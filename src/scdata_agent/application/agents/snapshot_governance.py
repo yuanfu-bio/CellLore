@@ -106,7 +106,10 @@ class SnapshotCorpusGovernanceAgent:
             elif report and report.license_status == LicenseStatus.RESTRICTED:
                 pool = "exclude"
                 reasons.append("license_restricted")
-            elif report is None or report.license_status != LicenseStatus.APPROVED:
+            elif report is None or report.license_status not in {
+                LicenseStatus.APPROVED,
+                LicenseStatus.REPOSITORY_POLICY,
+            }:
                 pool = "quarantine"
                 reasons.append("license_unknown")
             elif manifest is None or manifest.status != MaterializationStatus.MATERIALIZED:
@@ -126,6 +129,13 @@ class SnapshotCorpusGovernanceAgent:
             else:
                 pool = "pretrain"
                 reasons.append("hard_gates_passed")
+                # Admitting on archive terms rather than a read licence is a
+                # weaker basis; it must travel with the snapshot, not be lost.
+                if report.license_status == LicenseStatus.REPOSITORY_POLICY:
+                    reasons.extend(
+                        f"license_repository_policy:{item}"
+                        for item in report.license_policy_ids
+                    )
             decisions.append(
                 CorpusBundleDecision(
                     bundle_id=bundle_id,

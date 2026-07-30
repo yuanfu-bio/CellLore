@@ -67,6 +67,17 @@ def agent_run(
     remote_probe: Annotated[
         bool, typer.Option("--remote-probe/--no-remote-probe")
     ] = True,
+    strict_license: Annotated[
+        bool,
+        typer.Option(
+            "--strict-license/--repository-license-policy",
+            help=(
+                "Strict requires a declared, allowlisted licence. The default "
+                "also accepts an archive's own published terms of use when no "
+                "per-record licence exists, recording the basis for audit."
+            ),
+        ),
+    ] = False,
     trace_mode: Annotated[str, typer.Option("--trace-mode", help="local or langsmith.")] = "local",
 ) -> None:
     """Run evidence, acquisition, materialization, QC, and governance agents."""
@@ -82,6 +93,7 @@ def agent_run(
             "enable_fulltext_enrichment": enable_fulltext,
             "remote_probe_enabled": remote_probe,
             "approved_license_ids": approved_license_id or [],
+            "strict_license": strict_license,
         },
     )
     supervisor = MultiAgentSupervisor(ledger, str(database), trace_mode=trace_mode)

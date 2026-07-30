@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from scdata_agent.domain.identifiers import stable_id
+from scdata_agent.domain.licensing import policies_for_urls
 from scdata_agent.domain.lifecycle import (
     MaterializationManifest,
     MaterializationStatus,
@@ -81,6 +82,11 @@ class DatasetMaterializer:
             ),
             None,
         )
+        # The published package must state what its reuse terms rest on, so a
+        # downstream consumer is never left guessing why the data was admitted.
+        license_terms = _license_terms(
+            [by_asset[receipt.asset_id] for receipt in successful if receipt.asset_id in by_asset]
+        )
         provenance = {
             "schema_version": "2.0",
             "bundle_id": bundle.bundle_id,
@@ -93,11 +99,12 @@ class DatasetMaterializer:
             "standard_object": standard_object,
             "source_asset_roles": {key: value.value for key, value in source_asset_roles.items()},
             "genome_builds": genome_builds,
+            "license": license_terms,
         }
         provenance_path = package / "provenance.json"
         _atomic_json(provenance_path, provenance)
         data_card_path = _write_data_card(
-            package, bundle, status, data_roles, standard_object
+            package, bundle, status, data_roles, standard_object, license_terms
         )
         manifest = MaterializationManifest(
             manifest_id=stable_id(
@@ -269,12 +276,72 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _license_terms(assets: list[DataAsset]) -> dict[str, Any]:
+    """Describe the reuse basis for a package: a read licence, or archive terms.
+
+    Mirrors the precedence used at preflight. A licence declared on the assets
+    is reported as observed; only when none exists does the hosting archive's
+    published policy stand in, and it is labelled as such.
+    """
+    declared = sorted({item.license_id for item in assets if item.license_id})
+    if declared:
+        return {
+            "basis": "declared_license",
+            "license_ids": declared,
+            "license_urls": sorted(
+                {item.license_url for item in assets if item.license_url}
+            ),
+        }
+    policies = policies_for_urls(
+        [location.url for item in assets for location in item.locations]
+    )
+    if not policies:
+        return {
+            "basis": "unknown",
+            "detail": "No licence was declared and no archive policy applies.",
+        }
+    return {
+        "basis": "repository_policy",
+        "policies": [
+            {
+                "policy_id": policy.policy_id,
+                "repository": policy.repository,
+                "policy_url": policy.policy_url,
+                "summary": policy.summary,
+                "caveat": policy.caveat,
+            }
+            for policy in policies
+        ],
+    }
+
+
+def _license_card_lines(license_terms: dict[str, Any]) -> list[str]:
+    basis = license_terms.get("basis")
+    if basis == "declared_license":
+        ids = ", ".join(f"`{item}`" for item in license_terms["license_ids"])
+        return [f"- Licence: {ids} (declared by the source repository)"]
+    if basis == "repository_policy":
+        lines = [
+            "- Licence: no per-record licence is published; reuse rests on the "
+            "terms of use of the hosting archive(s):",
+        ]
+        for policy in license_terms["policies"]:
+            lines.extend([
+                f"  - {policy['repository']} ({policy['policy_url']})",
+                f"    - {policy['summary']}",
+                f"    - Caveat: {policy['caveat']}",
+            ])
+        return lines
+    return ["- Licence: **unknown**; confirm reuse terms before training on this bundle."]
+
+
 def _write_data_card(
     package: Path,
     bundle: SemanticBundle,
     status: MaterializationStatus,
     data_roles: list[DataRole],
     standard_object: str | None,
+    license_terms: dict[str, Any] | None = None,
 ) -> Path:
     path = package / "DATA_CARD.md"
     roles = ", ".join(f"`{role.value}`" for role in data_roles) or "none"
@@ -289,6 +356,7 @@ def _write_data_card(
                 "- Policy: processed-first; source assets remain immutable.",
                 f"- Data roles: {roles}",
                 f"- Standard object: {standard}",
+                *_license_card_lines(license_terms or {"basis": "unknown"}),
                 "",
                 "QC metrics and corpus admission are recorded separately.",
             ]

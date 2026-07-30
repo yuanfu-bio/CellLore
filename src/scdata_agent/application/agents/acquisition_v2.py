@@ -87,6 +87,9 @@ class AcquisitionStrategistAgent:
                 )
             if summary is None or summary.total_bytes is None:
                 manual_reasons.append("size:unknown")
+            # An archive-policy licence is a sufficient basis to recommend; it
+            # is surfaced in `reasons` so the decision stays auditable rather
+            # than being folded into "approved".
             if report is None or report.license_status == LicenseStatus.UNKNOWN:
                 manual_reasons.append("license:unknown")
             if bundle.bundle_id != representative:
@@ -114,7 +117,14 @@ class AcquisitionStrategistAgent:
                 representative_bundle_id=representative,
                 score_components=components,
                 hard_blockers=hard_blockers,
-                reasons=["Remote inventory, preflight, and lineage evidence reconciled."],
+                reasons=[
+                    "Remote inventory, preflight, and lineage evidence reconciled.",
+                    *(
+                        [f"Licence basis: {report.license_basis}"]
+                        if report is not None and report.license_basis
+                        else []
+                    ),
+                ],
                 risks=[*manual_reasons, *hard_blockers],
             ))
         tier_order = {"recommended": 0, "manual_review": 1, "excluded": 2}
@@ -151,7 +161,12 @@ class AcquisitionStrategistAgent:
         return {
             "bundle_completeness": 30.0 if bundle.complete else 0.0,
             "schema_breadth": min(satisfied, 2) * 5.0 if satisfied > 1 else 0.0,
-            "license": 20.0 if report and report.license_status == LicenseStatus.APPROVED else 0.0,
+            # A licence that was read outranks one inferred from archive terms.
+            "license": (
+                20.0 if report and report.license_status == LicenseStatus.APPROVED
+                else 15.0 if report and report.license_status == LicenseStatus.REPOSITORY_POLICY
+                else 0.0
+            ),
             "verified_access": 20.0 if summary and summary.access_status == BundleAccessStatus.VERIFIED else 0.0,
             "preflight": 15.0 if report and report.decision == BundleStatus.PREFLIGHT_READY else 0.0,
             "modality_pairing": 10.0 if report and report.dimensions.get("modality_authenticity") == GateStatus.PASS else 0.0,

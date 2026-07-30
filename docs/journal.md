@@ -28,12 +28,14 @@
 - Offline tests cover old behavior plus state transitions, open-full-text access, repository resolvers, transfer receipts, QC, governance, and both approval gates.
 - Bundle completeness is evaluated per modality against alternative `BundleSchema` shapes with OR-semantics role groups; satisfying any one schema completes the Bundle, and acquisition scores each schema independently. Standalone scATAC no longer inherits multiome requirements.
 - Role inference reads the whole asset path (10x encodes modality in the directory) and covers 10x, SNARE-seq and ENA conventions. Archives get a dedicated `ARCHIVE` role so unopened containers report `archive:uninspected` instead of a completeness verdict that was never verified.
+- Licence resolution has four states in strict precedence: `restricted` (hard blocker) > `approved` (declared and allowlisted, or operator-approved) > `repository_policy` (no per-record licence, every file served by an archive whose published terms cover redistribution) > `unknown`. Archive terms never override a licence that was read; coverage must be total but may span several archives, since GEO-processed plus ENA-raw is the normal deposition shape. The policies relied on travel with the preflight report, acquisition reasons, corpus snapshot and Data Card. `--strict-license` disables the fallback.
 - The offline planner fallback is domain-neutral: clinical-outcome and spatial-validation needs are added only when the question actually carries disease or outcome cues, and the CLI warns when a plan came from the template rather than the model.
 
 ## Next
 
 - Preserve the semantic relation of every extracted accession (`primary_data_deposition`, `reused_dataset`, `supplementary_reference`); only primary deposition should form a paper-owned Bundle by default.
-- Read archive manifests after transfer so `archive:uninspected` Bundles can be assessed rather than parked in manual review; roughly 40% of remotely observed GEO assets are archives.
+- Read archive manifests after transfer so `archive:uninspected` Bundles can be assessed rather than parked in manual review; roughly 40% of remotely observed GEO assets are archives, and this is now the main brake on the recommended tier.
+- Register a licence policy for each new repository adapter in `domain/licensing.py`; an adapter without one leaves its Bundles at `license:unknown`.
 - Add ENCODE, BioStudies/ArrayExpress, Single Cell Portal, and HCA adapters; keep EGA/dbGaP metadata-only.
 - Add normalized donor/sample/cell entities and ontology IDs so lineage can move beyond accession and checksum families.
 - Add reference-backed TSS enrichment, doublet methods, full matrix sparsity, and explicit RNA/ATAC barcode intersection.

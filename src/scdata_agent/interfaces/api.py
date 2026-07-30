@@ -22,6 +22,9 @@ class CreateRunRequest(BaseModel):
     approved_license_candidate_ids: list[str] = Field(default_factory=list)
     allow_qc_warn: bool = False
     approved_license_ids: list[str] = Field(default_factory=list)
+    # When false, an archive's published terms of use stand in for a missing
+    # per-record licence, and the basis is recorded on the preflight report.
+    strict_license: bool = False
     enable_fulltext_enrichment: bool = True
     max_fulltexts: int = Field(default=5, ge=0, le=100)
     remote_probe_enabled: bool = True
@@ -60,6 +63,7 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             "enable_fulltext_enrichment": request.enable_fulltext_enrichment,
             "max_fulltexts": request.max_fulltexts,
             "approved_license_ids": request.approved_license_ids,
+            "strict_license": request.strict_license,
             "remote_probe_enabled": request.remote_probe_enabled,
             "remote_probe_concurrency": request.remote_probe_concurrency,
             "remote_probe_timeout_seconds": request.remote_probe_timeout_seconds,

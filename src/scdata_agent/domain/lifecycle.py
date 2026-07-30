@@ -34,6 +34,10 @@ class PointerStatus(StrEnum):
 
 class LicenseStatus(StrEnum):
     APPROVED = "approved"
+    # No per-record licence exists, but the hosting archive's own terms cover
+    # redistribution. Deliberately distinct from APPROVED: nobody read a
+    # licence for this record, so the basis must stay visible to a reviewer.
+    REPOSITORY_POLICY = "repository_policy"
     RESTRICTED = "restricted"
     UNKNOWN = "unknown"
 
@@ -230,6 +234,11 @@ class PreflightBundleReport(StrictModel):
     dimensions: dict[str, GateStatus]
     rationale: dict[str, str] = Field(default_factory=dict)
     license_status: LicenseStatus = LicenseStatus.UNKNOWN
+    # Populated only for REPOSITORY_POLICY: the archive policies being relied
+    # on, so the licence verdict can be audited rather than merely trusted. A
+    # bundle split across archives legitimately cites more than one.
+    license_policy_ids: list[str] = Field(default_factory=list)
+    license_basis: str | None = None
     expected_bytes: int | None = Field(default=None, ge=0)
     storage_scale: dict[str, Any] = Field(default_factory=dict)
     biological_scale: dict[str, int | None] = Field(default_factory=dict)

@@ -9,6 +9,7 @@ from scdata_agent.application.agents.shared import (
 )
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.domain.identifiers import stable_id
+from scdata_agent.domain.licensing import policies_for_urls
 from scdata_agent.domain.lifecycle import (
     BundleStatus,
     LicenseStatus,
@@ -151,15 +152,34 @@ class ProgressivePreflightAssessmentAgent:
                 BundleAccessStatus.UNAVAILABLE: GateStatus.FAIL,
                 BundleAccessStatus.UNKNOWN: GateStatus.UNKNOWN,
             }[access_status]
+            # Precedence, strongest evidence first. A licence that was actually
+            # read always decides; archive policy may only fill a genuine gap,
+            # never override or upgrade an observed licence.
             license_values = {item.casefold() for item in observed_license_ids}
-            license_status = (
-                LicenseStatus.RESTRICTED
-                if license_values & restricted_license_ids
-                else LicenseStatus.APPROVED
-                if candidate.candidate_id in approved_candidates
-                or (license_values and license_values <= approved_license_ids)
-                else LicenseStatus.UNKNOWN
+            license_policies = (
+                policies_for_urls(
+                    [
+                        location.url
+                        for item in bundle_assets
+                        for location in item.locations
+                    ]
+                )
+                if not license_values
+                and not context.policy.get("strict_license", False)
+                else []
             )
+            if license_values & restricted_license_ids:
+                license_status = LicenseStatus.RESTRICTED
+            elif candidate.candidate_id in approved_candidates or (
+                license_values and license_values <= approved_license_ids
+            ):
+                license_status = LicenseStatus.APPROVED
+            elif license_policies:
+                license_status = LicenseStatus.REPOSITORY_POLICY
+            else:
+                # Includes the case of an observed licence that is real but not
+                # on the allowlist: unrecognised is not the same as permitted.
+                license_status = LicenseStatus.UNKNOWN
             dimensions = {
                 "scientific_relevance": modality_gate,
                 "modality_authenticity": modality_gate,
@@ -210,6 +230,12 @@ class ProgressivePreflightAssessmentAgent:
                 warnings.append("size:unknown")
             if license_status == LicenseStatus.UNKNOWN:
                 warnings.append("license:unknown")
+            elif license_status == LicenseStatus.REPOSITORY_POLICY:
+                # Recorded, not silent: the reviewer sees what is relied upon.
+                warnings.extend(
+                    f"license:repository_policy:{item.policy_id}"
+                    for item in license_policies
+                )
             if not bundle.complete:
                 warnings.append(
                     "archive:uninspected" if archive_only else "bundle:missing_roles"
@@ -229,6 +255,10 @@ class ProgressivePreflightAssessmentAgent:
                 if license_status == LicenseStatus.APPROVED
                 else GateStatus.FAIL
                 if license_status == LicenseStatus.RESTRICTED
+                # Archive policy is a real basis but a weaker one than a licence
+                # that was read, so it warns rather than passing outright.
+                else GateStatus.WARN
+                if license_status == LicenseStatus.REPOSITORY_POLICY
                 else GateStatus.UNKNOWN
             )
             report = PreflightBundleReport(
@@ -244,7 +274,15 @@ class ProgressivePreflightAssessmentAgent:
                         "repository-reported or remotely observed."
                     ),
                     "license": (
-                        "Repository-reported licenses: "
+                        "No per-record licence is published for this bundle; "
+                        "relying on "
+                        + " Also relying on ".join(
+                            item.as_basis() for item in license_policies
+                        )
+                        + " "
+                        + " ".join(item.caveat for item in license_policies)
+                        if license_status == LicenseStatus.REPOSITORY_POLICY
+                        else "Repository-reported licenses: "
                         f"{sorted(observed_license_ids) or ['unknown']}; "
                         "training use requires an explicit allowlist or "
                         "candidate approval."
@@ -270,6 +308,16 @@ class ProgressivePreflightAssessmentAgent:
                     ),
                 },
                 license_status=license_status,
+                license_policy_ids=(
+                    [item.policy_id for item in license_policies]
+                    if license_status == LicenseStatus.REPOSITORY_POLICY
+                    else []
+                ),
+                license_basis=(
+                    "; ".join(item.as_basis() for item in license_policies)
+                    if license_status == LicenseStatus.REPOSITORY_POLICY
+                    else None
+                ),
                 expected_bytes=expected_bytes,
                 storage_scale={
                     "asset_count": summary.asset_count if summary else len(bundle_assets),

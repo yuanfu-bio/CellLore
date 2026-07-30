@@ -94,6 +94,31 @@ Satisfying *any one* schema makes a bundle complete.
 AnnData/MuData object, which is why the groups are disjunctions. This is what stops a
 standalone scATAC study from being marked incomplete for lacking multiome files.
 
+### Licence handling
+
+Public genomics archives mostly publish no per-record licence. Treating that silence
+as "unknown" is literally correct but leaves nothing recommendable; treating it as an
+approved licence asserts a fact nobody checked. The agent takes a third position, with
+four distinct states resolved in strict precedence order:
+
+| Status | Meaning |
+|---|---|
+| `restricted` | A declared licence matched the restricted list — hard blocker, always wins |
+| `approved` | A declared licence was read and is on your allowlist, or you approved the candidate |
+| `repository_policy` | No per-record licence exists, and every file is served by an archive whose own published terms cover redistribution |
+| `unknown` | Anything else — including a declared licence that is real but not allowlisted |
+
+`repository_policy` never overrides a licence that was actually read; it only fills a
+genuine gap. Coverage must be **total** — one file from an unrecognised host voids the
+basis for the whole bundle — but it may come from more than one archive, since a
+deposition split across GEO (processed) and ENA (raw reads) is the norm. The policies
+relied on are recorded on the preflight report, in the acquisition plan's reasons, in
+the corpus snapshot, and in the package's `DATA_CARD.md`, so the basis is auditable
+rather than merely trusted.
+
+Pass `--strict-license` to require a declared, allowlisted licence and disable archive
+terms entirely.
+
 Package layout follows a strict dependency direction, asserted by
 `tests/test_architecture.py`:
 
@@ -170,13 +195,14 @@ highest-value contribution right now — see [Roadmap](#roadmap).
   downloading, so such bundles are labelled `archive:uninspected` and routed to human
   review rather than being scored as complete or incomplete. Extracting archive
   manifests post-transfer is not implemented.
-- **Licence status is almost always `unknown`, and this is the binding constraint.**
-  GEO/SRA expose no structured licence field and the agent refuses to guess, so in
-  practice nothing reaches the `recommended` tier on its own: a measured run ended
-  with a bundle that was preflight-ready, access-verified and complete, held back
-  solely by `license:unknown`. Asserting the licence for a candidate via the
-  `approved_license_candidate_ids` policy moves it to `recommended` with a clean risk
-  list. A general, auditable licence policy is the highest-value fix in the roadmap.
+- **Most public data is admitted on archive terms, not a read licence.** GEO, SRA and
+  ENA publish no per-record licence field, so bundles sourced entirely from them are
+  marked `repository_policy` rather than `approved` — see
+  [Licence handling](#licence-handling). That is a weaker basis than a licence
+  somebody read, and the distinction is deliberately preserved end to end.
+- **Archives are the remaining brake on the `recommended` tier.** In a measured run
+  the top bundle reaches `recommended` on archive terms with an empty risk list, but
+  the next one is held at `archive:uninspected` alone.
 - **Role inference is filename-based.** It recognises 10x, SNARE-seq and ENA
   conventions (see `tests/test_role_inference.py`), but a deposition using
   idiosyncratic names will under-report its roles. Inference never guesses: an
@@ -200,6 +226,7 @@ Model routing is provider-neutral; StepFun is the default.
 | `SCDATA_AGENT_MODEL_{PLANNER,DISCOVERY,REVIEW,CHAT}` | per-role model overrides |
 | `SCDATA_AGENT_REASONING_EFFORT[_ROLE]` | per-role reasoning effort |
 | `NCBI_EMAIL` / `NCBI_API_KEY` | NCBI E-utilities etiquette and rate limits |
+| `SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS` | planner latency budget before the offline template takes over (default 30) |
 | `SCDATA_AGENT_TRACE_MODE` | `local` (default, nothing leaves the machine) or `langsmith` |
 
 **Tracing is local by default.** Setting `SCDATA_AGENT_TRACE_MODE=langsmith` together
@@ -224,11 +251,11 @@ Optional AnnData/MuData inspection support: `pip install -e '.[dev,curation]'`.
 
 Ordered by value to a single-cell epigenomics foundation-model corpus:
 
-1. Make licence resolution auditable instead of uniformly `unknown`. This currently
-   gates the entire `recommended` tier, so it unblocks everything else.
-2. Add ENCODE, CELLxGENE, Single Cell Portal, HCA and BioStudies/ArrayExpress adapters.
-3. Read archive manifests after transfer so `archive:uninspected` bundles can be
-   assessed instead of parked in manual review.
+1. Read archive manifests after transfer so `archive:uninspected` bundles can be
+   assessed instead of parked in manual review. This is now the main brake on the
+   `recommended` tier: roughly 40% of remotely observed GEO assets are archives.
+2. Add ENCODE, CELLxGENE, Single Cell Portal, HCA and BioStudies/ArrayExpress adapters,
+   each with its licence policy registered in `domain/licensing.py`.
 4. Preserve the semantic relation of every extracted accession
    (`primary_data_deposition` vs `reused_dataset` vs `supplementary_reference`).
 5. Normalised donor/sample/cell entities with ontology IDs, so lineage can move beyond

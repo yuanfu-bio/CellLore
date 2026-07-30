@@ -112,6 +112,15 @@ mamba run -n scdata-agent scdata-agent agent-run \
   --remote-probe
 ```
 
+By default a bundle with no declared licence may be admitted on the published
+terms of the archive serving it, with the basis recorded for audit. Require a
+declared, allowlisted licence instead:
+
+```bash
+mamba run -n scdata-agent scdata-agent agent-run 'research question' \
+  --strict-license --database var/scdata_agent.sqlite
+```
+
 At the download checkpoint, stop after planning, download the recommendation, or
 download every preflight-ready Bundle (including assets with unknown size):
 
