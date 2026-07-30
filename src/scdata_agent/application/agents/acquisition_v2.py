@@ -81,6 +81,12 @@ class AcquisitionStrategistAgent:
                 manual_reasons.append("preflight:needs_evidence")
             if report and "archive:uninspected" in report.warnings:
                 manual_reasons.append("archive:uninspected")
+            # Pairing is inferred from text, so a shortfall sends the bundle to
+            # a human rather than excluding it: the phrasing may simply not
+            # state a relationship the study actually has.
+            for pairing_warning in ("pairing:unverified", "pairing:unknown"):
+                if report and pairing_warning in report.warnings:
+                    manual_reasons.append(pairing_warning)
             # A truncated listing means the bundle is not the whole deposition,
             # so a human decides whether to widen the budget before committing.
             if summary is not None and summary.inventory_truncated:

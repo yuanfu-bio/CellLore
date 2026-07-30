@@ -125,7 +125,7 @@ async def test_standalone_scatac_is_not_judged_against_multiome(tmp_path):
 
     assert "scatac_standalone" in bundle["satisfied_schema_ids"]
     # The multiome schema is not even applicable to a scATAC-only candidate.
-    assert "multiome_rna_atac" not in bundle["applicable_schema_ids"]
+    assert "multiome_same_cell" not in bundle["applicable_schema_ids"]
     assert DataRole.RNA_MATRIX not in bundle["missing_roles"]
     assert DataRole.BARCODE_LINKAGE not in bundle["missing_roles"]
 
@@ -144,7 +144,7 @@ async def test_multiome_candidate_still_needs_rna(tmp_path):
     bundle = bundles["ds_multiome"]
 
     assert bundle["satisfied_schema_ids"] == []
-    assert "multiome_rna_atac" in bundle["applicable_schema_ids"]
+    assert "multiome_same_cell" in bundle["applicable_schema_ids"]
 
 
 @pytest.mark.asyncio
@@ -159,7 +159,7 @@ async def test_complete_multiome_bundle_is_satisfied(tmp_path):
             _asset("ds_multiome", DataRole.CELL_METADATA, "barcodes.tsv.gz"),
         ],
     )
-    assert "multiome_rna_atac" in bundles["ds_multiome"]["satisfied_schema_ids"]
+    assert "multiome_same_cell" in bundles["ds_multiome"]["satisfied_schema_ids"]
 
 
 @pytest.mark.asyncio

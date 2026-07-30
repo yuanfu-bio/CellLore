@@ -8,9 +8,11 @@ from scdata_agent.domain.models import (
     BundleSchema,
     DataRole,
     Modality,
+    PairingLevel,
     QueryPlan,
     QuerySpec,
     ResearchRequirement,
+    pairing_rank,
 )
 
 
@@ -40,19 +42,49 @@ BUNDLE_SCHEMAS: tuple[BundleSchema, ...] = (
         ],
     ),
     BundleSchema(
-        schema_id="multiome_rna_atac",
-        label="Joint RNA + ATAC in the same cell or nucleus",
-        modalities=[
-            Modality.MULTIOME_RNA_ATAC,
-            Modality.MATCHED_SCRNA_SCATAC,
-            Modality.MULTIOME_RNA_ATAC_PROTEIN,
-        ],
+        schema_id="multiome_same_cell",
+        label="Joint RNA + ATAC measured in the same cell or nucleus",
+        modalities=[Modality.MULTIOME_RNA_ATAC],
         required_role_groups=[
             _ACCESSIBILITY,
             [DataRole.RNA_MATRIX, DataRole.STANDARD_OBJECT],
             # Same-cell assays link modalities by construction; an explicit map
             # or a joint object both count as evidence of that linkage.
             [DataRole.BARCODE_LINKAGE, DataRole.CELL_METADATA, DataRole.STANDARD_OBJECT],
+        ],
+        preferred_roles=[
+            DataRole.FRAGMENT_INDEX, DataRole.PEAKS,
+            DataRole.QC_METRICS, DataRole.SAMPLE_METADATA,
+        ],
+    ),
+    BundleSchema(
+        schema_id="multiome_trimodal",
+        label="RNA + ATAC + surface protein in the same cell (TEA-seq, DOGMA-seq)",
+        modalities=[Modality.MULTIOME_RNA_ATAC_PROTEIN],
+        required_role_groups=[
+            _ACCESSIBILITY,
+            [DataRole.RNA_MATRIX, DataRole.STANDARD_OBJECT],
+            # The third layer is the point of a trimodal assay: without it the
+            # bundle is a two-layer multiome mislabelled as trimodal.
+            [DataRole.PROTEIN_MATRIX, DataRole.STANDARD_OBJECT],
+            [DataRole.BARCODE_LINKAGE, DataRole.CELL_METADATA, DataRole.STANDARD_OBJECT],
+        ],
+        preferred_roles=[
+            DataRole.FRAGMENT_INDEX, DataRole.PEAKS,
+            DataRole.QC_METRICS, DataRole.SAMPLE_METADATA,
+        ],
+    ),
+    BundleSchema(
+        schema_id="matched_scrna_scatac",
+        # Separate assays on shared material. Kept apart from the same-cell
+        # schema because sharing a sample is a much weaker claim than sharing
+        # a cell, and conflating them let matched studies pass as multiome.
+        label="Separate scRNA and scATAC on matched samples or donors",
+        modalities=[Modality.MATCHED_SCRNA_SCATAC],
+        required_role_groups=[
+            _ACCESSIBILITY,
+            [DataRole.RNA_MATRIX, DataRole.STANDARD_OBJECT],
+            _CELL_AXIS,
         ],
         preferred_roles=[
             DataRole.FRAGMENT_INDEX, DataRole.PEAKS,
@@ -160,6 +192,19 @@ MODALITY_ALIASES: dict[Modality, tuple[str, ...]] = {
     ),
 }
 
+# Phrasings that ask for the two omics layers to come from one physical cell,
+# as opposed to merely appearing in the same study. Sample- and donor-level
+# matching is deliberately absent: it is a weaker claim and gets its own tier.
+SAME_CELL_PAIRING_ALIASES: tuple[str, ...] = (
+    "same cell", "same-cell", "same nucleus", "same-nucleus",
+    "single cell multiome", "single-cell multiome", "joint profiling",
+    "simultaneous profiling", "co-assay", "coassay", "co-profiling",
+    "paired multiome", "paired rna and atac", "paired scatac",
+    "10x multiome", "snare-seq", "share-seq", "sci-car", "paired-seq",
+    "tea-seq", "dogma-seq",
+    "配对", "同细胞", "同一细胞", "同核", "同一细胞核", "共测", "联合检测", "同时测量",
+)
+
 TASK_ALIASES: dict[str, tuple[str, ...]] = {
     "cell_type_annotation": ("annotation", "cell type", "细胞类型注释", "细胞注释"),
     "cross_dataset_generalization": (
@@ -206,7 +251,22 @@ class RuleBasedRequirementCompiler:
         ]
         downstream_tasks = _extract_aliases(question, TASK_ALIASES)
 
-        if not modalities:
+        # Asking for paired data is a constraint, not just a topic. Without
+        # this, "paired multiome" compiled to the same contract as a generic
+        # scATAC question and standalone studies were recalled alongside it.
+        minimum_pairing_level = (
+            PairingLevel.SAME_CELL
+            if _contains(question, SAME_CELL_PAIRING_ALIASES)
+            else None
+        )
+        if minimum_pairing_level is not None:
+            same_cell_modalities = [
+                Modality.MULTIOME_RNA_ATAC,
+                Modality.MULTIOME_RNA_ATAC_PROTEIN,
+            ]
+            observed = [item for item in modalities if item in same_cell_modalities]
+            modalities = observed or same_cell_modalities
+        elif not modalities:
             modalities = [Modality.SCATAC, Modality.MULTIOME_RNA_ATAC]
 
         minimum_donors = None
@@ -279,6 +339,7 @@ class RuleBasedRequirementCompiler:
             required_data_roles=sorted(required_roles, key=str),
             preferred_data_roles=sorted(preferred_roles, key=str),
             minimum_donors=minimum_donors,
+            minimum_pairing_level=minimum_pairing_level,
             excluded_biological_sources=excluded_sources,
             exclusions=exclusions,
             evaluation_policy=evaluation_policy,
@@ -294,6 +355,21 @@ def _unique(values: list[str]) -> list[str]:
 MODALITY_QUERY_TERMS = (
     '"single-cell ATAC-seq" OR scATAC-seq OR snATAC-seq OR '
     '"single nucleus ATAC-seq" OR "10x Multiome" OR "RNA ATAC multiome"'
+)
+
+# Named co-assay technologies: the only reliable way to search for layers
+# measured in one cell, since "multiome" alone also matches studies that merely
+# report both assays. Shared by QueryPlanner and CorpusQueryPlanner.
+RNA_ATAC_COASSAY_QUERY_TERMS = (
+    '"10x Multiome" OR "RNA ATAC multiome" OR SNARE-seq OR SHARE-seq '
+    'OR sci-CAR OR Paired-seq'
+)
+ATAC_OTHER_MULTIOMICS_QUERY_TERMS = (
+    'ASAP-seq OR ISSAAC-seq OR TEA-seq OR DOGMA-seq '
+    'OR ((scATAC-seq OR snATAC-seq) AND (protein OR epitope OR trimodal))'
+)
+SAME_CELL_QUERY_TERMS = (
+    f"{RNA_ATAC_COASSAY_QUERY_TERMS} OR TEA-seq OR DOGMA-seq"
 )
 
 
@@ -313,14 +389,23 @@ class QueryPlanner:
             f'"{organism}"' for organism in requirement.organisms
         )
 
-        common_parts = [f"({MODALITY_QUERY_TERMS})"]
+        # Searching for same-cell data with the generic modality blob recalls
+        # standalone scATAC and study-level co-reporting alongside it, so a
+        # question that asks for pairing gets the named co-assay technologies.
+        modality_terms = (
+            SAME_CELL_QUERY_TERMS
+            if pairing_rank(requirement.minimum_pairing_level or PairingLevel.NOT_APPLICABLE) >= 3
+            else MODALITY_QUERY_TERMS
+        )
+
+        common_parts = [f"({modality_terms})"]
         if biological_query:
             common_parts.append(f"({biological_query})")
         if organism_query:
             common_parts.append(f"({organism_query})")
         common_query = " AND ".join(common_parts)
 
-        geo_parts = [f"({MODALITY_QUERY_TERMS})"]
+        geo_parts = [f"({modality_terms})"]
         if biological_query:
             geo_parts.append(f"({biological_query})")
         if requirement.organisms:
@@ -372,7 +457,7 @@ CORPUS_QUERY_FAMILIES: tuple[tuple[str, str], ...] = (
     ),
     (
         "rna_atac_coassay",
-        '("10x Multiome" OR "RNA ATAC multiome" OR SNARE-seq OR SHARE-seq OR sci-CAR OR Paired-seq)',
+        f"({RNA_ATAC_COASSAY_QUERY_TERMS})",
     ),
     (
         "matched_scrna_scatac",
@@ -380,7 +465,7 @@ CORPUS_QUERY_FAMILIES: tuple[tuple[str, str], ...] = (
     ),
     (
         "atac_other_multiomics",
-        '(ASAP-seq OR ISSAAC-seq OR TEA-seq OR DOGMA-seq OR ((scATAC-seq OR snATAC-seq) AND (protein OR epitope OR trimodal)))',
+        f"({ATAC_OTHER_MULTIOMICS_QUERY_TERMS})",
     ),
 )
 

@@ -22,11 +22,11 @@ def test_standalone_scatac_is_complete_without_rna_or_barcode_linkage():
     observed = {DataRole.FRAGMENTS, DataRole.CELL_METADATA}
     assert _schema("scatac_standalone").is_satisfied_by(observed)
     # The same bundle correctly fails the multiome schema.
-    assert not _schema("multiome_rna_atac").is_satisfied_by(observed)
+    assert not _schema("multiome_same_cell").is_satisfied_by(observed)
 
 
 def test_multiome_still_requires_rna_and_a_cell_linkage():
-    schema = _schema("multiome_rna_atac")
+    schema = _schema("multiome_same_cell")
     assert not schema.is_satisfied_by({DataRole.FRAGMENTS, DataRole.CELL_METADATA})
     assert schema.is_satisfied_by(
         {DataRole.FRAGMENTS, DataRole.RNA_MATRIX, DataRole.CELL_METADATA}
@@ -44,7 +44,7 @@ def test_accessibility_may_be_fragments_or_a_peak_matrix():
 
 def test_a_joint_object_satisfies_matrix_and_cell_axis_at_once():
     """An AnnData/MuData carries the matrix and the cell axis together."""
-    assert _schema("multiome_rna_atac").is_satisfied_by({DataRole.STANDARD_OBJECT})
+    assert _schema("multiome_same_cell").is_satisfied_by({DataRole.STANDARD_OBJECT})
 
 
 def test_raw_reads_schema_applies_to_every_modality():
@@ -60,7 +60,7 @@ def test_schema_selection_follows_the_candidate_not_the_question():
     }
     multiome_only = applicable_bundle_schemas([Modality.MULTIOME_RNA_ATAC])
     assert {item.schema_id for item in multiome_only} == {
-        "multiome_rna_atac", "raw_reads",
+        "multiome_same_cell", "raw_reads",
     }
 
 
@@ -70,7 +70,7 @@ def test_undeclared_modality_offers_every_schema():
 
 
 def test_unmet_groups_name_what_is_actually_missing():
-    unmet = _schema("multiome_rna_atac").unmet_groups(
+    unmet = _schema("multiome_same_cell").unmet_groups(
         {DataRole.FRAGMENTS, DataRole.CELL_METADATA}
     )
     assert len(unmet) == 1

@@ -51,6 +51,39 @@ class PairingLevel(StrEnum):
     NOT_APPLICABLE = "not_applicable"
 
 
+# How strongly two omics layers are tied together. Cell and nucleus are one
+# tier: both mean the layers were measured in the same physical unit, which is
+# what makes cross-modality supervision possible. Sample and donor pairing is a
+# genuinely weaker claim -- the assays were run separately.
+_PAIRING_RANK: dict[PairingLevel, int] = {
+    PairingLevel.NOT_APPLICABLE: 0,
+    PairingLevel.UNVERIFIED: 1,
+    PairingLevel.STUDY_LEVEL: 1,
+    PairingLevel.SAME_DONOR: 2,
+    PairingLevel.SAME_SAMPLE: 2,
+    PairingLevel.SAME_NUCLEUS: 3,
+    PairingLevel.SAME_CELL: 3,
+}
+
+
+def pairing_rank(level: PairingLevel) -> int:
+    """Strength of a pairing claim; higher binds the layers more tightly."""
+    return _PAIRING_RANK.get(level, 0)
+
+
+def pairing_satisfies(observed: PairingLevel, minimum: PairingLevel | None) -> bool:
+    """Whether an observed pairing level meets a required one.
+
+    ``NOT_APPLICABLE`` never satisfies a requirement: a standalone assay has no
+    pairing to offer, which is different from having one that is merely unproven.
+    """
+    if minimum is None:
+        return True
+    if observed == PairingLevel.NOT_APPLICABLE:
+        return False
+    return pairing_rank(observed) >= pairing_rank(minimum)
+
+
 class AssayProfile(StrictModel):
     label: str
     modalities: list[Modality] = Field(default_factory=list)
@@ -60,6 +93,17 @@ class AssayProfile(StrictModel):
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     rationale: str
     evidence_ids: list[str] = Field(default_factory=list)
+
+
+def best_pairing_level(profiles: list[AssayProfile]) -> PairingLevel | None:
+    """The strongest pairing any inferred assay profile claims, or None.
+
+    Profiles are alternative readings of the same study, so the strongest one
+    is the study's best case; preflight then decides whether that is enough.
+    """
+    if not profiles:
+        return None
+    return max((item.pairing_level for item in profiles), key=pairing_rank)
 
 
 class DataRole(StrEnum):
@@ -223,6 +267,9 @@ class ResearchRequirement(StrictModel):
     required_data_roles: list[DataRole] = Field(default_factory=list)
     preferred_data_roles: list[DataRole] = Field(default_factory=list)
     minimum_donors: int | None = Field(default=None, ge=1)
+    # Weakest pairing a candidate may offer and still count. Unset means the
+    # question did not ask for paired data and pairing is not gated at all.
+    minimum_pairing_level: PairingLevel | None = None
     public_only: bool = True
     excluded_access_levels: list[AccessLevel] = Field(default_factory=list)
     excluded_biological_sources: list[str] = Field(default_factory=list)

@@ -16,7 +16,14 @@ from scdata_agent.domain.lifecycle import (
     PreflightBundleReport,
     SemanticBundle,
 )
-from scdata_agent.domain.models import AccessLevel, DataAsset, DataRole, GateStatus
+from scdata_agent.domain.models import (
+    AccessLevel,
+    DataAsset,
+    DataRole,
+    GateStatus,
+    best_pairing_level,
+    pairing_satisfies,
+)
 from scdata_agent.domain.resource_pipeline import (
     BundleAccessStatus,
     EvidenceEscalationReport,
@@ -155,6 +162,23 @@ class ProgressivePreflightAssessmentAgent:
             # Precedence, strongest evidence first. A licence that was actually
             # read always decides; archive policy may only fill a genuine gap,
             # never override or upgrade an observed licence.
+            # Pairing is judged on the level actually claimed, not on whether an
+            # assay profile merely exists. The previous check passed every
+            # candidate that had any profile, which included studies that only
+            # report RNA and ATAC side by side with no stated relationship.
+            required_pairing = (
+                context.requirement.minimum_pairing_level
+                if context.requirement
+                else None
+            )
+            observed_pairing = best_pairing_level(candidate.assay_profiles)
+            if observed_pairing is None:
+                pairing_gate = GateStatus.UNKNOWN
+            elif pairing_satisfies(observed_pairing, required_pairing):
+                pairing_gate = GateStatus.PASS
+            else:
+                pairing_gate = GateStatus.WARN
+
             license_values = {item.casefold() for item in observed_license_ids}
             license_policies = (
                 policies_for_urls(
@@ -195,10 +219,7 @@ class ProgressivePreflightAssessmentAgent:
                     if summary and summary.genome_builds
                     else GateStatus.UNKNOWN
                 ),
-                "pairing_evidence": (
-                    GateStatus.PASS
-                    if candidate.assay_profiles else GateStatus.UNKNOWN
-                ),
+                "pairing_evidence": pairing_gate,
                 "evidence_maturity": (
                     GateStatus.PASS
                     if not unresolved_evidence else GateStatus.UNKNOWN
@@ -242,6 +263,13 @@ class ProgressivePreflightAssessmentAgent:
                 )
             elif archive_assets:
                 warnings.append("archive:uninspected")
+            if pairing_gate == GateStatus.WARN:
+                warnings.append("pairing:unverified")
+            elif pairing_gate == GateStatus.UNKNOWN and required_pairing is not None:
+                # Pairing was asked for and could not be established either way.
+                # Unknown is not absent, but it is also not a pass: silently
+                # recommending it would assert a relationship nobody checked.
+                warnings.append("pairing:unknown")
             if summary is not None and summary.inventory_truncated:
                 warnings.append("inventory:truncated")
             if unresolved_evidence:
@@ -293,6 +321,16 @@ class ProgressivePreflightAssessmentAgent:
                         ", ".join(unresolved_evidence)
                         if unresolved_evidence
                         else "none"
+                    ),
+                    "pairing": (
+                        f"Required {required_pairing.value}; strongest claim "
+                        f"observed is {observed_pairing.value} from "
+                        f"{', '.join(sorted({item.label for item in candidate.assay_profiles}))}."
+                        if required_pairing is not None and observed_pairing is not None
+                        else "No pairing requirement was set."
+                        if required_pairing is None
+                        else "No assay profile could be inferred, so the pairing "
+                        "relationship is unknown rather than absent."
                     ),
                     "inventory_completeness": (
                         "Listing cut short by the asset budget for: "

@@ -86,9 +86,15 @@ Satisfying *any one* schema makes a bundle complete.
 | Schema | Applies to | Requires |
 |---|---|---|
 | `scatac_standalone` | scATAC, snATAC | accessibility signal + a cell axis — **not** an RNA matrix |
-| `multiome_rna_atac` | multiome, matched RNA/ATAC | accessibility + RNA matrix + per-cell linkage |
+| `multiome_same_cell` | 10x Multiome, SNARE-seq, SHARE-seq | accessibility + RNA matrix + per-cell linkage |
+| `multiome_trimodal` | TEA-seq, DOGMA-seq | the above **+ a protein matrix** |
+| `matched_scrna_scatac` | separate assays on matched samples | accessibility + RNA matrix + a cell axis |
 | `atac_protein` | ASAP-seq, ISSAAC-seq | accessibility + protein matrix + a cell axis |
 | `raw_reads` | any | FASTQ (legitimate but expensive input) |
+
+`matched_scrna_scatac` is deliberately separate from `multiome_same_cell`: sharing
+a sample is a much weaker claim than sharing a cell, and collapsing the two let
+matched-sample studies pass as multiome.
 
 "Accessibility signal" is satisfied by fragments **or** a peak matrix **or** a joint
 AnnData/MuData object, which is why the groups are disjunctions. This is what stops a
@@ -118,6 +124,22 @@ rather than merely trusted.
 
 Pass `--strict-license` to require a declared, allowlisted licence and disable archive
 terms entirely.
+
+### Requiring paired data
+
+Asking for *paired* multiome is a constraint, not a topic. Phrasings such as
+"same-cell", "joint profiling", "10x Multiome", "配对", "同细胞" compile to a
+`minimum_pairing_level` on the requirement, which then changes three things:
+
+- **Search** switches from the broad modality blob to the named co-assay
+  technologies (SNARE-seq, SHARE-seq, sci-CAR, Paired-seq, TEA-seq, DOGMA-seq),
+  so standalone scATAC is no longer recalled alongside.
+- **Verification** compares the pairing level actually claimed by the candidate
+  against what was required. Levels form tiers: same-cell ≡ same-nucleus >
+  same-sample ≡ same-donor > study-level ≡ unverified.
+- **Decision** routes a shortfall to `manual_review` with `pairing:unverified`
+  rather than excluding it, because pairing is *inferred from text*: many real
+  multiome studies never write "same cell" in their abstract.
 
 Package layout follows a strict dependency direction, asserted by
 `tests/test_architecture.py`:
