@@ -1,0 +1,30 @@
+# Secrets: never commit real credentials. Only the template is tracked.
+.env
+.env.*
+!.env.example
+
+# Python bytecode and build artifacts
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+src/*.egg-info/
+
+# Test and tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Runtime state: ledgers, checkpoints, and downloaded data stay local.
+var/
+data/
+.langgraph_api/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Editor and OS noise
+.DS_Store
+.vscode/
+.idea/

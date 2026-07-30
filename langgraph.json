@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "scdata-supervisor": "./src/scdata_agent/studio.py:graph"
+  },
+  "env": ".env"
+}

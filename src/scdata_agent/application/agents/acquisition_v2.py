@@ -1,0 +1,170 @@
+"""Layered acquisition decisions over inventory, preflight, and lineage."""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from pathlib import Path
+
+from scdata_agent.application.agents.shared import AgentContext, latest_artifact
+from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
+from scdata_agent.domain.identifiers import stable_id
+from scdata_agent.domain.lifecycle import (
+    AcquisitionBundle, AcquisitionPlan, BundleLineageAssessment,
+    BundleStatus, LicenseStatus, LineageGraphSnapshot,
+    PreflightBundleReport, SemanticBundle,
+)
+from scdata_agent.domain.models import GateStatus
+from scdata_agent.domain.resource_pipeline import BundleAccessStatus, RemoteBundleInventorySummary
+
+
+class AcquisitionStrategistAgent:
+    """Apply deterministic hard gates, then rank reviewable bundles."""
+
+    name = AgentName.ACQUISITION_STRATEGIST
+
+    async def run(self, context: AgentContext):
+        inventory = latest_artifact(context.artifacts, ArtifactKind.ASSET_INVENTORY.value)
+        preflight = latest_artifact(context.artifacts, ArtifactKind.PREFLIGHT_REPORT.value)
+        lineage_artifacts = [item for item in context.artifacts if item.kind == ArtifactKind.LINEAGE_REPORT]
+        lineage_artifact = lineage_artifacts[-1] if lineage_artifacts else None
+        bundles = [SemanticBundle.model_validate(item) for item in (inventory.payload.get("bundles", []) if inventory else [])]
+        summaries = {
+            item.bundle_id: item for item in (
+                RemoteBundleInventorySummary.model_validate(raw)
+                for raw in (inventory.payload.get("bundle_summaries", []) if inventory else [])
+            )
+        }
+        reports = {
+            item.bundle_id: item for item in (
+                PreflightBundleReport.model_validate(raw)
+                for raw in (preflight.payload.get("reports", []) if preflight else [])
+            )
+        }
+        lineage = (
+            LineageGraphSnapshot.model_validate(lineage_artifact.payload)
+            if lineage_artifact else LineageGraphSnapshot(
+                snapshot_id="missing", run_id=context.run_id, phase="early"
+            )
+        )
+        assessments = {item.bundle_id: item for item in lineage.bundle_assessments}
+        family_groups: dict[str, list[SemanticBundle]] = defaultdict(list)
+        for bundle in bundles:
+            assessment = assessments.get(bundle.bundle_id)
+            family_id = assessment.family_ids[0] if assessment and assessment.family_ids else f"bundle:{bundle.bundle_id}"
+            family_groups[family_id].append(bundle)
+        representatives = {
+            family_id: self._representative(items, reports, summaries).bundle_id
+            for family_id, items in family_groups.items()
+        }
+
+        decisions: list[AcquisitionBundle] = []
+        for bundle in bundles:
+            report = reports.get(bundle.bundle_id)
+            summary = summaries.get(bundle.bundle_id)
+            assessment = assessments.get(bundle.bundle_id, BundleLineageAssessment(
+                bundle_id=bundle.bundle_id, candidate_id=bundle.candidate_id
+            ))
+            family_id = assessment.family_ids[0] if assessment.family_ids else f"bundle:{bundle.bundle_id}"
+            representative = representatives[family_id]
+            hard_blockers = list(report.hard_blockers if report else ["preflight:missing"])
+            if report and report.decision == BundleStatus.REJECTED:
+                hard_blockers.append("preflight:rejected")
+            if assessment.evaluation_leakage:
+                hard_blockers.append("lineage:evaluation_leakage")
+            if summary and summary.access_status in {
+                BundleAccessStatus.AUTH_REQUIRED, BundleAccessStatus.UNAVAILABLE,
+            }:
+                hard_blockers.append(f"access:{summary.access_status.value}")
+            hard_blockers = list(dict.fromkeys(hard_blockers))
+            manual_reasons: list[str] = []
+            if report and report.decision == BundleStatus.NEEDS_EVIDENCE:
+                manual_reasons.append("preflight:needs_evidence")
+            if summary is None or summary.access_status != BundleAccessStatus.VERIFIED:
+                manual_reasons.append(
+                    f"access:{summary.access_status.value}" if summary else "access:unknown"
+                )
+            if summary is None or summary.total_bytes is None:
+                manual_reasons.append("size:unknown")
+            if report is None or report.license_status == LicenseStatus.UNKNOWN:
+                manual_reasons.append("license:unknown")
+            if bundle.bundle_id != representative:
+                manual_reasons.append("lineage:non_representative")
+            if hard_blockers:
+                tier = "excluded"
+            elif manual_reasons:
+                tier = "manual_review"
+            else:
+                tier = "recommended"
+            components = self._score_components(bundle, report, summary)
+            score = 0.0 if hard_blockers else sum(components.values())
+            if bundle.bundle_id != representative:
+                score = max(0.0, score - 25.0)
+            decisions.append(AcquisitionBundle(
+                bundle_id=bundle.bundle_id,
+                candidate_id=bundle.candidate_id,
+                asset_ids=bundle.asset_ids,
+                priority=1,
+                score=score,
+                expected_bytes=summary.total_bytes if summary else None,
+                requires_size_override=summary is None or summary.total_bytes is None,
+                decision_tier=tier,
+                lineage_family_ids=assessment.family_ids,
+                representative_bundle_id=representative,
+                score_components=components,
+                hard_blockers=hard_blockers,
+                reasons=["Remote inventory, preflight, and lineage evidence reconciled."],
+                risks=[*manual_reasons, *hard_blockers],
+            ))
+        tier_order = {"recommended": 0, "manual_review": 1, "excluded": 2}
+        decisions.sort(key=lambda item: (tier_order[item.decision_tier], -item.score, item.bundle_id))
+        decisions = [item.model_copy(update={"priority": index}) for index, item in enumerate(decisions, 1)]
+        recommended = [item.bundle_id for item in decisions if item.decision_tier == "recommended"]
+        manual = [item.bundle_id for item in decisions if item.decision_tier == "manual_review"]
+        excluded = [item.bundle_id for item in decisions if item.decision_tier == "excluded"]
+        plan = AcquisitionPlan(
+            plan_id=stable_id("acquisition", context.run_id),
+            run_id=context.run_id,
+            bundles=decisions,
+            recommended_bundle_ids=recommended,
+            manual_review_bundle_ids=manual,
+            excluded_bundle_ids=excluded,
+            total_expected_bytes=sum(item.expected_bytes or 0 for item in decisions if item.bundle_id in recommended),
+            destination_root=str(Path(context.policy.get("data_root", "data")) / "raw"),
+        )
+        if context.catalog is not None:
+            context.catalog.append(record_id=plan.plan_id, record_type="acquisition_plan",
+                                   run_id=context.run_id, value=plan)
+            for bundle_id in recommended:
+                context.catalog.transition_bundle(bundle_id, BundleStatus.PROPOSED, run_id=context.run_id)
+        parents = [item.artifact_id for item in (inventory, preflight, lineage_artifact) if item is not None]
+        return [artifact(context.run_id, ArtifactKind.ACQUISITION_PLAN, self.name,
+                         plan.model_dump(mode="json"), parents=parents)]
+
+    @staticmethod
+    def _score_components(bundle, report, summary) -> dict[str, float]:
+        return {
+            "bundle_completeness": 30.0 if bundle.complete else 0.0,
+            "license": 20.0 if report and report.license_status == LicenseStatus.APPROVED else 0.0,
+            "verified_access": 20.0 if summary and summary.access_status == BundleAccessStatus.VERIFIED else 0.0,
+            "preflight": 15.0 if report and report.decision == BundleStatus.PREFLIGHT_READY else 0.0,
+            "modality_pairing": 10.0 if report and report.dimensions.get("modality_authenticity") == GateStatus.PASS else 0.0,
+            "known_size": 5.0 if summary and summary.total_bytes is not None else 0.0,
+        }
+
+    @classmethod
+    def _representative(cls, bundles, reports, summaries):
+        ordered = sorted(bundles, key=lambda item: item.bundle_id)
+        def rank(bundle):
+            report, summary = reports.get(bundle.bundle_id), summaries.get(bundle.bundle_id)
+            scale = report.biological_scale if report else {}
+            return (
+                report is not None and report.decision == BundleStatus.PREFLIGHT_READY,
+                report is not None and report.license_status == LicenseStatus.APPROVED,
+                summary is not None and summary.access_status == BundleAccessStatus.VERIFIED,
+                bundle.complete,
+                scale.get("cell_count") or 0,
+                scale.get("donor_count") or 0,
+                scale.get("sample_count") or 0,
+                summary is not None and summary.total_bytes is not None,
+            )
+        return max(ordered, key=rank)

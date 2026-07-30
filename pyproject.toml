@@ -1,0 +1,78 @@
+[build-system]
+# setuptools>=77 is required for PEP 639 SPDX license metadata.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scdata-agent"
+version = "0.1.0"
+description = "Evidence-first discovery and curation agent for public single-cell epigenomics data."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+# TODO: replace with the names/emails you want publicly associated with the repo.
+authors = [{ name = "scdata-agent contributors" }]
+keywords = [
+  "single-cell",
+  "scATAC-seq",
+  "multiome",
+  "epigenomics",
+  "data-curation",
+  "foundation-model",
+  "langgraph",
+  "agent",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Typing :: Typed",
+]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "jinja2>=3.1,<4",
+  "langchain>=1,<2",
+  "langchain-anthropic>=1,<2",
+  "langchain-openai>=1,<2",
+  "langgraph>=1,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
+  "pydantic>=2.12,<3",
+  "rich>=14,<15",
+  "typer>=0.20,<1",
+  "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9,<10",
+  "pytest-asyncio>=1,<2",
+  "langgraph-cli[inmem]>=0.4,<1",
+]
+
+curation = [
+  "anndata>=0.11,<1",
+  "h5py>=3.12,<4",
+  "mudata>=0.3,<1",
+]
+
+[project.scripts]
+scdata-agent = "scdata_agent.interfaces.cli:app"
+
+# TODO: uncomment and fill in once the GitHub repository exists.
+# [project.urls]
+# Homepage = "https://github.com/OWNER/scdata-agent"
+# Repository = "https://github.com/OWNER/scdata-agent"
+# Issues = "https://github.com/OWNER/scdata-agent/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+

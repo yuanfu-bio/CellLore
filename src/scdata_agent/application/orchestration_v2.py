@@ -1,0 +1,906 @@
+"""Evidence-maturity Supervisor with gated acquisition and corpus publication."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any, TypedDict
+
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
+
+from scdata_agent.application.agents.acquisition_v2 import (
+    AcquisitionStrategistAgent,
+)
+from scdata_agent.application.agents.evidence_escalation import (
+    EvidenceEscalationAgent,
+)
+from scdata_agent.application.agents.inventory_reconcile import (
+    InventoryReconcileAgent,
+)
+from scdata_agent.application.agents.progressive_asset_scout import (
+    ProgressiveAssetScoutAgent,
+)
+from scdata_agent.application.agents.progressive_evidence import (
+    ProgressiveEvidenceCuratorAgent,
+)
+from scdata_agent.application.agents.curator import DatasetCuratorAgent
+from scdata_agent.application.agents.discovery import ResourceDiscoveryAgent
+from scdata_agent.application.agents.materialized_quality import (
+    MaterializedQualityAssessmentAgent,
+)
+from scdata_agent.application.agents.planning import ResearchPlannerAgent
+from scdata_agent.application.agents.progressive_preflight import (
+    ProgressivePreflightAssessmentAgent,
+)
+from scdata_agent.application.agents.progressive_lineage_v2 import (
+    ProgressiveLineageLeakageAgent,
+)
+from scdata_agent.application.agents.shared import (
+    AgentContext,
+    SpecialistAgent,
+    latest_artifact,
+)
+from scdata_agent.application.agents.snapshot_governance import (
+    SnapshotCorpusGovernanceAgent,
+)
+from scdata_agent.application.agents.transfer_execution import (
+    TransferExecutionAgent,
+)
+from scdata_agent.application.collaboration import (
+    AgentArtifact,
+    AgentMessage,
+    AgentName,
+    ArtifactKind,
+    CheckpointStatus,
+    CollaborationLedger,
+    DecisionCheckpoint,
+    RunStatus,
+    artifact,
+)
+from scdata_agent.domain.identifiers import stable_id
+from scdata_agent.domain.lifecycle import AcquisitionPlan, BundleStatus, CorpusSnapshot, PreflightBundleReport
+from scdata_agent.domain.models import DiscoveryRunResult, ResearchRequirement
+from scdata_agent.domain.planning import PlanReadiness, ResearchPlan
+from scdata_agent.domain.resource_pipeline import (
+    EvidenceEscalationReport,
+    ScoutPhase,
+)
+from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+from scdata_agent.infrastructure.observability import configure_tracing
+from scdata_agent.infrastructure.persistence.catalog import Catalog
+
+
+class SupervisorState(TypedDict, total=False):
+    run_id: str
+    question: str
+    database_path: str
+    policy: dict[str, Any]
+    research_plan: ResearchPlan
+    requirement: ResearchRequirement
+    planning_iterations: int
+    planning_replan: bool
+    discovery: DiscoveryRunResult
+    evidence_route: str
+    resolution: dict[str, Any]
+    corpus_resolution: dict[str, Any]
+
+
+class MultiAgentSupervisor:
+    """Central supervisor; specialists exchange typed, persisted artifacts."""
+
+    def __init__(
+        self,
+        ledger: CollaborationLedger,
+        database_path: str,
+        checkpoint_path: str | Path | None = None,
+        trace_mode: str | None = None,
+    ) -> None:
+        self.ledger = ledger
+        self.database_path = database_path
+        self.catalog = Catalog(database_path)
+        self.checkpoint_path = str(
+            checkpoint_path
+            or Path(database_path).with_name("langgraph_checkpoints.sqlite")
+        )
+        self.trace_mode = configure_tracing(trace_mode)
+        self.agents: dict[AgentName, SpecialistAgent] = {
+            AgentName.RESEARCH_PLANNER: ResearchPlannerAgent(),
+            AgentName.RESOURCE_DISCOVERY: ResourceDiscoveryAgent(),
+            AgentName.EVIDENCE_CURATOR: ProgressiveEvidenceCuratorAgent(
+                "metadata"
+            ),
+            AgentName.ASSET_SCOUT: ProgressiveAssetScoutAgent(
+                ScoutPhase.DIRECT
+            ),
+            AgentName.PREFLIGHT_ASSESSMENT: (
+                ProgressivePreflightAssessmentAgent()
+            ),
+            AgentName.ACQUISITION_STRATEGIST: AcquisitionStrategistAgent(),
+            AgentName.ASSET_TRANSFER: TransferExecutionAgent(),
+            AgentName.DATASET_CURATOR: DatasetCuratorAgent(),
+            AgentName.QUALITY_ASSESSMENT: MaterializedQualityAssessmentAgent(),
+            AgentName.CORPUS_GOVERNANCE: SnapshotCorpusGovernanceAgent(),
+        }
+        self.evidence_metadata = ProgressiveEvidenceCuratorAgent("metadata")
+        self.evidence_fulltext = ProgressiveEvidenceCuratorAgent("fulltext")
+        self.asset_scout_direct = ProgressiveAssetScoutAgent(ScoutPhase.DIRECT)
+        self.asset_scout_enriched = ProgressiveAssetScoutAgent(
+            ScoutPhase.ENRICHED
+        )
+        self.evidence_escalation = EvidenceEscalationAgent()
+        self.inventory_reconcile = InventoryReconcileAgent()
+        self.early_lineage = ProgressiveLineageLeakageAgent("early")
+        self.late_lineage = ProgressiveLineageLeakageAgent("late")
+
+    async def execute(self, run_id: str) -> None:
+        run = self.ledger.get_run(run_id)
+        self.ledger.set_run_status(run_id, RunStatus.RUNNING)
+        self.ledger.add_event(
+            run_id,
+            "graph_started",
+            {"thread_id": run_id, "trace_mode": self.trace_mode.value},
+        )
+        try:
+            async with AsyncSqliteSaver.from_conn_string(
+                self.checkpoint_path
+            ) as saver:
+                await saver.setup()
+                graph = self._build_graph(saver)
+                await graph.ainvoke(
+                    {
+                        "run_id": run_id,
+                        "question": run.question,
+                        "database_path": self.database_path,
+                        "policy": run.policy,
+                    },
+                    config=self._config(run_id),
+                )
+        except asyncio.CancelledError:
+            self.ledger.set_run_status(run_id, RunStatus.CANCELLED)
+            raise
+        except Exception as error:
+            self._record_failure(run_id, error)
+            raise
+
+    async def resume_checkpoint(
+        self, checkpoint_id: str, resolution: dict[str, Any]
+    ) -> DecisionCheckpoint:
+        checkpoint = self.ledger.resolve_checkpoint(checkpoint_id, resolution)
+        self.ledger.add_event(
+            checkpoint.run_id,
+            "graph_resumed",
+            {"checkpoint_id": checkpoint_id, "resolution": resolution},
+        )
+        try:
+            async with AsyncSqliteSaver.from_conn_string(
+                self.checkpoint_path
+            ) as saver:
+                await saver.setup()
+                graph = self._build_graph(saver)
+                await graph.ainvoke(
+                    Command(resume=resolution),
+                    config=self._config(checkpoint.run_id),
+                )
+        except Exception as error:
+            self._record_failure(checkpoint.run_id, error)
+            raise
+        return checkpoint
+
+    def resolve_checkpoint(
+        self, checkpoint_id: str, resolution: dict[str, Any]
+    ) -> DecisionCheckpoint:
+        return self.ledger.resolve_checkpoint(checkpoint_id, resolution)
+
+    async def graph_state(self, run_id: str) -> dict[str, Any]:
+        self.ledger.get_run(run_id)
+        async with AsyncSqliteSaver.from_conn_string(
+            self.checkpoint_path
+        ) as saver:
+            await saver.setup()
+            snapshot = await self._build_graph(saver).aget_state(
+                self._config(run_id)
+            )
+        return {
+            "values": snapshot.values,
+            "next": list(snapshot.next),
+            "config": snapshot.config,
+        }
+
+    def cancel(self, run_id: str) -> None:
+        self.ledger.get_run(run_id)
+        self.ledger.set_run_status(run_id, RunStatus.CANCELLED)
+        self.ledger.add_event(
+            run_id, "graph_cancelled", {"thread_id": run_id}
+        )
+
+    def build_graph(self, checkpointer: Any | None = None):
+        return self._build_graph(checkpointer)
+
+    def _build_graph(self, saver: Any | None):
+        graph = StateGraph(SupervisorState)
+        graph.add_node("initialize_run", self._initialize_run)
+        graph.add_node("research_planner", self._planner)
+        graph.add_node("planning_gate", self._planning_gate)
+        graph.add_node("resource_discovery", self._discovery)
+        graph.add_node(
+            "evidence_metadata",
+            self._specialist(
+                AgentName.EVIDENCE_CURATOR, self.evidence_metadata
+            ),
+        )
+        graph.add_node(
+            "asset_scout_direct",
+            self._specialist(
+                AgentName.ASSET_SCOUT, self.asset_scout_direct
+            ),
+        )
+        graph.add_node(
+            "evidence_escalation_gate", self._evidence_escalation_gate
+        )
+        graph.add_node(
+            "evidence_fulltext",
+            self._specialist(
+                AgentName.EVIDENCE_CURATOR, self.evidence_fulltext
+            ),
+        )
+        graph.add_node(
+            "asset_scout_enriched",
+            self._specialist(
+                AgentName.ASSET_SCOUT, self.asset_scout_enriched
+            ),
+        )
+        graph.add_node(
+            "inventory_reconcile",
+            self._specialist(
+                AgentName.ASSET_SCOUT, self.inventory_reconcile
+            ),
+        )
+        graph.add_node(
+            "preflight_assessment",
+            self._specialist(AgentName.PREFLIGHT_ASSESSMENT),
+        )
+        graph.add_node(
+            "early_lineage",
+            self._specialist(
+                AgentName.LINEAGE_LEAKAGE, self.early_lineage
+            ),
+        )
+        graph.add_node(
+            "acquisition_strategy",
+            self._specialist(AgentName.ACQUISITION_STRATEGIST),
+        )
+        graph.add_node("download_approval", self._download_approval)
+        graph.add_node(
+            "transfer_execution",
+            self._specialist(AgentName.ASSET_TRANSFER),
+        )
+        graph.add_node(
+            "dataset_curator",
+            self._specialist(AgentName.DATASET_CURATOR),
+        )
+        graph.add_node(
+            "materialized_quality",
+            self._specialist(AgentName.QUALITY_ASSESSMENT),
+        )
+        graph.add_node(
+            "late_lineage",
+            self._specialist(AgentName.LINEAGE_LEAKAGE, self.late_lineage),
+        )
+        graph.add_node(
+            "corpus_governance",
+            self._specialist(AgentName.CORPUS_GOVERNANCE),
+        )
+        graph.add_node("corpus_approval", self._corpus_approval)
+        graph.add_node("finalize", self._finalize)
+
+        graph.add_edge(START, "initialize_run")
+        graph.add_edge("initialize_run", "research_planner")
+        graph.add_edge("research_planner", "planning_gate")
+        graph.add_conditional_edges(
+            "planning_gate",
+            self._route_after_planning_gate,
+            {"replan": "research_planner", "discover": "resource_discovery"},
+        )
+        graph.add_edge("resource_discovery", "asset_scout_direct")
+        graph.add_edge("resource_discovery", "evidence_metadata")
+        graph.add_edge(
+            ["asset_scout_direct", "evidence_metadata"],
+            "evidence_escalation_gate",
+        )
+        graph.add_conditional_edges(
+            "evidence_escalation_gate",
+            self._route_after_evidence_escalation,
+            {
+                "fulltext": "evidence_fulltext",
+                "scout": "asset_scout_enriched",
+            },
+        )
+        graph.add_edge("evidence_fulltext", "asset_scout_enriched")
+        graph.add_edge("asset_scout_enriched", "inventory_reconcile")
+        graph.add_edge("inventory_reconcile", "preflight_assessment")
+        graph.add_edge("inventory_reconcile", "early_lineage")
+        graph.add_edge(
+            ["preflight_assessment", "early_lineage"],
+            "acquisition_strategy",
+        )
+        graph.add_edge("acquisition_strategy", "download_approval")
+        graph.add_conditional_edges(
+            "download_approval",
+            self._route_after_download,
+            {"stop": "finalize", "transfer": "transfer_execution"},
+        )
+        graph.add_edge("transfer_execution", "dataset_curator")
+        graph.add_edge("dataset_curator", "materialized_quality")
+        graph.add_edge("materialized_quality", "late_lineage")
+        graph.add_edge("late_lineage", "corpus_governance")
+        graph.add_edge("corpus_governance", "corpus_approval")
+        graph.add_edge("corpus_approval", "finalize")
+        graph.add_edge("finalize", END)
+        return graph.compile(checkpointer=saver)
+
+    async def _initialize_run(
+        self, state: SupervisorState
+    ) -> dict[str, Any]:
+        run_id = state.get("run_id")
+        if run_id:
+            run = self.ledger.get_run(run_id)
+        else:
+            question = state.get("question")
+            if not question:
+                raise ValueError("question is required to start a run.")
+            run = self.ledger.create_run(question, state.get("policy", {}))
+        self.ledger.set_run_status(run.run_id, RunStatus.RUNNING)
+        return {
+            "run_id": run.run_id,
+            "question": run.question,
+            "database_path": state.get(
+                "database_path", self.database_path
+            ),
+            "policy": run.policy,
+            "planning_iterations": state.get("planning_iterations", 0),
+        }
+
+    async def _planner(self, state: SupervisorState) -> dict[str, Any]:
+        context = self._context(state)
+        await self._dispatch(context, AgentName.RESEARCH_PLANNER)
+        assert context.research_plan is not None
+        assert context.requirement is not None
+        return {
+            "research_plan": context.research_plan.model_dump(mode="json"),
+            "requirement": context.requirement.model_dump(mode="json"),
+            "planning_replan": False,
+        }
+
+    async def _planning_gate(
+        self, state: SupervisorState
+    ) -> dict[str, Any]:
+        plan = ResearchPlan.model_validate(state["research_plan"])
+        if plan.readiness != PlanReadiness.BLOCKED:
+            return {"planning_replan": False}
+        iteration = state.get("planning_iterations", 0)
+        checkpoint = self._open_planning_checkpoint(
+            state["run_id"], plan, iteration
+        )
+        self._mark_waiting(checkpoint)
+        resolution = interrupt(
+            {
+                "checkpoint_id": checkpoint.checkpoint_id,
+                "kind": checkpoint.kind,
+                "questions": plan.clarifying_questions,
+                "options": checkpoint.options,
+                "recommendation": checkpoint.recommendation,
+            }
+        )
+        clarification = str(resolution.get("clarification", "")).strip()
+        if clarification:
+            return {
+                "question": (
+                    f"{state['question']}\nUser clarification: {clarification}"
+                ),
+                "planning_iterations": iteration + 1,
+                "planning_replan": True,
+            }
+        return {"planning_replan": False}
+
+    @staticmethod
+    def _route_after_planning_gate(state: SupervisorState) -> str:
+        return "replan" if state.get("planning_replan", False) else "discover"
+
+    async def _evidence_escalation_gate(
+        self, state: SupervisorState
+    ) -> dict[str, Any]:
+        context = self._context(state)
+        await self._dispatch(
+            context,
+            AgentName.EVIDENCE_CURATOR,
+            self.evidence_escalation,
+        )
+        escalation_artifact = latest_artifact(
+            context.artifacts, ArtifactKind.EVIDENCE_ESCALATION.value
+        )
+        report = (
+            EvidenceEscalationReport.model_validate(
+                escalation_artifact.payload
+            )
+            if escalation_artifact is not None
+            else None
+        )
+        return {
+            "evidence_route": (
+                "fulltext"
+                if report and report.fulltext_candidate_ids
+                else "scout"
+            )
+        }
+
+    
+    def _route_after_evidence_escalation(
+        self, state: SupervisorState,
+    ) -> str:
+        return state.get("evidence_route", "scout")
+
+    async def _discovery(self, state: SupervisorState) -> dict[str, Any]:
+        context = self._context(state)
+        await self._dispatch(context, AgentName.RESOURCE_DISCOVERY)
+        assert context.discovery is not None
+        update: dict[str, Any] = {
+            "discovery": context.discovery.model_dump(mode="json")
+        }
+        if context.research_plan is not None:
+            update["research_plan"] = context.research_plan.model_dump(
+                mode="json"
+            )
+        return update
+
+    def _specialist(
+        self, name: AgentName, agent: SpecialistAgent | None = None
+    ):
+        async def node(state: SupervisorState) -> dict[str, Any]:
+            await self._dispatch(self._context(state), name, agent)
+            return {}
+
+        return node
+
+    async def _download_approval(
+        self, state: SupervisorState
+    ) -> dict[str, Any]:
+        context = self._context(state)
+        checkpoint = self._open_download_checkpoint(context)
+        self._mark_waiting(checkpoint)
+        resolution = interrupt(
+            {
+                "checkpoint_id": checkpoint.checkpoint_id,
+                "kind": checkpoint.kind,
+                "options": checkpoint.options,
+                "recommendation": checkpoint.recommendation,
+            }
+        )
+        return {"resolution": resolution}
+
+    @staticmethod
+    def _route_after_download(state: SupervisorState) -> str:
+        option = state.get("resolution", {}).get("option")
+        return "transfer" if option in {
+            "recommended", "all_with_unknown_size"
+        } else "stop"
+
+    async def _corpus_approval(
+        self, state: SupervisorState
+    ) -> dict[str, Any]:
+        context = self._context(state)
+        checkpoint = self._open_corpus_checkpoint(context)
+        self._mark_waiting(checkpoint)
+        resolution = interrupt(
+            {
+                "checkpoint_id": checkpoint.checkpoint_id,
+                "kind": checkpoint.kind,
+                "options": checkpoint.options,
+                "recommendation": checkpoint.recommendation,
+            }
+        )
+        if resolution.get("option") == "approve_snapshot":
+            snapshot_artifact = latest_artifact(
+                self.ledger.list_artifacts(context.run_id),
+                ArtifactKind.CORPUS_SNAPSHOT.value,
+            )
+            if snapshot_artifact is not None:
+                snapshot = CorpusSnapshot.model_validate(
+                    snapshot_artifact.payload
+                ).model_copy(update={"approved": True})
+                self.catalog.append(
+                    record_id=snapshot.snapshot_id,
+                    record_type="corpus_snapshot",
+                    run_id=context.run_id,
+                    value=snapshot,
+                )
+                approved = artifact(
+                    context.run_id,
+                    ArtifactKind.CORPUS_SNAPSHOT,
+                    AgentName.SUPERVISOR,
+                    snapshot.model_dump(mode="json"),
+                    parents=[snapshot_artifact.artifact_id],
+                )
+                self.ledger.add_artifact(approved)
+        return {"corpus_resolution": resolution}
+
+    async def _finalize(self, state: SupervisorState) -> dict[str, Any]:
+        self.ledger.set_run_status(state["run_id"], RunStatus.COMPLETED)
+        self.ledger.add_event(
+            state["run_id"],
+            "graph_completed",
+            {
+                "download_resolution": state.get("resolution"),
+                "corpus_resolution": state.get("corpus_resolution"),
+            },
+        )
+        return {}
+
+    def _context(self, state: SupervisorState) -> AgentContext:
+        raw_plan = state.get("research_plan")
+        raw_requirement = state.get("requirement")
+        raw_discovery = state.get("discovery")
+        return AgentContext(
+            run_id=state["run_id"],
+            question=state["question"],
+            database_path=state["database_path"],
+            ledger=self.ledger,
+            policy=state.get("policy", {}),
+            research_plan=(
+                ResearchPlan.model_validate(raw_plan) if raw_plan else None
+            ),
+            requirement=(
+                ResearchRequirement.model_validate(raw_requirement)
+                if raw_requirement
+                else None
+            ),
+            discovery=(
+                DiscoveryRunResult.model_validate(raw_discovery)
+                if raw_discovery
+                else None
+            ),
+            artifacts=self.ledger.list_artifacts(state["run_id"]),
+            catalog=self.catalog,
+            resolution=state.get("resolution"),
+        )
+
+    async def _dispatch(
+        self,
+        context: AgentContext,
+        name: AgentName,
+        agent: SpecialistAgent | None = None,
+    ) -> None:
+        self._ensure_active(context.run_id)
+        implementation = agent or self.agents[name]
+        task = self.ledger.start_task(
+            context.run_id,
+            name,
+            [item.artifact_id for item in context.artifacts],
+        )
+        self.ledger.add_event(
+            context.run_id,
+            "graph_node_started",
+            {"node": name.value, "task_id": task.task_id},
+        )
+        try:
+            outputs = await implementation.run(context)
+            for output in outputs:
+                self.ledger.add_artifact(output)
+                context.artifacts.append(output)
+            self.ledger.add_message(
+                AgentMessage(
+                    message_id=stable_id(
+                        "message",
+                        f"{context.run_id}:{name.value}:{task.task_id}",
+                    ),
+                    run_id=context.run_id,
+                    sender=name,
+                    recipient=AgentName.SUPERVISOR,
+                    summary=(
+                        f"{name.value} completed and published "
+                        f"{len(outputs)} artifact(s)."
+                    ),
+                    recommendation=_recommendation(outputs),
+                    artifact_ids=[item.artifact_id for item in outputs],
+                    confidence=0.9,
+                )
+            )
+            self.ledger.finish_task(
+                task.task_id, [item.artifact_id for item in outputs]
+            )
+            self.ledger.add_event(
+                context.run_id,
+                "graph_node_finished",
+                {"node": name.value, "task_id": task.task_id},
+            )
+        except Exception as error:
+            self.ledger.finish_task(
+                task.task_id, [], f"{type(error).__name__}: {error}"
+            )
+            self.ledger.add_event(
+                context.run_id,
+                "graph_node_failed",
+                {"node": name.value, "error": str(error)},
+            )
+            raise
+
+    def _open_planning_checkpoint(
+        self, run_id: str, plan: ResearchPlan, iteration: int
+    ) -> DecisionCheckpoint:
+        checkpoint_id = stable_id(
+            "checkpoint", f"{run_id}:research_clarification:{iteration}"
+        )
+        existing = [
+            item
+            for item in self.ledger.list_checkpoints(run_id)
+            if item.checkpoint_id == checkpoint_id
+        ]
+        if existing:
+            return existing[-1]
+        return self.ledger.add_checkpoint(
+            DecisionCheckpoint(
+                checkpoint_id=checkpoint_id,
+                run_id=run_id,
+                kind="research_clarification",
+                title="Clarify a research-design conflict before discovery",
+                recommendation=plan.readiness_rationale,
+                options=[
+                    {
+                        "id": "provide_clarification",
+                        "label": "Provide clarification",
+                    },
+                    {
+                        "id": "proceed_with_assumptions",
+                        "label": "Proceed with documented assumptions",
+                    },
+                ],
+            )
+        )
+
+    def _open_download_checkpoint(
+        self, context: AgentContext
+    ) -> DecisionCheckpoint:
+        existing = [
+            item
+            for item in self.ledger.list_checkpoints(context.run_id)
+            if item.kind == "download_selection"
+        ]
+        if existing:
+            return existing[-1]
+        plan_artifact = latest_artifact(
+            context.artifacts, ArtifactKind.ACQUISITION_PLAN.value
+        )
+        plan = (
+            AcquisitionPlan.model_validate(plan_artifact.payload)
+            if plan_artifact
+            else AcquisitionPlan(
+                plan_id=stable_id("acquisition", context.run_id),
+                run_id=context.run_id,
+                destination_root=str(
+                    Path(context.policy.get("data_root", "data")) / "raw"
+                ),
+            )
+        )
+        preflight_artifact = latest_artifact(
+            context.artifacts, ArtifactKind.PREFLIGHT_REPORT.value
+        )
+        ready_ids = {
+            report.bundle_id
+            for report in (
+                PreflightBundleReport.model_validate(item)
+                for item in (
+                    preflight_artifact.payload.get("reports", [])
+                    if preflight_artifact else []
+                )
+            )
+            if report.decision == BundleStatus.PREFLIGHT_READY
+        }
+        all_ids = [
+            item.bundle_id
+            for item in plan.bundles
+            if item.bundle_id in ready_ids
+            and item.bundle_id in {
+                *plan.recommended_bundle_ids,
+                *plan.manual_review_bundle_ids,
+            }
+        ]
+        unknown_ids = [
+            item.bundle_id
+            for item in plan.bundles
+            if item.bundle_id in ready_ids and item.requires_size_override
+        ]
+        return self.ledger.add_checkpoint(
+            DecisionCheckpoint(
+                checkpoint_id=stable_id(
+                    "checkpoint", f"{context.run_id}:download"
+                ),
+                run_id=context.run_id,
+                kind="download_selection",
+                title="Approve semantic bundles for transfer",
+                recommendation=(
+                    f"Recommended bundles: {len(plan.recommended_bundle_ids)}; "
+                    f"known expected bytes: {plan.total_expected_bytes or 0}."
+                ),
+                options=[
+                    {
+                        "id": "plan_only",
+                        "label": "Keep plans only",
+                        "bundle_ids": [],
+                    },
+                    {
+                        "id": "recommended",
+                        "label": "Download recommended bundles",
+                        "bundle_ids": plan.recommended_bundle_ids,
+                    },
+                    {
+                        "id": "all_with_unknown_size",
+                        "label": "Download recommended and eligible manual-review bundles; allow unknown sizes",
+                        "bundle_ids": all_ids,
+                        "unknown_size_bundle_ids": unknown_ids,
+                    },
+                ],
+            )
+        )
+
+    def _open_corpus_checkpoint(
+        self, context: AgentContext
+    ) -> DecisionCheckpoint:
+        existing = [
+            item
+            for item in self.ledger.list_checkpoints(context.run_id)
+            if item.kind == "corpus_snapshot"
+        ]
+        if existing:
+            return existing[-1]
+        snapshot_artifact = latest_artifact(
+            context.artifacts, ArtifactKind.CORPUS_SNAPSHOT.value
+        )
+        snapshot = (
+            CorpusSnapshot.model_validate(snapshot_artifact.payload)
+            if snapshot_artifact
+            else None
+        )
+        recommendation = (
+            f"Admit {len(snapshot.admitted_bundle_ids)}, quarantine "
+            f"{len(snapshot.quarantined_bundle_ids)}, exclude "
+            f"{len(snapshot.excluded_bundle_ids)} bundle(s)."
+            if snapshot
+            else "No snapshot was generated."
+        )
+        return self.ledger.add_checkpoint(
+            DecisionCheckpoint(
+                checkpoint_id=stable_id(
+                    "checkpoint", f"{context.run_id}:corpus_snapshot"
+                ),
+                run_id=context.run_id,
+                kind="corpus_snapshot",
+                title="Approve immutable corpus snapshot",
+                recommendation=recommendation,
+                options=[
+                    {
+                        "id": "approve_snapshot",
+                        "label": "Approve snapshot",
+                    },
+                    {
+                        "id": "reject_snapshot",
+                        "label": "Keep as draft",
+                    },
+                ],
+            )
+        )
+
+    def _mark_waiting(self, checkpoint: DecisionCheckpoint) -> None:
+        if checkpoint.status == CheckpointStatus.OPEN:
+            self.ledger.set_run_status(
+                checkpoint.run_id, RunStatus.WAITING_FOR_DECISION
+            )
+            self.ledger.add_event(
+                checkpoint.run_id,
+                "graph_interrupted",
+                {"checkpoint_id": checkpoint.checkpoint_id},
+            )
+
+    def _ensure_active(self, run_id: str) -> None:
+        if self.ledger.get_run(run_id).status == RunStatus.CANCELLED:
+            raise asyncio.CancelledError(f"Run {run_id} was cancelled.")
+
+    def _config(self, run_id: str) -> dict[str, Any]:
+        return {
+            "configurable": {"thread_id": run_id},
+            "recursion_limit": 50,
+            "tags": ["scdata-agent", "supervisor-v2"],
+        }
+
+    def _record_failure(self, run_id: str, error: Exception) -> None:
+        self.ledger.add_message(
+            AgentMessage(
+                message_id=stable_id("message", f"{run_id}:failure:{error}"),
+                run_id=run_id,
+                sender=AgentName.SUPERVISOR,
+                recipient=AgentName.SUPERVISOR,
+                summary=(
+                    "Supervisor stopped the run after an unrecoverable "
+                    "stage failure."
+                ),
+                recommendation=(
+                    "Inspect the failed task and retry after correcting input."
+                ),
+                confidence=1.0,
+            )
+        )
+        self.ledger.set_run_status(run_id, RunStatus.FAILED)
+
+    async def chat(self, run_id: str, message: str) -> AgentArtifact:
+        run = self.ledger.get_run(run_id)
+        reply = await _chat_reply(
+            run.question,
+            run.status.value,
+            self.ledger.list_checkpoints(run_id),
+            message,
+        )
+        response = artifact(
+            run_id,
+            ArtifactKind.CHAT,
+            AgentName.SUPERVISOR,
+            {"user": message, "assistant": reply},
+        )
+        self.ledger.add_artifact(response)
+        return response
+
+
+async def _chat_reply(
+    question: str,
+    status: str,
+    checkpoints: list[DecisionCheckpoint],
+    message: str,
+) -> str:
+    fallback = (
+        f"已记录你的指令。当前运行状态为 {status}；"
+        "高影响选择请在开放的 checkpoint 中确认。"
+    )
+    try:
+        client = ModelRouter.from_environment().client(ReasoningProfile.CHAT)
+        return (
+            await client.complete(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Answer briefly in Chinese. "
+                            "Do not claim unobserved facts."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "question": question,
+                                "run_status": status,
+                                "checkpoints": [
+                                    item.model_dump(mode="json")
+                                    for item in checkpoints
+                                ],
+                                "user_message": message,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+                temperature=0.2,
+                max_tokens=500,
+            )
+        ).strip()
+    except Exception:
+        return fallback
+
+
+def _recommendation(outputs: list[AgentArtifact]) -> str | None:
+    for output in outputs:
+        value = output.payload.get("recommendation") or output.payload.get(
+            "next_action"
+        )
+        if isinstance(value, str):
+            return value
+    return None

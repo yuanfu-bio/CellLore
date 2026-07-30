@@ -1,0 +1,237 @@
+import json
+
+import pytest
+
+from scdata_agent.domain.models import Modality
+from scdata_agent.domain.planning import ExecutionStatus, PlanOrigin, PlanReadiness
+from scdata_agent.infrastructure.llm.research_planner import MultiStageResearchPlanner
+
+
+class ScriptedClient:
+    class settings:
+        model = "planner-test"
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def complete(self, messages, *, temperature=0.1, max_tokens=2_000):
+        self.calls.append(messages)
+        if not self.responses:
+            raise AssertionError("unexpected planner call")
+        return json.dumps(self.responses.pop(0), ensure_ascii=False)
+
+
+def _intent(question):
+    return {
+        "original_request": question,
+        "intent_summary": "解析肿瘤免疫逃逸相关的调控状态及其临床关联",
+        "primary_question": "哪些调控状态驱动肿瘤免疫逃逸？",
+        "scientific_objectives": ["识别免疫逃逸相关细胞状态和调控元件"],
+        "hypotheses": ["染色质调控状态与免疫逃逸相关"],
+        "comparisons": ["免疫逃逸高与低的样本或细胞状态"],
+        "units_of_analysis": ["患者", "细胞状态", "调控区域"],
+        "desired_outcomes": ["候选调控程序和外部验证方案"],
+        "ambiguities": ["癌种和免疫逃逸定义尚未指定"],
+    }
+
+
+def _constraint(statement, origin):
+    return {
+        "statement": statement,
+        "kind": "preference",
+        "origin": origin,
+        "confidence": 0.8,
+        "rationale": "支持研究目标",
+        "verification_question": "候选数据是否提供相应元数据？",
+    }
+
+
+def _atac_need():
+    return {
+        "need_id": "atac",
+        "name": "单细胞染色质可及性队列",
+        "data_type": "scATAC-seq or RNA+ATAC multiome",
+        "role": "主要调控发现数据",
+        "priority": "essential",
+        "rationale": "用于解析细胞状态特异调控元件",
+        "modalities": ["scATAC-seq", "RNA+ATAC multiome"],
+        "required_metadata": ["患者", "疾病状态"],
+        "constraints": [_constraint("应包含可比较的免疫状态", "recommended")],
+        "execution_status": "unknown",
+    }
+
+
+def _rna_need():
+    return {
+        "need_id": "rna",
+        "name": "转录或空间验证队列",
+        "data_type": "scRNA-seq and spatial transcriptomics",
+        "role": "外部验证",
+        "priority": "supporting",
+        "rationale": "验证调控程序的表达和空间背景",
+        "modalities": ["scRNA-seq", "spatial transcriptomics"],
+        "execution_status": "unknown",
+    }
+
+
+def _strategy():
+    return {
+        "study_design_summary": "以表观调控发现、转录和空间验证组成多阶段研究",
+        "constraints": [_constraint("癌种暂以实体瘤为工作假设", "inferred")],
+        "data_needs": [_atac_need(), _rna_need()],
+        "resource_needs": [
+            {
+                "need_id": "papers",
+                "resource_type": "literature",
+                "purpose": "确定免疫逃逸定义和可用队列",
+                "priority": "essential",
+            },
+            {
+                "need_id": "ontology",
+                "resource_type": "cell-state ontology",
+                "purpose": "统一状态术语",
+                "priority": "supporting",
+            },
+        ],
+        "analysis_plan": [
+            {
+                "step_id": "discover",
+                "title": "资源发现",
+                "objective": "发现候选研究和数据",
+                "inputs": ["papers", "atac", "rna"],
+                "methods": ["文献与数据库检索"],
+                "outputs": ["候选资源清单"],
+                "success_criteria": ["每项候选均有证据来源"],
+            }
+        ],
+        "assumptions": ["先采用广义实体瘤范围"],
+        "uncertainties": ["癌种和免疫逃逸表型定义待确认"],
+        "alternative_strategies": ["按癌种分支检索"],
+    }
+
+
+def _critique():
+    return {
+        "intent_fidelity_issues": [],
+        "scientific_design_issues": ["需明确免疫逃逸操作性定义"],
+        "feasibility_issues": ["空间数据不一定具有配对样本"],
+        "leakage_or_bias_risks": ["同一研究不可跨训练与验证集合"],
+        "recommended_changes": ["将癌种和免疫逃逸定义列为显式假设"],
+        "critical_conflicts": [],
+    }
+
+
+def _final(question):
+    return {
+        "intent": _intent(question),
+        "constraints": [_constraint("癌种暂以实体瘤为工作假设", "inferred")],
+        "data_needs": [_atac_need(), _rna_need()],
+        "resource_needs": _strategy()["resource_needs"],
+        "analysis_plan": _strategy()["analysis_plan"],
+        "assumptions": ["先采用广义实体瘤范围"],
+        "uncertainties": ["癌种和免疫逃逸表型定义待确认"],
+        "clarifying_questions": ["优先关注哪一种癌症？"],
+        "alternative_strategies": ["按癌种分支检索"],
+        "readiness": "conditional",
+        "readiness_rationale": "可以按显式假设开始发现，随后再收窄。",
+    }
+
+
+@pytest.mark.asyncio
+async def test_planner_derives_cross_modal_strategy_without_user_data_specification():
+    question = "我想研究肿瘤免疫逃逸的调控机制，并找到可验证的临床相关信号。"
+    planner = ScriptedClient([_intent(question), _strategy(), _final(question)])
+    reviewer = ScriptedClient([_critique()])
+
+    plan = await MultiStageResearchPlanner(planner, review_client=reviewer, mode="deep").plan(question)
+
+    assert plan.readiness == PlanReadiness.CONDITIONAL
+    assert plan.intent.original_request == question
+    assert len(planner.calls) == 3
+    assert len(reviewer.calls) == 1
+    assert plan.data_needs[0].execution_status == ExecutionStatus.SUPPORTED
+    assert plan.data_needs[1].execution_status == ExecutionStatus.UNSUPPORTED
+    assert any(gap.startswith("data_need:转录或空间验证队列") for gap in plan.capability_gaps)
+    assert plan.constraints[0].origin == PlanOrigin.INFERRED
+    assert Modality.SCATAC in plan.executable_contracts[0].modalities
+    assert Modality.MULTIOME_RNA_ATAC in plan.executable_contracts[0].modalities
+
+
+@pytest.mark.asyncio
+async def test_planner_failure_is_explicitly_degraded_not_silent():
+    planner = ScriptedClient(["not-json"])
+    plan = await MultiStageResearchPlanner(planner, mode="fast").plan("研究未知疾病机制")
+
+    assert plan.readiness == PlanReadiness.CONDITIONAL
+    assert plan.executable_contracts
+    assert plan.executable_contracts[0].compiler == "research_plan_v1"
+    assert any(item.startswith("planner:fast_intent_failed") for item in plan.planner_diagnostics)
+    assert any(item.startswith("planner:fast_strategy_failed") for item in plan.planner_diagnostics)
+
+
+def _compact_final(question):
+    final = _final(question)
+    intent = final["intent"]
+    return {
+        "intent_summary": intent["intent_summary"],
+        "primary_question": intent["primary_question"],
+        "scientific_objectives": intent["scientific_objectives"],
+        "hypotheses": intent["hypotheses"],
+        "comparisons": intent["comparisons"],
+        "units_of_analysis": intent["units_of_analysis"],
+        "desired_outcomes": intent["desired_outcomes"],
+        "ambiguities": intent["ambiguities"],
+        "constraints": final["constraints"],
+        "data_needs": [
+            {key: value for key, value in item.items() if key in {
+                "name", "data_type", "role", "priority", "rationale",
+                "modalities", "required_metadata", "alternatives",
+            }}
+            for item in final["data_needs"]
+        ],
+        "resource_needs": [
+            {key: value for key, value in item.items() if key in {
+                "resource_type", "purpose", "priority", "search_focus",
+            }}
+            for item in final["resource_needs"]
+        ],
+        "analysis_plan": [
+            {key: value for key, value in item.items() if key in {
+                "title", "objective", "inputs", "methods", "outputs", "success_criteria",
+            }}
+            for item in final["analysis_plan"]
+        ],
+        "assumptions": final["assumptions"],
+        "uncertainties": final["uncertainties"],
+        "clarifying_questions": final["clarifying_questions"],
+        "alternative_strategies": final["alternative_strategies"],
+        "readiness": final["readiness"],
+        "readiness_rationale": final["readiness_rationale"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_fast_planner_uses_one_model_call_and_local_validation():
+    question = "研究肿瘤免疫逃逸并设计公共数据验证方案"
+    compact = _compact_final(question)
+    intent_fields = {
+        key: compact[key]
+        for key in (
+            "intent_summary", "primary_question", "scientific_objectives",
+            "hypotheses", "comparisons", "units_of_analysis",
+            "desired_outcomes", "ambiguities",
+        )
+    }
+    strategy_fields = {key: value for key, value in compact.items() if key not in intent_fields}
+    planner = ScriptedClient([intent_fields, strategy_fields])
+
+    plan = await MultiStageResearchPlanner(planner, mode="fast").plan(question)
+
+    assert len(planner.calls) == 2
+    assert plan.intent.primary_question
+    assert plan.data_needs[0].execution_status == ExecutionStatus.SUPPORTED
+    assert plan.planner_diagnostics == [
+        "planner:fast_parallel_plan",
+        "planner:deterministic_validation",
+    ]
