@@ -26,11 +26,14 @@
   (`application.orchestration` and its v1 specialist modules) was removed before
   the first public release; `application.orchestration_v2` is the only graph.
 - Offline tests cover old behavior plus state transitions, open-full-text access, repository resolvers, transfer receipts, QC, governance, and both approval gates.
+- Bundle completeness is evaluated per modality against alternative `BundleSchema` shapes with OR-semantics role groups; satisfying any one schema completes the Bundle, and acquisition scores each schema independently. Standalone scATAC no longer inherits multiome requirements.
+- Role inference reads the whole asset path (10x encodes modality in the directory) and covers 10x, SNARE-seq and ENA conventions. Archives get a dedicated `ARCHIVE` role so unopened containers report `archive:uninspected` instead of a completeness verdict that was never verified.
+- The offline planner fallback is domain-neutral: clinical-outcome and spatial-validation needs are added only when the question actually carries disease or outcome cues, and the CLI warns when a plan came from the template rather than the model.
 
 ## Next
 
-- Split training-ready requirements into alternative Bundle schemas: scATAC should not require RNA matrix or barcode linkage, while same-cell multiome should; acquisition must score each schema independently.
 - Preserve the semantic relation of every extracted accession (`primary_data_deposition`, `reused_dataset`, `supplementary_reference`); only primary deposition should form a paper-owned Bundle by default.
+- Read archive manifests after transfer so `archive:uninspected` Bundles can be assessed rather than parked in manual review; roughly 40% of remotely observed GEO assets are archives.
 - Add ENCODE, BioStudies/ArrayExpress, Single Cell Portal, and HCA adapters; keep EGA/dbGaP metadata-only.
 - Add normalized donor/sample/cell entities and ontology IDs so lineage can move beyond accession and checksum families.
 - Add reference-backed TSS enrichment, doublet methods, full matrix sparsity, and explicit RNA/ATAC barcode intersection.

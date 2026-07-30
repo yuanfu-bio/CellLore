@@ -11,8 +11,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-# TODO: replace with the names/emails you want publicly associated with the repo.
-authors = [{ name = "scdata-agent contributors" }]
+authors = [{ name = "Yuan Fu", email = "yuanfu_bio@163.com" }]
 keywords = [
   "single-cell",
   "scATAC-seq",

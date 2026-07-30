@@ -1,0 +1,54 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package and dev dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+
+      # The suite stubs every outbound call with monkeypatch and
+      # httpx.MockTransport, so no API key or network access is required.
+      - name: Run tests
+        run: pytest
+
+      - name: Verify package metadata is publishable
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A committed .env is the one mistake this repository cannot take back.
+      - name: Fail if credentials or a real .env were committed
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is tracked; it must stay gitignored."
+            exit 1
+          fi
+          if git grep -nIE 'sk-[A-Za-z0-9]{16,}|lsv2_[A-Za-z0-9_]{16,}' -- . ':!.github/workflows'; then
+            echo "::error::A credential-shaped string was found in tracked files."
+            exit 1
+          fi
+          echo "No tracked credentials found."

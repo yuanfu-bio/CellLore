@@ -79,6 +79,9 @@ class DataRole(StrEnum):
     QC_METRICS = "qc_metrics"
     REFERENCE = "reference_files"
     PIPELINE = "pipeline_code"
+    # A container whose payload cannot be identified without opening it. Kept
+    # distinct from OTHER so remote assessment can say "unknown, not absent".
+    ARCHIVE = "archive"
     OTHER = "other"
 
 
@@ -178,6 +181,34 @@ class EvaluationPolicy(StrictModel):
     reserve_independent_studies: bool = False
     holdout_unit: str | None = None
     prevent_lineage_leakage: bool = False
+
+
+class BundleSchema(StrictModel):
+    """One acceptable shape for a training-ready bundle.
+
+    A single flat list of required roles cannot express what these datasets
+    actually look like: standalone scATAC must not be asked for an RNA matrix,
+    and accessibility signal is equally usable as fragments or as a peak matrix.
+    ``required_role_groups`` is therefore a conjunction of disjunctions — every
+    group must be satisfied by at least one of its roles.
+    """
+
+    schema_id: str
+    label: str = ""
+    modalities: list[Modality] = Field(default_factory=list)
+    required_role_groups: list[list[DataRole]] = Field(default_factory=list)
+    preferred_roles: list[DataRole] = Field(default_factory=list)
+
+    def unmet_groups(self, observed_roles: set[DataRole]) -> list[list[DataRole]]:
+        """Return the role groups that no observed role satisfies."""
+        return [
+            group
+            for group in self.required_role_groups
+            if not set(group) & observed_roles
+        ]
+
+    def is_satisfied_by(self, observed_roles: set[DataRole]) -> bool:
+        return not self.unmet_groups(observed_roles)
 
 
 class ResearchRequirement(StrictModel):

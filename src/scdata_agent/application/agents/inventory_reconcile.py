@@ -18,8 +18,10 @@ from scdata_agent.domain.lifecycle import (
     SemanticBundle,
 )
 from scdata_agent.domain.models import (
-    AccessLevel, AssetAvailability, DataAsset, DataRole,
+    AccessLevel, AssetAvailability, DataAsset, DataRole, DatasetCandidate,
+    Modality,
 )
+from scdata_agent.domain.requirements import applicable_bundle_schemas
 from scdata_agent.domain.resource_pipeline import (
     AssetInventoryDelta,
     BundleAccessStatus,
@@ -76,18 +78,34 @@ class InventoryReconcileAgent:
             )
             if not candidate_assets:
                 continue
+            observed_roles = {item.role for item in candidate_assets}
+            # Judge the bundle against every shape it could legitimately take,
+            # not against the union of every modality mentioned in the question.
+            schemas = applicable_bundle_schemas(
+                self._candidate_modalities(candidate, context)
+            )
+            satisfied = [
+                schema.schema_id
+                for schema in schemas
+                if schema.is_satisfied_by(observed_roles)
+            ]
+            # `required_roles`/`missing_roles` stay populated for readers that
+            # predate schemas; they describe the closest schema, not the union.
+            closest = min(
+                schemas,
+                key=lambda item: len(item.unmet_groups(observed_roles)),
+                default=None,
+            )
             required_roles = (
-                context.requirement.required_data_roles
-                if context.requirement
-                and context.requirement.required_data_roles
+                [group[0] for group in closest.required_role_groups]
+                if closest is not None
                 else [DataRole.RAW_READS]
             )
-            observed_roles = {item.role for item in candidate_assets}
-            missing_roles = [
-                role
-                for role in required_roles
-                if role not in observed_roles
-            ]
+            missing_roles = (
+                [group[0] for group in closest.unmet_groups(observed_roles)]
+                if closest is not None
+                else [DataRole.RAW_READS]
+            )
             bundles.append(
                 SemanticBundle(
                     bundle_id=stable_id(
@@ -106,6 +124,9 @@ class InventoryReconcileAgent:
                     ],
                     required_roles=required_roles,
                     missing_roles=missing_roles,
+                    applicable_schema_ids=[item.schema_id for item in schemas],
+                    satisfied_schema_ids=satisfied,
+                    observed_roles=sorted(observed_roles, key=str),
                     status=BundleStatus.REMOTE_INVENTORIED,
                     evidence_ids=list(
                         dict.fromkeys(
@@ -218,6 +239,28 @@ class InventoryReconcileAgent:
                 ],
             )
         ]
+
+    @staticmethod
+    def _candidate_modalities(
+        candidate: DatasetCandidate, context: AgentContext
+    ) -> set[Modality]:
+        """Modalities this candidate actually declares, narrowed by the contract.
+
+        Assay profiles are preferred over the candidate's coarse modality list
+        because they carry a verified pairing level. The requirement only
+        restricts the result — it never adds a modality the candidate never
+        claimed, which is what made scATAC depositions look like multiome.
+        """
+        observed = {
+            modality
+            for profile in candidate.assay_profiles
+            for modality in profile.modalities
+        } or set(candidate.modalities)
+        acceptable = set(
+            (context.requirement.acceptable_modalities if context.requirement else [])
+            or (context.requirement.modalities if context.requirement else [])
+        )
+        return (observed & acceptable) or observed
 
     @staticmethod
     def _summarize(bundle, assets, candidate):

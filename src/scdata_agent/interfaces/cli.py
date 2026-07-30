@@ -188,6 +188,19 @@ def compile(
             )
         )
         return
+    degraded = [
+        item
+        for item in research_plan.planner_diagnostics
+        if "failed" in item or "timeout" in item.casefold()
+    ]
+    if degraded:
+        console.print(
+            "[yellow]warning:[/yellow] the planner fell back to a template; "
+            "this plan is not fully model-derived."
+        )
+        for item in degraded:
+            console.print(f"  [yellow]-[/yellow] {item}")
+        console.print()
     console.print("[bold]Research intent[/bold]")
     console.print(research_plan.intent.intent_summary)
     console.print("\n[bold]Recommended data and resources[/bold]")
@@ -206,6 +219,15 @@ def compile(
     console.print("\n[bold]Executable query plan[/bold]")
     for query in query_plan.queries:
         console.print(f"- {query.source}: {query.query}")
+    if query_plan.uncovered_sources:
+        console.print(
+            "\n[bold]Sources not covered by any adapter[/bold]\n"
+            f"{', '.join(query_plan.uncovered_sources)}"
+        )
+    if research_plan.planner_diagnostics:
+        console.print("\n[bold]Planner diagnostics[/bold]")
+        for item in research_plan.planner_diagnostics:
+            console.print(f"- {item}")
 
 
 @app.command()

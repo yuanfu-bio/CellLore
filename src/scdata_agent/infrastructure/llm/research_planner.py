@@ -447,10 +447,37 @@ def _fallback_compact_intent(question: str) -> CompactIntentDraft:
     )
 
 
+# Cues that a study is actually about disease mechanism or patient outcome.
+# Without one of these, adding clinical-cohort and spatial-validation needs to
+# the fallback plan invents requirements the researcher never asked for.
+_CLINICAL_CUES: tuple[str, ...] = (
+    "patient", "clinical", "cohort", "survival", "prognosis", "prognostic",
+    "treatment", "therapy", "therapeutic", "drug", "response", "outcome",
+    "disease", "tumor", "tumour", "cancer", "carcinoma", "diagnosis",
+    "biomarker", "trial", "relapse", "metastasis",
+    "\u60a3\u8005", "\u4e34\u5e8a", "\u961f\u5217", "\u751f\u5b58", "\u9884\u540e", "\u6cbb\u7597", "\u836f\u7269", "\u7597\u6548",
+    "\u75be\u75c5", "\u80bf\u7624", "\u764c", "\u8bca\u65ad", "\u6807\u5fd7\u7269", "\u590d\u53d1", "\u8f6c\u79fb",
+)
+
+
+def _mentions_clinical_outcomes(question: str, intent: CompactIntentDraft) -> bool:
+    haystack = " ".join(
+        [
+            question,
+            intent.intent_summary,
+            intent.primary_question,
+            *intent.scientific_objectives,
+            *intent.desired_outcomes,
+        ]
+    ).casefold()
+    return any(cue in haystack for cue in _CLINICAL_CUES)
+
+
 def _fallback_compact_strategy(
     question: str, intent: CompactIntentDraft
 ) -> CompactStrategyDraft:
     chinese = bool(re.search(r"[\u4e00-\u9fff]", question))
+    clinical = _mentions_clinical_outcomes(question, intent)
     metadata = list(
         dict.fromkeys([*intent.units_of_analysis, *intent.desired_outcomes])
     )[:6]
@@ -474,20 +501,26 @@ def _fallback_compact_strategy(
                 modalities=["scRNA-seq", "RNA+ATAC multiome"],
                 required_metadata=metadata,
             ),
-            CompactDataNeed(
-                name="独立临床结局验证队列",
-                data_type="带治疗响应和生存随访的bulk或多组学临床队列",
-                role="验证治疗响应和预后关联",
-                priority=NeedPriority.ESSENTIAL,
-                rationale="将机制发现与患者层面的可验证结局连接。",
-                required_metadata=["治疗方案", "治疗响应", "生存结局", "关键临床协变量"],
-            ),
-            CompactDataNeed(
-                name="空间或扰动正交验证数据",
-                data_type="空间组学或扰动实验数据",
-                role="验证空间生态位或因果方向",
-                priority=NeedPriority.SUPPORTING,
-                rationale="降低观察性关联被误解为机制或因果关系的风险。",
+            *(
+                [
+                    CompactDataNeed(
+                        name="独立临床结局验证队列",
+                        data_type="带治疗响应和生存随访的bulk或多组学临床队列",
+                        role="验证治疗响应和预后关联",
+                        priority=NeedPriority.ESSENTIAL,
+                        rationale="将机制发现与患者层面的可验证结局连接。",
+                        required_metadata=["治疗方案", "治疗响应", "生存结局", "关键临床协变量"],
+                    ),
+                    CompactDataNeed(
+                        name="空间或扰动正交验证数据",
+                        data_type="空间组学或扰动实验数据",
+                        role="验证空间生态位或因果方向",
+                        priority=NeedPriority.SUPPORTING,
+                        rationale="降低观察性关联被误解为机制或因果关系的风险。",
+                    ),
+                ]
+                if clinical
+                else []
             ),
         ]
         resources = [
@@ -498,17 +531,29 @@ def _fallback_compact_strategy(
             CompactAnalysisStep(title="定义可操作研究表型", objective="把抽象研究问题转成可证伪的状态、比较和结局定义。", outputs=["表型定义与证据问题"], success_criteria=["每个主要目标均有可观测指标"]),
             CompactAnalysisStep(title="发现并审计公共资源", objective="检索发现、验证和临床队列并核验元数据与访问条件。", inputs=[item.name for item in data_needs], outputs=["证据关联的候选资源清单"], success_criteria=["候选结论均有来源证据"]),
             CompactAnalysisStep(title="构建细胞状态与调控程序", objective="整合单细胞表观与转录信号，控制批次和研究来源。", methods=["跨研究协调", "细胞状态建模", "调控网络推断"], outputs=["候选状态和调控程序"]),
-            CompactAnalysisStep(title="独立临床和正交验证", objective="在独立队列验证关联，并用空间或扰动证据限定机制解释。", methods=["研究级留出", "临床协变量校正", "正交证据验证"], outputs=["泛化、响应和预后评估"]),
+            CompactAnalysisStep(title="独立验证与泛化评估", objective="在留出的独立研究上验证结论，并量化跨数据集泛化。", methods=["研究级留出", "跨数据集泛化评估"], outputs=["泛化评估报告"])
+            if not clinical
+            else CompactAnalysisStep(title="独立临床和正交验证", objective="在独立队列验证关联，并用空间或扰动证据限定机制解释。", methods=["研究级留出", "临床协变量校正", "正交证据验证"], outputs=["泛化、响应和预后评估"]),
         ]
-        assumptions = ["在用户补充具体疾病和研究范围前，先生成跨癌种候选方案。"]
+        assumptions = (
+            ["在用户补充具体疾病和研究范围前，先生成跨癌种候选方案。"]
+            if clinical
+            else ["问题未提及疾病或临床结局，因此未引入临床队列需求；如需请补充说明。"]
+        )
         uncertainties = ["语义数据策略分支未在交互延迟预算内完成；当前为可审计的推荐模板。"]
         rationale = "可以在显式假设下开始资源发现，并在获得元数据后收窄方案。"
     else:
         data_needs = [
             CompactDataNeed(name="Single-cell regulatory discovery cohorts", data_type="scATAC-seq or RNA+ATAC multiome", role="discover cell states and regulatory programs", priority=NeedPriority.ESSENTIAL, rationale="Resolve the phenotype at cell-state and regulatory-element level.", modalities=["scATAC-seq", "RNA+ATAC multiome"], required_metadata=metadata),
             CompactDataNeed(name="Transcriptomic state validation data", data_type="scRNA-seq or paired multiome RNA", role="validate expression and cell states", priority=NeedPriority.PREFERRED, rationale="Avoid functional claims based only on accessibility.", modalities=["scRNA-seq", "RNA+ATAC multiome"], required_metadata=metadata),
-            CompactDataNeed(name="Independent clinical-outcome cohorts", data_type="bulk or multi-omics cohorts with treatment and survival outcomes", role="validate response and prognosis", priority=NeedPriority.ESSENTIAL, rationale="Connect mechanistic findings to patient-level outcomes.", required_metadata=["treatment", "response", "survival", "clinical covariates"]),
-            CompactDataNeed(name="Spatial or perturbational validation", data_type="spatial omics or perturbation data", role="orthogonal validation", priority=NeedPriority.SUPPORTING, rationale="Limit causal over-interpretation of observational associations."),
+            *(
+                [
+                    CompactDataNeed(name="Independent clinical-outcome cohorts", data_type="bulk or multi-omics cohorts with treatment and survival outcomes", role="validate response and prognosis", priority=NeedPriority.ESSENTIAL, rationale="Connect mechanistic findings to patient-level outcomes.", required_metadata=["treatment", "response", "survival", "clinical covariates"]),
+                    CompactDataNeed(name="Spatial or perturbational validation", data_type="spatial omics or perturbation data", role="orthogonal validation", priority=NeedPriority.SUPPORTING, rationale="Limit causal over-interpretation of observational associations."),
+                ]
+                if clinical
+                else []
+            ),
         ]
         resources = [
             CompactResourceNeed(resource_type="literature and preprints", purpose="Define phenotypes, mechanisms, and linked data.", priority=NeedPriority.ESSENTIAL),
@@ -518,9 +563,15 @@ def _fallback_compact_strategy(
             CompactAnalysisStep(title="Operationalize the research phenotype", objective="Turn the research question into falsifiable states, comparisons, and outcomes.", outputs=["phenotype definitions and evidence questions"]),
             CompactAnalysisStep(title="Discover and audit public resources", objective="Find discovery, validation, and clinical cohorts and verify metadata.", inputs=[item.name for item in data_needs], outputs=["evidence-linked resource inventory"]),
             CompactAnalysisStep(title="Model cell states and regulatory programs", objective="Integrate epigenomic and transcriptomic evidence across studies.", outputs=["candidate states and regulatory programs"]),
-            CompactAnalysisStep(title="Perform independent clinical and orthogonal validation", objective="Test generalization, response, prognosis, and mechanistic limits.", outputs=["validated associations and uncertainty report"]),
+            CompactAnalysisStep(title="Evaluate independent generalization", objective="Validate on held-out studies and quantify cross-dataset generalization.", methods=["study-level holdout", "cross-dataset evaluation"], outputs=["generalization report"])
+            if not clinical
+            else CompactAnalysisStep(title="Perform independent clinical and orthogonal validation", objective="Test generalization, response, prognosis, and mechanistic limits.", outputs=["validated associations and uncertainty report"]),
         ]
-        assumptions = ["Use a broad disease scope until the user supplies a specific cohort definition."]
+        assumptions = (
+            ["Use a broad disease scope until the user supplies a specific cohort definition."]
+            if clinical
+            else ["The question names no disease or clinical outcome, so no clinical cohort need was added."]
+        )
         uncertainties = ["The semantic strategy branch exceeded the interactive budget; this is an auditable recommended template."]
         rationale = "Resource discovery can start under explicit assumptions and narrow after metadata review."
     return CompactStrategyDraft(

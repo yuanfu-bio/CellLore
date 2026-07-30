@@ -79,6 +79,8 @@ class AcquisitionStrategistAgent:
             manual_reasons: list[str] = []
             if report and report.decision == BundleStatus.NEEDS_EVIDENCE:
                 manual_reasons.append("preflight:needs_evidence")
+            if report and "archive:uninspected" in report.warnings:
+                manual_reasons.append("archive:uninspected")
             if summary is None or summary.access_status != BundleAccessStatus.VERIFIED:
                 manual_reasons.append(
                     f"access:{summary.access_status.value}" if summary else "access:unknown"
@@ -142,8 +144,13 @@ class AcquisitionStrategistAgent:
 
     @staticmethod
     def _score_components(bundle, report, summary) -> dict[str, float]:
+        # Each satisfiable schema is scored on its own terms. A bundle that
+        # fully satisfies standalone scATAC scores as well as one that
+        # satisfies multiome; breadth is rewarded separately and modestly.
+        satisfied = len(bundle.satisfied_schema_ids)
         return {
             "bundle_completeness": 30.0 if bundle.complete else 0.0,
+            "schema_breadth": min(satisfied, 2) * 5.0 if satisfied > 1 else 0.0,
             "license": 20.0 if report and report.license_status == LicenseStatus.APPROVED else 0.0,
             "verified_access": 20.0 if summary and summary.access_status == BundleAccessStatus.VERIFIED else 0.0,
             "preflight": 15.0 if report and report.decision == BundleStatus.PREFLIGHT_READY else 0.0,

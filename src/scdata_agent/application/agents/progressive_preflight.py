@@ -15,7 +15,7 @@ from scdata_agent.domain.lifecycle import (
     PreflightBundleReport,
     SemanticBundle,
 )
-from scdata_agent.domain.models import AccessLevel, DataAsset, GateStatus
+from scdata_agent.domain.models import AccessLevel, DataAsset, DataRole, GateStatus
 from scdata_agent.domain.resource_pipeline import (
     BundleAccessStatus,
     EvidenceEscalationReport,
@@ -194,6 +194,15 @@ class ProgressivePreflightAssessmentAgent:
                 hard_blockers.append("modality:mismatch")
             if license_status == LicenseStatus.RESTRICTED:
                 hard_blockers.append("license:restricted")
+            # An archive's payload cannot be identified without downloading it,
+            # so an archive-only bundle is "contents unknown", not "roles
+            # absent". Saying the latter would be a claim we never verified.
+            archive_assets = [
+                item for item in bundle_assets if item.role == DataRole.ARCHIVE
+            ]
+            archive_only = bool(bundle_assets) and len(archive_assets) == len(
+                bundle_assets
+            )
             warnings = []
             if access_status != BundleAccessStatus.VERIFIED:
                 warnings.append(f"access:{access_status.value}")
@@ -202,7 +211,11 @@ class ProgressivePreflightAssessmentAgent:
             if license_status == LicenseStatus.UNKNOWN:
                 warnings.append("license:unknown")
             if not bundle.complete:
-                warnings.append("bundle:missing_roles")
+                warnings.append(
+                    "archive:uninspected" if archive_only else "bundle:missing_roles"
+                )
+            elif archive_assets:
+                warnings.append("archive:uninspected")
             if unresolved_evidence:
                 warnings.append("evidence:unresolved")
             if hard_blockers:
@@ -240,6 +253,20 @@ class ProgressivePreflightAssessmentAgent:
                         ", ".join(unresolved_evidence)
                         if unresolved_evidence
                         else "none"
+                    ),
+                    "bundle_schema": (
+                        "Satisfies "
+                        f"{', '.join(bundle.satisfied_schema_ids)}"
+                        if bundle.satisfied_schema_ids
+                        else (
+                            "Contents are archived and were not opened; "
+                            "completeness is unknown, not disproven."
+                            if archive_only
+                            else "Satisfies none of "
+                            f"{', '.join(bundle.applicable_schema_ids) or 'n/a'}; "
+                            f"observed roles: "
+                            f"{', '.join(str(item) for item in bundle.observed_roles) or 'none'}"
+                        )
                     ),
                 },
                 license_status=license_status,

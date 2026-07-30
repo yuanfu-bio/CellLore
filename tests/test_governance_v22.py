@@ -117,3 +117,53 @@ async def test_acquisition_uses_representative_manual_and_excluded_tiers(tmp_pat
     assert payload["recommended_bundle_ids"] == ["bundle_a"]
     assert payload["manual_review_bundle_ids"] == ["bundle_b"]
     assert payload["excluded_bundle_ids"] == ["bundle_c"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_license_alone_holds_back_an_otherwise_ready_bundle(tmp_path):
+    """The licence gate is what keeps GEO data out of the recommended tier.
+
+    GEO and SRA publish no structured licence field, so a bundle can be
+    complete, access-verified and preflight-ready and still be held in manual
+    review on `license:unknown` alone. This pins that behaviour so the reason a
+    run recommends nothing stays visible rather than being mistaken for a bug.
+    """
+    candidates = [DatasetCandidate(candidate_id="a", title="a")]
+    ctx = context(tmp_path, candidates)
+    bundle = SemanticBundle(
+        bundle_id="bundle_a", candidate_id="a", bundle_type="processed",
+        asset_ids=["asset_a"], applicable_schema_ids=["scatac_standalone"],
+        satisfied_schema_ids=["scatac_standalone"],
+    )
+    summary = RemoteBundleInventorySummary(
+        summary_id="summary_a", bundle_id="bundle_a", candidate_id="a",
+        access_status=BundleAccessStatus.VERIFIED, asset_count=1,
+        verified_asset_count=1, known_bytes=10, total_bytes=10,
+    )
+
+    async def plan_with(license_status):
+        local = context(tmp_path, candidates)
+        report = PreflightBundleReport(
+            report_id="report_a", bundle_id="bundle_a", candidate_id="a",
+            dimensions={}, license_status=license_status, expected_bytes=10,
+            access_status=summary.access_status.value,
+            decision=BundleStatus.PREFLIGHT_READY,
+        )
+        local.artifacts.extend([
+            artifact("run_1", ArtifactKind.ASSET_INVENTORY, AgentName.ASSET_SCOUT,
+                     {"assets": [], "bundles": [bundle.model_dump(mode="json")],
+                      "bundle_summaries": [summary.model_dump(mode="json")]}),
+            artifact("run_1", ArtifactKind.PREFLIGHT_REPORT, AgentName.PREFLIGHT_ASSESSMENT,
+                     {"reports": [report.model_dump(mode="json")]}),
+        ])
+        return (await AcquisitionStrategistAgent().run(local))[0].payload
+
+    unknown = await plan_with(LicenseStatus.UNKNOWN)
+    assert unknown["recommended_bundle_ids"] == []
+    assert unknown["manual_review_bundle_ids"] == ["bundle_a"]
+    assert unknown["bundles"][0]["risks"] == ["license:unknown"]
+
+    # Asserting the licence is the only change needed to reach `recommended`.
+    approved = await plan_with(LicenseStatus.APPROVED)
+    assert approved["recommended_bundle_ids"] == ["bundle_a"]
+    assert approved["bundles"][0]["risks"] == []

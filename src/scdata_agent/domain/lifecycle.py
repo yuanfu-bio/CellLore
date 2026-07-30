@@ -205,11 +205,22 @@ class SemanticBundle(StrictModel):
     missing_roles: list[DataRole] = Field(default_factory=list)
     status: BundleStatus = BundleStatus.REMOTE_INVENTORIED
     evidence_ids: list[str] = Field(default_factory=list)
+    # Alternative bundle shapes this candidate could satisfy, and the ones it
+    # actually does. Satisfying any one schema makes the bundle complete, so a
+    # standalone scATAC study is not judged against multiome requirements.
+    applicable_schema_ids: list[str] = Field(default_factory=list)
+    satisfied_schema_ids: list[str] = Field(default_factory=list)
+    observed_roles: list[DataRole] = Field(default_factory=list)
     schema_version: str = SCHEMA_VERSION
 
     @property
     def complete(self) -> bool:
-        return bool(self.asset_ids) and not self.missing_roles
+        if not self.asset_ids:
+            return False
+        if self.applicable_schema_ids:
+            return bool(self.satisfied_schema_ids)
+        # Bundles built before schema evaluation keep the flat-role semantics.
+        return not self.missing_roles
 
 
 class PreflightBundleReport(StrictModel):

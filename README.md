@@ -10,8 +10,8 @@ observed remote file manifests, and produces an auditable acquisition plan — *
 at a human approval gate before a single byte is downloaded.**
 
 > **Status: alpha / research prototype.** The pipeline runs end to end against live
-> public APIs, but the bundle-completeness logic has known gaps that currently prevent
-> it from auto-recommending datasets. See [Known limitations](#known-limitations).
+> public APIs. Read [Known limitations](#known-limitations) before trusting its
+> output — several classes of dataset are still deliberately routed to human review.
 
 ---
 
@@ -74,6 +74,25 @@ flowchart TD
     gate2 --> fin
     fin --> END([end])
 ```
+
+### Bundle schemas
+
+A candidate is judged against the shapes it could legitimately take, not against
+the union of everything the research question mentioned. Each schema
+(`domain/requirements.py::BUNDLE_SCHEMAS`) lists **role groups**: a conjunction of
+disjunctions, where every group must be satisfied by at least one of its roles.
+Satisfying *any one* schema makes a bundle complete.
+
+| Schema | Applies to | Requires |
+|---|---|---|
+| `scatac_standalone` | scATAC, snATAC | accessibility signal + a cell axis — **not** an RNA matrix |
+| `multiome_rna_atac` | multiome, matched RNA/ATAC | accessibility + RNA matrix + per-cell linkage |
+| `atac_protein` | ASAP-seq, ISSAAC-seq | accessibility + protein matrix + a cell axis |
+| `raw_reads` | any | FASTQ (legitimate but expensive input) |
+
+"Accessibility signal" is satisfied by fragments **or** a peak matrix **or** a joint
+AnnData/MuData object, which is why the groups are disjunctions. This is what stops a
+standalone scATAC study from being marked incomplete for lacking multiome files.
 
 Package layout follows a strict dependency direction, asserted by
 `tests/test_architecture.py`:
@@ -146,35 +165,29 @@ highest-value contribution right now — see [Roadmap](#roadmap).
 
 ## Known limitations
 
-Measured on a real end-to-end run (17 candidates from Europe PMC + GEO + SRA,
-12 semantic bundles, all remote manifests verified with live HTTP probes):
-
-**Every bundle landed in `manual_review`; `recommended` was 0.** Two independent
-defects compound to produce this, and both must be fixed before the acquisition tier
-is trustworthy:
-
-1. **Bundle completeness uses one flat role list.** `agents/inventory_reconcile.py`
-   applies `requirement.required_data_roles` to *every* candidate regardless of its
-   modality. When a question mentions both scATAC and multiome, the compiler unions
-   their roles, so a pure scATAC dataset is wrongly required to ship an RNA matrix and
-   barcode linkage. Fix requires per-modality bundle schemas with OR-semantics role
-   groups, scored independently.
-2. **File-role inference is too narrow.** `domain/assets.py::ROLE_PATTERNS` does not
-   recognise `.h5`, `.tar`/`.zip` archives, the 10x MTX triplet, `.tbi.gz`, or
-   `.h5ad.gz`, so most real GEO/ENA payloads fall through to `other`. Archives in
-   particular need a dedicated role — their contents are not remotely inspectable and
-   should surface as an explicit warning, not a silent completeness failure.
-
-Additional known rough edges:
-
-- **Licence status is almost always `unknown`.** GEO/SRA expose no structured licence
-  field, and the agent refuses to guess. This is deliberate but needs an auditable
-  policy/allowlist to be practical.
-- **The planner's offline fallback is domain-skewed.** When the LLM strategy branch
-  exceeds its latency budget, a hardcoded disease-mechanism template takes over and
-  injects clinical-outcome and spatial-validation needs that are irrelevant to a
-  methods-oriented project. Check `planner_diagnostics` for
-  `planner:fast_strategy_failed` to detect this.
+- **Archived supplementary files cannot be assessed remotely.** A large share of GEO
+  depositions ship a single `GSExxxxx_RAW.tar`. Its contents are unknowable without
+  downloading, so such bundles are labelled `archive:uninspected` and routed to human
+  review rather than being scored as complete or incomplete. Extracting archive
+  manifests post-transfer is not implemented.
+- **Licence status is almost always `unknown`, and this is the binding constraint.**
+  GEO/SRA expose no structured licence field and the agent refuses to guess, so in
+  practice nothing reaches the `recommended` tier on its own: a measured run ended
+  with a bundle that was preflight-ready, access-verified and complete, held back
+  solely by `license:unknown`. Asserting the licence for a candidate via the
+  `approved_license_candidate_ids` policy moves it to `recommended` with a clean risk
+  list. A general, auditable licence policy is the highest-value fix in the roadmap.
+- **Role inference is filename-based.** It recognises 10x, SNARE-seq and ENA
+  conventions (see `tests/test_role_inference.py`), but a deposition using
+  idiosyncratic names will under-report its roles. Inference never guesses: an
+  unrecognised file stays unclassified rather than being assigned a plausible role.
+- **Only five repositories are wired up.** ENCODE, CELLxGENE, Single Cell Portal and
+  HCA — arguably the most valuable sources for this problem — are not implemented and
+  are reported in `QueryPlan.uncovered_sources`.
+- **The offline planner fallback is a template.** If the model's strategy branch
+  exceeds `SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS` (default 30s), a deterministic
+  template takes over. The CLI prints a warning when this happens; the plan is still
+  auditable but is not model-derived.
 
 ## Configuration
 
@@ -211,9 +224,11 @@ Optional AnnData/MuData inspection support: `pip install -e '.[dev,curation]'`.
 
 Ordered by value to a single-cell epigenomics foundation-model corpus:
 
-1. Fix the two bundle-completeness defects above so acquisition can recommend.
+1. Make licence resolution auditable instead of uniformly `unknown`. This currently
+   gates the entire `recommended` tier, so it unblocks everything else.
 2. Add ENCODE, CELLxGENE, Single Cell Portal, HCA and BioStudies/ArrayExpress adapters.
-3. Make licence resolution auditable instead of uniformly `unknown`.
+3. Read archive manifests after transfer so `archive:uninspected` bundles can be
+   assessed instead of parked in manual review.
 4. Preserve the semantic relation of every extracted accession
    (`primary_data_deposition` vs `reused_dataset` vs `supplementary_reference`).
 5. Normalised donor/sample/cell entities with ontology IDs, so lineage can move beyond

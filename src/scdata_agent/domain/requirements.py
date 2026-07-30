@@ -5,12 +5,99 @@ from __future__ import annotations
 import re
 
 from scdata_agent.domain.models import (
+    BundleSchema,
     DataRole,
     Modality,
     QueryPlan,
     QuerySpec,
     ResearchRequirement,
 )
+
+
+# An AnnData/MuData object carries the matrix and the cell axis together, so it
+# satisfies any group it appears in. Naming it once keeps that intent explicit.
+_ACCESSIBILITY = [DataRole.FRAGMENTS, DataRole.PEAK_MATRIX, DataRole.STANDARD_OBJECT]
+# A cell-by-feature matrix cannot exist without cell identifiers, so it defines
+# the cell axis on its own; a separate metadata table is a bonus, not a gate.
+_CELL_AXIS = [
+    DataRole.CELL_METADATA,
+    DataRole.STANDARD_OBJECT,
+    DataRole.PEAK_MATRIX,
+    DataRole.RNA_MATRIX,
+]
+
+BUNDLE_SCHEMAS: tuple[BundleSchema, ...] = (
+    BundleSchema(
+        schema_id="scatac_standalone",
+        label="Standalone single-cell ATAC",
+        modalities=[Modality.SCATAC, Modality.SNATAC],
+        # Deliberately does NOT require an RNA matrix or barcode linkage:
+        # a standalone scATAC study has neither and is still training-ready.
+        required_role_groups=[_ACCESSIBILITY, _CELL_AXIS],
+        preferred_roles=[
+            DataRole.FRAGMENT_INDEX, DataRole.PEAKS,
+            DataRole.QC_METRICS, DataRole.SAMPLE_METADATA,
+        ],
+    ),
+    BundleSchema(
+        schema_id="multiome_rna_atac",
+        label="Joint RNA + ATAC in the same cell or nucleus",
+        modalities=[
+            Modality.MULTIOME_RNA_ATAC,
+            Modality.MATCHED_SCRNA_SCATAC,
+            Modality.MULTIOME_RNA_ATAC_PROTEIN,
+        ],
+        required_role_groups=[
+            _ACCESSIBILITY,
+            [DataRole.RNA_MATRIX, DataRole.STANDARD_OBJECT],
+            # Same-cell assays link modalities by construction; an explicit map
+            # or a joint object both count as evidence of that linkage.
+            [DataRole.BARCODE_LINKAGE, DataRole.CELL_METADATA, DataRole.STANDARD_OBJECT],
+        ],
+        preferred_roles=[
+            DataRole.FRAGMENT_INDEX, DataRole.PEAKS,
+            DataRole.QC_METRICS, DataRole.SAMPLE_METADATA,
+        ],
+    ),
+    BundleSchema(
+        schema_id="atac_protein",
+        label="ATAC + surface protein",
+        modalities=[Modality.MULTIOME_ATAC_PROTEIN],
+        required_role_groups=[
+            _ACCESSIBILITY,
+            [DataRole.PROTEIN_MATRIX, DataRole.STANDARD_OBJECT],
+            _CELL_AXIS,
+        ],
+        preferred_roles=[DataRole.QC_METRICS, DataRole.SAMPLE_METADATA],
+    ),
+    BundleSchema(
+        schema_id="raw_reads",
+        label="Raw sequencing reads requiring reprocessing",
+        # Applies to any modality: FASTQ is a legitimate, if expensive, input.
+        modalities=[],
+        required_role_groups=[[DataRole.RAW_READS]],
+        preferred_roles=[DataRole.SAMPLE_METADATA],
+    ),
+)
+
+
+def applicable_bundle_schemas(
+    modalities: list[Modality] | set[Modality],
+) -> list[BundleSchema]:
+    """Select the schemas a candidate could plausibly satisfy.
+
+    A schema with no declared modality (``raw_reads``) always applies. When the
+    candidate declares no modality at all, every schema is offered rather than
+    none, so an unlabelled deposition is judged on what it actually contains.
+    """
+    observed = set(modalities)
+    if not observed:
+        return list(BUNDLE_SCHEMAS)
+    return [
+        schema
+        for schema in BUNDLE_SCHEMAS
+        if not schema.modalities or observed & set(schema.modalities)
+    ]
 
 
 ORGANISM_ALIASES: dict[str, tuple[str, ...]] = {
