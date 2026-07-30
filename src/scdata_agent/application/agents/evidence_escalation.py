@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from scdata_agent.application.agents.shared import AgentContext, need_discovery
+from scdata_agent.application.agents.shared import (
+    AgentContext,
+    candidate_modalities,
+    need_discovery,
+)
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.resource_pipeline import pointer_batches
 from scdata_agent.domain.identifiers import stable_id
@@ -64,14 +68,18 @@ class EvidenceEscalationAgent:
         records = {
             item.record_id: item for item in discovery.source_records
         }
-        paired_required = bool(
-            context.requirement
-            and set(context.requirement.modalities) & _PAIRED_MODALITIES
-        )
         decisions: list[CandidateEvidenceEscalation] = []
         for candidate in discovery.candidates:
             unresolved: list[str] = []
             reasons: list[str] = []
+            # Pairing evidence is only owed by candidates that actually claim a
+            # paired assay. Deriving this from the question's union of
+            # modalities asked standalone scATAC studies to prove a multiome
+            # relationship they never asserted, and sent them for full text.
+            paired_required = bool(
+                candidate_modalities(candidate, context.requirement)
+                & _PAIRED_MODALITIES
+            )
             if not direct_by_candidate[candidate.candidate_id]:
                 unresolved.append("repository_pointer")
                 reasons.append(

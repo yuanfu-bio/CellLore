@@ -242,6 +242,8 @@ class ProgressivePreflightAssessmentAgent:
                 )
             elif archive_assets:
                 warnings.append("archive:uninspected")
+            if summary is not None and summary.inventory_truncated:
+                warnings.append("inventory:truncated")
             if unresolved_evidence:
                 warnings.append("evidence:unresolved")
             if hard_blockers:
@@ -291,6 +293,15 @@ class ProgressivePreflightAssessmentAgent:
                         ", ".join(unresolved_evidence)
                         if unresolved_evidence
                         else "none"
+                    ),
+                    "inventory_completeness": (
+                        "Listing cut short by the asset budget for: "
+                        f"{', '.join(summary.truncated_resolvers)}. The asset "
+                        "set is a subset of the repository's holdings and the "
+                        "reported size is a lower bound; raise --max-assets to "
+                        "enumerate the rest."
+                        if summary is not None and summary.inventory_truncated
+                        else "Remote listings were enumerated in full."
                     ),
                     "bundle_schema": (
                         "Satisfies "

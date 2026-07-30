@@ -112,6 +112,15 @@ mamba run -n scdata-agent scdata-agent agent-run \
   --remote-probe
 ```
 
+Raise the per-repository enumeration budget for very large depositions. A study
+that exceeds it is flagged `inventory:truncated` and its size is reported as a
+lower bound:
+
+```bash
+mamba run -n scdata-agent scdata-agent agent-run 'research question' \
+  --max-assets 5000 --database var/scdata_agent.sqlite
+```
+
 By default a bundle with no declared licence may be admitted on the published
 terms of the archive serving it, with the basis recorded for audit. Require a
 declared, allowlisted licence instead:

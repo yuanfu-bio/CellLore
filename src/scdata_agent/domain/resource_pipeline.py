@@ -48,6 +48,11 @@ class RemoteBundleInventorySummary(StrictModel):
     known_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     unknown_size_asset_count: int = Field(default=0, ge=0)
+    # True when some adapter's listing was cut short: the asset set is a subset
+    # of what the repository holds, so total_bytes is withheld rather than
+    # reported as a figure that is certain to be too low.
+    inventory_truncated: bool = False
+    truncated_resolvers: list[str] = Field(default_factory=list)
     role_counts: dict[str, int] = Field(default_factory=dict)
     file_type_counts: dict[str, int] = Field(default_factory=dict)
     media_type_counts: dict[str, int] = Field(default_factory=dict)
@@ -75,6 +80,9 @@ class AssetInventoryDelta(StrictModel):
     assets: list[DataAsset] = Field(default_factory=list)
     observations: list[RemoteAssetObservation] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    # Candidate ID -> adapters whose listing was cut short by a budget. Kept
+    # per candidate because completeness is judged per bundle downstream.
+    truncated_by_candidate: dict[str, list[str]] = Field(default_factory=dict)
     schema_version: str = RESOURCE_PIPELINE_SCHEMA_VERSION
 
 

@@ -67,6 +67,19 @@ def agent_run(
     remote_probe: Annotated[
         bool, typer.Option("--remote-probe/--no-remote-probe")
     ] = True,
+    max_assets: Annotated[
+        int,
+        typer.Option(
+            "--max-assets",
+            min=1,
+            max=100000,
+            help=(
+                "Per-repository cap on files enumerated for one dataset. A "
+                "study whose listing exceeds it is marked inventory:truncated "
+                "and its reported size becomes a lower bound."
+            ),
+        ),
+    ] = 500,
     strict_license: Annotated[
         bool,
         typer.Option(
@@ -94,6 +107,7 @@ def agent_run(
             "remote_probe_enabled": remote_probe,
             "approved_license_ids": approved_license_id or [],
             "strict_license": strict_license,
+            "max_assets": max_assets,
         },
     )
     supervisor = MultiAgentSupervisor(ledger, str(database), trace_mode=trace_mode)

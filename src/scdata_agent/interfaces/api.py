@@ -25,6 +25,9 @@ class CreateRunRequest(BaseModel):
     # When false, an archive's published terms of use stand in for a missing
     # per-record licence, and the basis is recorded on the preflight report.
     strict_license: bool = False
+    # Per-repository cap on files enumerated for one dataset. Exceeding it
+    # marks the bundle inventory:truncated rather than silently under-reporting.
+    max_assets: int = Field(default=500, ge=1, le=100_000)
     enable_fulltext_enrichment: bool = True
     max_fulltexts: int = Field(default=5, ge=0, le=100)
     remote_probe_enabled: bool = True
@@ -64,6 +67,7 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             "max_fulltexts": request.max_fulltexts,
             "approved_license_ids": request.approved_license_ids,
             "strict_license": request.strict_license,
+            "max_assets": request.max_assets,
             "remote_probe_enabled": request.remote_probe_enabled,
             "remote_probe_concurrency": request.remote_probe_concurrency,
             "remote_probe_timeout_seconds": request.remote_probe_timeout_seconds,

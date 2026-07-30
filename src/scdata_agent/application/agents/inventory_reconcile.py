@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import PurePosixPath
 
-from scdata_agent.application.agents.shared import AgentContext, need_discovery
+from scdata_agent.application.agents.shared import (
+    AgentContext,
+    candidate_modalities,
+    need_discovery,
+)
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.resource_pipeline import (
     merge_pointers,
@@ -18,8 +22,7 @@ from scdata_agent.domain.lifecycle import (
     SemanticBundle,
 )
 from scdata_agent.domain.models import (
-    AccessLevel, AssetAvailability, DataAsset, DataRole, DatasetCandidate,
-    Modality,
+    AccessLevel, AssetAvailability, DataAsset, DataRole,
 )
 from scdata_agent.domain.requirements import applicable_bundle_schemas
 from scdata_agent.domain.resource_pipeline import (
@@ -82,7 +85,7 @@ class InventoryReconcileAgent:
             # Judge the bundle against every shape it could legitimately take,
             # not against the union of every modality mentioned in the question.
             schemas = applicable_bundle_schemas(
-                self._candidate_modalities(candidate, context)
+                candidate_modalities(candidate, context.requirement)
             )
             satisfied = [
                 schema.schema_id
@@ -148,10 +151,20 @@ class InventoryReconcileAgent:
         candidate_by_id = {
             item.candidate_id: item for item in discovery.candidates
         }
+        # Truncation is a property of the whole run's scouting, so union the
+        # phases: a listing cut short in the direct phase stays partial even if
+        # the enriched phase completed.
+        truncated_by_candidate: dict[str, list[str]] = {}
+        for delta in deltas:
+            for candidate_id, names in delta.truncated_by_candidate.items():
+                truncated_by_candidate.setdefault(candidate_id, []).extend(names)
         summaries = [
             self._summarize(
                 bundle, assets_by_candidate[bundle.candidate_id],
                 candidate_by_id[bundle.candidate_id],
+                list(dict.fromkeys(
+                    truncated_by_candidate.get(bundle.candidate_id, [])
+                )),
             )
             for bundle in bundles
         ]
@@ -241,29 +254,7 @@ class InventoryReconcileAgent:
         ]
 
     @staticmethod
-    def _candidate_modalities(
-        candidate: DatasetCandidate, context: AgentContext
-    ) -> set[Modality]:
-        """Modalities this candidate actually declares, narrowed by the contract.
-
-        Assay profiles are preferred over the candidate's coarse modality list
-        because they carry a verified pairing level. The requirement only
-        restricts the result — it never adds a modality the candidate never
-        claimed, which is what made scATAC depositions look like multiome.
-        """
-        observed = {
-            modality
-            for profile in candidate.assay_profiles
-            for modality in profile.modalities
-        } or set(candidate.modalities)
-        acceptable = set(
-            (context.requirement.acceptable_modalities if context.requirement else [])
-            or (context.requirement.modalities if context.requirement else [])
-        )
-        return (observed & acceptable) or observed
-
-    @staticmethod
-    def _summarize(bundle, assets, candidate):
+    def _summarize(bundle, assets, candidate, truncated_resolvers=None):
         locations = [location for asset in assets for location in asset.locations[:1]]
         verified = sum(
             location.availability == AssetAvailability.OBSERVED
@@ -291,6 +282,7 @@ class InventoryReconcileAgent:
         sizes = [location.size_bytes for location in locations]
         known_bytes = sum(size for size in sizes if size is not None)
         unknown_sizes = len(assets) - sum(size is not None for size in sizes)
+        truncated = list(truncated_resolvers or [])
         return RemoteBundleInventorySummary(
             summary_id=stable_id("remote_bundle_summary", bundle.bundle_id),
             bundle_id=bundle.bundle_id,
@@ -303,8 +295,15 @@ class InventoryReconcileAgent:
             unknown_asset_count=unknown,
             auth_required_asset_count=auth,
             known_bytes=known_bytes,
-            total_bytes=known_bytes if unknown_sizes == 0 else None,
+            # Withheld when the listing was truncated: summing a subset would
+            # report a figure guaranteed to be too low as though it were the
+            # bundle's size. known_bytes still carries the lower bound.
+            total_bytes=(
+                known_bytes if unknown_sizes == 0 and not truncated else None
+            ),
             unknown_size_asset_count=unknown_sizes,
+            inventory_truncated=bool(truncated),
+            truncated_resolvers=truncated,
             role_counts=dict(Counter(asset.role.value for asset in assets)),
             file_type_counts=dict(Counter(InventoryReconcileAgent._file_type(asset.file_name) for asset in assets)),
             media_type_counts=dict(Counter(asset.media_type or "unknown" for asset in assets)),

@@ -67,6 +67,7 @@ class ProgressiveAssetScoutAgent:
         assets: list[DataAsset] = []
         observations: list[RemoteAssetObservation] = []
         errors: list[str] = []
+        truncated_by_candidate: dict[str, list[str]] = {}
 
         for candidate in discovery.candidates:
             candidate_pointers = by_candidate.get(
@@ -95,6 +96,10 @@ class ProgressiveAssetScoutAgent:
                     f"{candidate.candidate_id}: {message}"
                     for message in resolution.errors
                 )
+                if resolution.truncated_resolvers:
+                    truncated_by_candidate[candidate.candidate_id] = (
+                        resolution.truncated_resolvers
+                    )
             unsupported = [
                 pointer
                 for pointer in candidate_pointers
@@ -137,6 +142,7 @@ class ProgressiveAssetScoutAgent:
             assets=assets,
             observations=observations,
             errors=errors,
+            truncated_by_candidate=truncated_by_candidate,
         )
         return [
             artifact(

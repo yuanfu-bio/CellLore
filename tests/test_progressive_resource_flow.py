@@ -22,6 +22,7 @@ from scdata_agent.domain.models import (
     DatasetCandidate,
     DiscoveryRunResult,
     Identifier,
+    Modality,
     QueryPlan,
     ResearchRequirement,
     SourceRecord,
@@ -271,4 +272,81 @@ async def test_native_repository_metadata_does_not_require_fulltext(
 
     assert report.fulltext_candidate_ids == []
     assert report.candidates[0].unresolved_fields == []
+
+
+async def _pairing_escalation(tmp_path, candidate_modalities):
+    """Escalate one candidate against a question naming BOTH scATAC and multiome."""
+    requirement = ResearchRequirement(
+        question="scATAC-seq and multiome for representation learning",
+        modalities=[Modality.SCATAC, Modality.MULTIOME_RNA_ATAC],
+        acceptable_modalities=[Modality.SCATAC, Modality.MULTIOME_RNA_ATAC],
+    )
+    candidate = DatasetCandidate(
+        candidate_id="candidate_1",
+        title="Repository dataset",
+        modalities=candidate_modalities,
+        identifiers=[Identifier(namespace="geo_series", value="GSE1")],
+        source_record_ids=["record_1"],
+    )
+    record = SourceRecord(
+        record_id="record_1", source_name="ncbi_geo", external_id="GSE1",
+        title="Repository dataset",
+        identifiers=[Identifier(namespace="geo_series", value="GSE1")],
+    )
+    discovery = DiscoveryRunResult(
+        run_id="discovery_1", requirement=requirement,
+        query_plan=QueryPlan(requirement=requirement, queries=[]),
+        source_records=[record], candidates=[candidate], feasibility_reports=[],
+    )
+    context = _context(tmp_path, discovery, requirement)
+    batch = ResourcePointerBatch(
+        batch_id="batch_1", run_id=context.run_id,
+        stage=PointerBatchStage.DISCOVERY,
+        pointers=[ResourcePointer(
+            pointer_id="pointer_1", candidate_id="candidate_1",
+            namespace="geo_series", locator="GSE1", source_name="ncbi_geo",
+            status=PointerStatus.REPORTED, origin_stage="discovery",
+        )],
+    )
+    context.artifacts.extend([
+        artifact(context.run_id, ArtifactKind.RESOURCE_POINTERS,
+                 EvidenceEscalationAgent.name, batch.model_dump(mode="json")),
+        artifact(context.run_id, ArtifactKind.ASSET_INVENTORY_DELTA,
+                 EvidenceEscalationAgent.name,
+                 AssetInventoryDelta(
+                     inventory_id="delta_1", run_id=context.run_id,
+                     phase=ScoutPhase.DIRECT, consumed_pointer_ids=["pointer_1"],
+                     assets=[{
+                         "asset_id": "asset_1", "candidate_id": "candidate_1",
+                         "role": "chromatin_fragments",
+                         "file_name": "fragments.tsv.gz", "locations": [],
+                     }],
+                 ).model_dump(mode="json")),
+    ])
+    outputs = await EvidenceEscalationAgent().run(context)
+    return EvidenceEscalationReport.model_validate(outputs[0].payload)
+
+
+@pytest.mark.asyncio
+async def test_standalone_scatac_is_not_asked_to_prove_multiome_pairing(tmp_path):
+    """Pairing is owed by candidates that claim a paired assay, not by the question.
+
+    Deriving this from the requirement's union of modalities made standalone
+    scATAC depositions carry an unresolvable `multiome_pairing` field, which
+    held them at needs_evidence and sent them for open full text.
+    """
+    report = await _pairing_escalation(
+        tmp_path, [Modality.SCATAC, Modality.SCRNA]
+    )
+
+    assert "multiome_pairing" not in report.candidates[0].unresolved_fields
+    assert report.fulltext_candidate_ids == []
+
+
+@pytest.mark.asyncio
+async def test_a_multiome_candidate_still_owes_pairing_evidence(tmp_path):
+    """Guard against over-correcting: real multiome must still be challenged."""
+    report = await _pairing_escalation(tmp_path, [Modality.MULTIOME_RNA_ATAC])
+
+    assert "multiome_pairing" in report.candidates[0].unresolved_fields
 

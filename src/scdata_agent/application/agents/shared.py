@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from scdata_agent.application.collaboration import AgentArtifact, AgentName, CollaborationLedger
-from scdata_agent.domain.models import DiscoveryRunResult, ResearchRequirement
+from scdata_agent.domain.models import (
+    DatasetCandidate,
+    DiscoveryRunResult,
+    Modality,
+    ResearchRequirement,
+)
 from scdata_agent.domain.planning import ResearchPlan
 from scdata_agent.infrastructure.persistence.catalog import Catalog
 
@@ -46,6 +51,29 @@ def need_discovery(context: AgentContext) -> DiscoveryRunResult:
     if context.discovery is None:
         raise RuntimeError("Discovery result is required for this agent.")
     return context.discovery
+
+
+def candidate_modalities(
+    candidate: DatasetCandidate, requirement: ResearchRequirement | None
+) -> set[Modality]:
+    """Modalities this candidate actually declares, narrowed by the contract.
+
+    Assay profiles are preferred over the candidate's coarse modality list
+    because they carry a verified pairing level. The requirement only narrows
+    the result — it never adds a modality the candidate never claimed. Applying
+    the question's union of modalities to every candidate is what made
+    standalone scATAC depositions get judged as though they were multiome.
+    """
+    observed = {
+        modality
+        for profile in candidate.assay_profiles
+        for modality in profile.modalities
+    } or set(candidate.modalities)
+    acceptable = set(
+        (requirement.acceptable_modalities if requirement else [])
+        or (requirement.modalities if requirement else [])
+    )
+    return (observed & acceptable) or observed
 
 
 def lineage_map(artifacts: list[AgentArtifact]) -> dict[str, list[str]]:

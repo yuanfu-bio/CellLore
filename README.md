@@ -203,6 +203,10 @@ highest-value contribution right now — see [Roadmap](#roadmap).
 - **Archives are the remaining brake on the `recommended` tier.** In a measured run
   the top bundle reaches `recommended` on archive terms with an empty risk list, but
   the next one is held at `archive:uninspected` alone.
+- **Very large depositions are enumerated only up to a budget.** `--max-assets`
+  (default 500) caps how many files are listed *per repository*. A study that exceeds
+  it is flagged `inventory:truncated`, its reported size becomes a lower bound, and it
+  is routed to human review rather than being treated as fully inventoried.
 - **Role inference is filename-based.** It recognises 10x, SNARE-seq and ENA
   conventions (see `tests/test_role_inference.py`), but a deposition using
   idiosyncratic names will under-report its roles. Inference never guesses: an

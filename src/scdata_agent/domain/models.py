@@ -379,6 +379,9 @@ class AssetResolutionResult(StrictModel):
     queried_accessions: list[str] = Field(default_factory=list)
     assets: list[DataAsset] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    # Adapters whose listing was cut short by a budget. Their assets are a
+    # subset, so any total derived from them is a lower bound, not a size.
+    truncated_resolvers: list[str] = Field(default_factory=list)
 
 
 class DiscoveryRunResult(StrictModel):

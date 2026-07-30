@@ -81,6 +81,10 @@ class AcquisitionStrategistAgent:
                 manual_reasons.append("preflight:needs_evidence")
             if report and "archive:uninspected" in report.warnings:
                 manual_reasons.append("archive:uninspected")
+            # A truncated listing means the bundle is not the whole deposition,
+            # so a human decides whether to widen the budget before committing.
+            if summary is not None and summary.inventory_truncated:
+                manual_reasons.append("inventory:truncated")
             if summary is None or summary.access_status != BundleAccessStatus.VERIFIED:
                 manual_reasons.append(
                     f"access:{summary.access_status.value}" if summary else "access:unknown"

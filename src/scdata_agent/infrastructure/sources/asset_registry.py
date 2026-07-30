@@ -38,38 +38,52 @@ class AssetResolverRegistry:
         max_assets: int = 500,
     ) -> None:
         self.max_assets = max_assets
+        # Processed-data resolvers run before raw reads. A study's matrices are
+        # what decide which bundle schema it can satisfy and are orders of
+        # magnitude smaller than its FASTQ set, so when a budget binds they are
+        # the ones worth spending it on.
         self.resolvers = [
+            GEOSupplementaryAssetResolver(client, max_assets=max_assets),
+            ZenodoAssetResolver(client, max_assets=max_assets),
+            FigshareAssetResolver(client, max_assets=max_assets),
             ENAAssetResolver(
                 client,
                 expand_bioproject=expand_bioproject,
                 max_assets=max_assets,
             ),
-            GEOSupplementaryAssetResolver(client, max_assets=max_assets),
-            ZenodoAssetResolver(client, max_assets=max_assets),
-            FigshareAssetResolver(client, max_assets=max_assets),
         ]
 
     async def resolve(self, candidate: DatasetCandidate) -> AssetResolutionResult:
         assets: dict[str, DataAsset] = {}
         queried: list[str] = []
         errors: list[str] = []
+        truncated: list[str] = []
         for resolver in self.resolvers:
             result = await resolver.resolve(candidate)
             queried.extend(result.queried_accessions)
             errors.extend(
                 f"{resolver.name}:{message}" for message in result.errors
             )
+            # Each resolver gets its own budget. Sharing one meant a study with
+            # thousands of ENA runs consumed it entirely and the repositories
+            # holding its processed matrices were never queried at all.
+            accepted = 0
             for asset in result.assets:
-                assets[asset.asset_id] = asset
-                if len(assets) >= self.max_assets:
+                if accepted >= self.max_assets:
+                    truncated.append(resolver.name)
                     break
-            if len(assets) >= self.max_assets:
-                break
+                assets[asset.asset_id] = asset
+                accepted += 1
+            if len(result.assets) >= resolver.max_assets:
+                # The adapter stopped at its own cap, so its listing is partial
+                # even though this loop never had to trim it.
+                truncated.append(resolver.name)
         return AssetResolutionResult(
             candidate_id=candidate.candidate_id,
             queried_accessions=list(dict.fromkeys(queried)),
             assets=list(assets.values()),
             errors=errors,
+            truncated_resolvers=list(dict.fromkeys(truncated)),
         )
 
 
