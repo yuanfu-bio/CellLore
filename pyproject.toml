@@ -62,11 +62,10 @@ curation = [
 [project.scripts]
 scdata-agent = "scdata_agent.interfaces.cli:app"
 
-# TODO: uncomment and fill in once the GitHub repository exists.
-# [project.urls]
-# Homepage = "https://github.com/OWNER/scdata-agent"
-# Repository = "https://github.com/OWNER/scdata-agent"
-# Issues = "https://github.com/OWNER/scdata-agent/issues"
+[project.urls]
+Homepage = "https://github.com/yuanfu-bio/scdata_agent"
+Repository = "https://github.com/yuanfu-bio/scdata_agent"
+Issues = "https://github.com/yuanfu-bio/scdata_agent/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
