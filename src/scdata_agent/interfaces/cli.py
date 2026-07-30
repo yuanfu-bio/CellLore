@@ -91,9 +91,25 @@ def agent_run(
             ),
         ),
     ] = False,
+    planner_mode: Annotated[
+        str,
+        typer.Option(
+            "--planner-mode",
+            help=(
+                "deep runs a sequential 4-stage LLM analysis (intent, study "
+                "design, critical review, synthesis; ~600s budget) so the "
+                "model actually completes its reasoning. fast races two "
+                "parallel calls against a 30s budget each and degrades to a "
+                "generic template on timeout -- pick it only when you need a "
+                "quick, approximate result."
+            ),
+        ),
+    ] = "deep",
     trace_mode: Annotated[str, typer.Option("--trace-mode", help="local or langsmith.")] = "local",
 ) -> None:
     """Run evidence, acquisition, materialization, QC, and governance agents."""
+    if planner_mode not in {"fast", "deep"}:
+        raise typer.BadParameter("planner-mode must be 'fast' or 'deep'.")
     ledger = CollaborationLedger(database)
     run = ledger.create_run(
         question,
@@ -108,6 +124,7 @@ def agent_run(
             "approved_license_ids": approved_license_id or [],
             "strict_license": strict_license,
             "max_assets": max_assets,
+            "planner_mode": planner_mode,
         },
     )
     supervisor = MultiAgentSupervisor(ledger, str(database), trace_mode=trace_mode)

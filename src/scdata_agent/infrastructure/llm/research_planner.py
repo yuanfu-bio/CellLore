@@ -12,7 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.domain.models import DataRole, Modality, ResearchRequirement
+from scdata_agent.domain.models import Modality, ResearchRequirement
 from scdata_agent.domain.planning import (
     AnalysisStep,
     ConstraintKind,
@@ -29,7 +29,14 @@ from scdata_agent.domain.planning import (
     SemanticConstraint,
     StudyStrategyDraft,
 )
-from scdata_agent.domain.requirements import RuleBasedRequirementCompiler
+from scdata_agent.domain.requirements import (
+    MODALITY_ALIASES,
+    RuleBasedRequirementCompiler,
+    _contains,
+    restrict_modalities_to_pairing,
+    roles_for_modalities,
+)
+from scdata_agent.infrastructure.llm.requirement_compiler import _safe_terms
 
 
 class ChatCompletionClient(Protocol):
@@ -808,16 +815,30 @@ def _compile_contracts(
 ) -> list[ResearchRequirement]:
     baseline = fallback.compile(question)
     modalities: list[Modality] = []
+    unclassified_terms: list[str] = []
     for need in draft.data_needs:
         if need.execution_status != ExecutionStatus.SUPPORTED:
             continue
         for value in [need.data_type, *need.modalities]:
-            modality = _known_modality(value)
-            if modality and modality not in modalities:
-                modalities.append(modality)
+            for modality in _known_modalities(value):
+                if modality not in modalities:
+                    modalities.append(modality)
+        # Harvest terms only from the short, technology-focused `modalities`
+        # list. `data_type`/`name` are full sentences and would inject long,
+        # low-precision phrases into a boolean search query if quoted whole.
+        unclassified_terms.extend(
+            value for value in need.modalities if not _known_modalities(value)
+        )
     if not modalities:
         return []
-    required_roles, preferred_roles = _roles_for_modalities(modalities)
+    # A same-cell pairing requirement must survive the LLM's own reading of
+    # the question: without this, a data need that also mentions standalone
+    # scATAC would silently reintroduce it even though the rule-based baseline
+    # already excluded it for the same question.
+    modalities = restrict_modalities_to_pairing(
+        modalities, baseline.minimum_pairing_level
+    )
+    required_roles, preferred_roles = roles_for_modalities(modalities)
     inferred_constraints = [
         item.statement
         for item in draft.constraints
@@ -830,6 +851,12 @@ def _compile_contracts(
                 "acceptable_modalities": modalities,
                 "required_data_roles": required_roles,
                 "preferred_data_roles": preferred_roles,
+                # A technology name the LLM surfaced but that no Modality alias
+                # covers yet -- kept for recall rather than discarded, so a
+                # niche assay can still widen the search without a code change.
+                "supplementary_search_terms": _safe_terms(
+                    [*baseline.supplementary_search_terms, *unclassified_terms]
+                ),
                 "unresolved_constraints": list(
                     dict.fromkeys(
                         [*baseline.unresolved_constraints, *inferred_constraints]
@@ -844,34 +871,20 @@ def _compile_contracts(
     ]
 
 
-def _known_modality(value: str) -> Modality | None:
-    normalized = re.sub(r"[^a-z0-9]+", "", value.casefold())
-    if "multiome" in normalized or ("rna" in normalized and "atac" in normalized):
-        return Modality.MULTIOME_RNA_ATAC
-    if "snatac" in normalized or "singlenucleusatac" in normalized:
-        return Modality.SNATAC
-    if "scatac" in normalized or "singlecellatac" in normalized or "chromatinaccessibility" in normalized:
-        return Modality.SCATAC
-    return None
+def _known_modalities(value: str) -> list[Modality]:
+    """Every Modality whose alias appears in this free-text string.
 
-
-def _roles_for_modalities(
-    modalities: list[Modality],
-) -> tuple[list[DataRole], list[DataRole]]:
-    required = {
-        DataRole.CELL_METADATA,
-        DataRole.SAMPLE_METADATA,
-        DataRole.FRAGMENTS,
-    }
-    preferred = {
-        DataRole.RAW_READS,
-        DataRole.PEAK_MATRIX,
-        DataRole.QC_METRICS,
-        DataRole.FRAGMENT_INDEX,
-    }
-    if Modality.MULTIOME_RNA_ATAC in modalities:
-        required.update({DataRole.RNA_MATRIX, DataRole.BARCODE_LINKAGE})
-    return sorted(required, key=str), sorted(preferred, key=str)
+    Reuses the same alias table the rule-based compiler scans (rather than a
+    separate, narrower keyword list) so a phrase like "TEA-seq" or "matched
+    scRNA-seq and scATAC-seq" is recognised the same way regardless of which
+    compiler produced it. A string may legitimately match more than one
+    modality -- e.g. a matched-sample study that also names scATAC on its own.
+    """
+    return [
+        modality
+        for modality, aliases in MODALITY_ALIASES.items()
+        if _contains(value, aliases)
+    ]
 
 
 def fallback_research_plan(

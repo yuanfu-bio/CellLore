@@ -130,6 +130,16 @@ mamba run -n scdata-agent scdata-agent agent-run 'research question' \
   --strict-license --database var/scdata_agent.sqlite
 ```
 
+`agent-run` defaults to the planner's `deep` mode (four sequential LLM calls,
+~600s budget) so the model actually completes its analysis instead of racing
+two calls against a 30s budget each and degrading to a generic template.
+Trade thoroughness for speed only when you need an approximate result fast:
+
+```bash
+mamba run -n scdata-agent scdata-agent agent-run 'research question' \
+  --planner-mode fast --database var/scdata_agent.sqlite
+```
+
 At the download checkpoint, stop after planning, download the recommendation, or
 download every preflight-ready Bundle (including assets with unknown size):
 

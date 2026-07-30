@@ -279,6 +279,11 @@ class ResearchRequirement(StrictModel):
     exclusions: list[str] = Field(default_factory=list)
     unresolved_constraints: list[str] = Field(default_factory=list)
     search_terms: list[str] = Field(default_factory=list)
+    # Free text the LLM identified as relevant but that does not map to any
+    # known Modality -- e.g. a co-assay technology not yet in MODALITY_ALIASES.
+    # QueryPlanner ORs a bounded number of these into the query so recall for
+    # a technology can improve before anyone updates the alias table for it.
+    supplementary_search_terms: list[str] = Field(default_factory=list)
     compiler: str = "rule_based_v1"
     compiler_warnings: list[str] = Field(default_factory=list)
     planner_diagnostics: list[str] = Field(default_factory=list)

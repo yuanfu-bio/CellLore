@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scdata_agent.domain.models import Modality
+from scdata_agent.domain.models import Modality, PairingLevel
 from scdata_agent.domain.planning import ExecutionStatus, PlanOrigin, PlanReadiness
 from scdata_agent.infrastructure.llm.research_planner import MultiStageResearchPlanner
 
@@ -156,6 +156,46 @@ async def test_planner_derives_cross_modal_strategy_without_user_data_specificat
     assert plan.constraints[0].origin == PlanOrigin.INFERRED
     assert Modality.SCATAC in plan.executable_contracts[0].modalities
     assert Modality.MULTIOME_RNA_ATAC in plan.executable_contracts[0].modalities
+
+
+def _trimodal_need():
+    return {
+        "need_id": "trimodal",
+        "name": "三模态队列",
+        "data_type": "TEA-seq or DOGMA-seq trimodal single-cell data",
+        "role": "同细胞RNA+ATAC+蛋白发现队列",
+        "priority": "essential",
+        "rationale": "同细胞获取三层组学信号",
+        "modalities": ["TEA-seq", "DOGMA-seq"],
+        "required_metadata": ["细胞类型"],
+        "constraints": [],
+        "execution_status": "supported",
+    }
+
+
+@pytest.mark.asyncio
+async def test_deep_mode_carries_trimodal_and_human_through_to_the_contract():
+    """End-to-end regression for the live-run defect: a question asking for
+    TEA-seq/DOGMA-seq trimodal human data must produce an executable contract
+    whose acceptable_modalities actually contains the trimodal modality, via
+    the real deep-mode graph rather than a hand-called compiler function."""
+    question = "配对的单细胞多组学数据（human）：TEA-seq/DOGMA-seq三模态数据，用于自监督基础模型预训练"
+    strategy = _strategy()
+    strategy["data_needs"] = [_trimodal_need()]
+    final = _final(question)
+    final["data_needs"] = [_trimodal_need()]
+
+    planner = ScriptedClient([_intent(question), strategy, final])
+    reviewer = ScriptedClient([_critique()])
+
+    plan = await MultiStageResearchPlanner(
+        planner, review_client=reviewer, mode="deep"
+    ).plan(question)
+
+    contract = plan.executable_contracts[0]
+    assert Modality.MULTIOME_RNA_ATAC_PROTEIN in contract.acceptable_modalities
+    assert contract.organisms == ["Homo sapiens"]
+    assert contract.minimum_pairing_level == PairingLevel.SAME_CELL
 
 
 @pytest.mark.asyncio

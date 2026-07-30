@@ -190,6 +190,12 @@ MODALITY_ALIASES: dict[Modality, tuple[str, ...]] = {
     Modality.MULTIOME_RNA_ATAC_PROTEIN: (
         "tea-seq", "dogma-seq", "rna atac protein", "trimodal", "tri-modal",
     ),
+    Modality.SCRNA: (
+        "scrna", "single cell rna", "single-cell rna", "单细胞rna", "单细胞转录组",
+    ),
+    Modality.ATAC_OTHER_MULTIOMICS: (
+        "atac other multiomics", "atac multiomics", "atac 多组学",
+    ),
 }
 
 # Phrasings that ask for the two omics layers to come from one physical cell,
@@ -236,6 +242,81 @@ def _extract_aliases(text: str, mapping: dict[str, tuple[str, ...]]) -> list[str
     return [label for label, aliases in mapping.items() if _contains(text, aliases)]
 
 
+# The same-cell tier: these are the only modalities whose own name asserts that
+# RNA and ATAC came from one physical cell or nucleus. MATCHED_SCRNA_SCATAC is
+# deliberately excluded -- it names assays run separately on matched material,
+# a materially weaker claim (see BUNDLE_SCHEMAS' matched_scrna_scatac schema).
+_SAME_CELL_MODALITIES: tuple[Modality, ...] = (
+    Modality.MULTIOME_RNA_ATAC,
+    Modality.MULTIOME_RNA_ATAC_PROTEIN,
+)
+
+
+def restrict_modalities_to_pairing(
+    modalities: list[Modality], minimum_pairing_level: PairingLevel | None
+) -> list[Modality]:
+    """Narrow a modality list to what a same-cell pairing requirement allows.
+
+    Both the rule-based compiler and the LLM-derived planner path assemble a
+    modality list on their own terms; without this shared step, whichever path
+    happened to also mention standalone scATAC or study-level co-reporting
+    would recall it alongside a question that explicitly asked for pairing.
+    Applying the same rule regardless of which compiler produced the list is
+    what keeps a same-cell requirement from being silently bypassed by taking
+    the LLM route.
+    """
+    if pairing_rank(minimum_pairing_level or PairingLevel.NOT_APPLICABLE) < pairing_rank(
+        PairingLevel.SAME_CELL
+    ):
+        return modalities
+    observed = [item for item in modalities if item in _SAME_CELL_MODALITIES]
+    return observed or list(_SAME_CELL_MODALITIES)
+
+
+def roles_for_modalities(
+    modalities: list[Modality],
+) -> tuple[list[DataRole], list[DataRole]]:
+    """Canonical required/preferred DataRoles implied by a modality set.
+
+    This is the single source of truth for what a coarse ResearchRequirement
+    should advise a candidate needs; it previously existed as three
+    independently drifting copies (this function, the compiler in
+    ``infrastructure/llm/requirement_compiler.py``, and one in
+    ``infrastructure/llm/research_planner.py``) and only this one -- the
+    rule-based compiler's inline version -- had the PROTEIN_MATRIX branch.
+    The per-candidate acquisition gate in ``inventory_reconcile``/
+    ``BUNDLE_SCHEMAS`` is the actual admission decision; this only seeds the
+    requirement's advisory fields and the compilers' role recommendations.
+    """
+    required_roles = {DataRole.CELL_METADATA, DataRole.SAMPLE_METADATA}
+    preferred_roles = {DataRole.RAW_READS, DataRole.PEAK_MATRIX, DataRole.QC_METRICS}
+    if any(
+        modality in modalities
+        for modality in (
+            Modality.SCATAC, Modality.SNATAC, Modality.MULTIOME_RNA_ATAC,
+            Modality.MATCHED_SCRNA_SCATAC, Modality.MULTIOME_ATAC_PROTEIN,
+            Modality.MULTIOME_RNA_ATAC_PROTEIN, Modality.ATAC_OTHER_MULTIOMICS,
+        )
+    ):
+        required_roles.add(DataRole.FRAGMENTS)
+        preferred_roles.add(DataRole.FRAGMENT_INDEX)
+    if any(modality in modalities for modality in (
+        Modality.MULTIOME_RNA_ATAC, Modality.MATCHED_SCRNA_SCATAC,
+        Modality.MULTIOME_RNA_ATAC_PROTEIN,
+    )):
+        required_roles.add(DataRole.RNA_MATRIX)
+    if any(modality in modalities for modality in (
+        Modality.MULTIOME_RNA_ATAC, Modality.MULTIOME_ATAC_PROTEIN,
+        Modality.MULTIOME_RNA_ATAC_PROTEIN,
+    )):
+        required_roles.add(DataRole.BARCODE_LINKAGE)
+    if any(modality in modalities for modality in (
+        Modality.MULTIOME_ATAC_PROTEIN, Modality.MULTIOME_RNA_ATAC_PROTEIN,
+    )):
+        required_roles.add(DataRole.PROTEIN_MATRIX)
+    return sorted(required_roles, key=str), sorted(preferred_roles, key=str)
+
+
 class RuleBasedRequirementCompiler:
     """Conservative baseline compiler that never invents domain entities."""
 
@@ -260,12 +341,7 @@ class RuleBasedRequirementCompiler:
             else None
         )
         if minimum_pairing_level is not None:
-            same_cell_modalities = [
-                Modality.MULTIOME_RNA_ATAC,
-                Modality.MULTIOME_RNA_ATAC_PROTEIN,
-            ]
-            observed = [item for item in modalities if item in same_cell_modalities]
-            modalities = observed or same_cell_modalities
+            modalities = restrict_modalities_to_pairing(modalities, minimum_pairing_level)
         elif not modalities:
             modalities = [Modality.SCATAC, Modality.MULTIOME_RNA_ATAC]
 
@@ -278,39 +354,7 @@ class RuleBasedRequirementCompiler:
         if donor_match:
             minimum_donors = int(donor_match.group(1))
 
-        required_roles = {
-            DataRole.CELL_METADATA,
-            DataRole.SAMPLE_METADATA,
-        }
-        preferred_roles = {
-            DataRole.RAW_READS,
-            DataRole.PEAK_MATRIX,
-            DataRole.QC_METRICS,
-        }
-        if any(
-            modality in modalities
-            for modality in (
-                Modality.SCATAC, Modality.SNATAC, Modality.MULTIOME_RNA_ATAC,
-                Modality.MATCHED_SCRNA_SCATAC, Modality.MULTIOME_ATAC_PROTEIN,
-                Modality.MULTIOME_RNA_ATAC_PROTEIN, Modality.ATAC_OTHER_MULTIOMICS,
-            )
-        ):
-            required_roles.add(DataRole.FRAGMENTS)
-            preferred_roles.add(DataRole.FRAGMENT_INDEX)
-        if any(modality in modalities for modality in (
-            Modality.MULTIOME_RNA_ATAC, Modality.MATCHED_SCRNA_SCATAC,
-            Modality.MULTIOME_RNA_ATAC_PROTEIN,
-        )):
-            required_roles.add(DataRole.RNA_MATRIX)
-        if any(modality in modalities for modality in (
-            Modality.MULTIOME_RNA_ATAC, Modality.MULTIOME_ATAC_PROTEIN,
-            Modality.MULTIOME_RNA_ATAC_PROTEIN,
-        )):
-            required_roles.add(DataRole.BARCODE_LINKAGE)
-        if any(modality in modalities for modality in (
-            Modality.MULTIOME_ATAC_PROTEIN, Modality.MULTIOME_RNA_ATAC_PROTEIN,
-        )):
-            required_roles.add(DataRole.PROTEIN_MATRIX)
+        required_roles, preferred_roles = roles_for_modalities(modalities)
 
         search_terms = _unique(
             [
@@ -336,8 +380,8 @@ class RuleBasedRequirementCompiler:
             modalities=modalities,
             acceptable_modalities=modalities,
             preferred_modalities=preferred_modalities,
-            required_data_roles=sorted(required_roles, key=str),
-            preferred_data_roles=sorted(preferred_roles, key=str),
+            required_data_roles=required_roles,
+            preferred_data_roles=preferred_roles,
             minimum_donors=minimum_donors,
             minimum_pairing_level=minimum_pairing_level,
             excluded_biological_sources=excluded_sources,
@@ -397,15 +441,29 @@ class QueryPlanner:
             if pairing_rank(requirement.minimum_pairing_level or PairingLevel.NOT_APPLICABLE) >= 3
             else MODALITY_QUERY_TERMS
         )
+        # LLM-identified technology names that no Modality alias covers yet.
+        # OR'd alongside the deterministic terms -- an alternate way to match
+        # the modality, not an additional constraint -- so a niche assay can
+        # widen recall without anyone updating MODALITY_ALIASES first. Bounded
+        # to keep the query from growing without limit; already sanitised by
+        # `_safe_terms` at the point each term was harvested.
+        supplementary_query = " OR ".join(
+            f'"{term}"' for term in requirement.supplementary_search_terms[:8]
+        )
+        modality_clause = (
+            f"({modality_terms} OR {supplementary_query})"
+            if supplementary_query
+            else f"({modality_terms})"
+        )
 
-        common_parts = [f"({modality_terms})"]
+        common_parts = [modality_clause]
         if biological_query:
             common_parts.append(f"({biological_query})")
         if organism_query:
             common_parts.append(f"({organism_query})")
         common_query = " AND ".join(common_parts)
 
-        geo_parts = [f"({modality_terms})"]
+        geo_parts = [modality_clause]
         if biological_query:
             geo_parts.append(f"({biological_query})")
         if requirement.organisms:

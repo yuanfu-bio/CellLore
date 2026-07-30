@@ -11,7 +11,12 @@ from pydantic import Field
 from scdata_agent.domain.models import (
     AccessLevel, DataRole, EvaluationPolicy, Modality, ResearchRequirement, StrictModel,
 )
-from scdata_agent.domain.requirements import TASK_ALIASES, RuleBasedRequirementCompiler
+from scdata_agent.domain.requirements import (
+    TASK_ALIASES,
+    RuleBasedRequirementCompiler,
+    restrict_modalities_to_pairing,
+    roles_for_modalities,
+)
 
 
 class ChatCompletionClient(Protocol):
@@ -116,8 +121,12 @@ def _merge_requirement_draft(baseline: ResearchRequirement, draft: LLMRequiremen
     if draft is None:
         return baseline
     acceptable = _unique([*baseline.acceptable_modalities, *baseline.modalities, *draft.modalities, *draft.acceptable_modalities])
+    # The LLM draft can reintroduce a modality the rule-based baseline already
+    # excluded for a same-cell pairing requirement (e.g. standalone scATAC);
+    # narrowing must be re-applied after the union, not only inside the baseline.
+    acceptable = restrict_modalities_to_pairing(acceptable, baseline.minimum_pairing_level)
     preferred = _unique([*baseline.preferred_modalities, *draft.preferred_modalities])
-    required_roles, preferred_roles = _data_roles_for_modalities(acceptable)
+    required_roles, preferred_roles = roles_for_modalities(acceptable)
     required_roles = _unique([*required_roles, *baseline.required_data_roles, *draft.required_data_roles])
     preferred_roles = _unique([*preferred_roles, *baseline.preferred_data_roles, *draft.preferred_data_roles])
     min_donors = baseline.minimum_donors or draft.minimum_donors
@@ -140,31 +149,18 @@ def _merge_requirement_draft(baseline: ResearchRequirement, draft: LLMRequiremen
         "hard_constraints": _safe_terms(hard),
         "unresolved_constraints": _safe_terms([*baseline.unresolved_constraints, *draft.unresolved_constraints]),
         "search_terms": _safe_terms([*baseline.search_terms, *draft.search_terms]),
+        # The LLM's own free-text search terms extend recall for technologies
+        # the modality enum cannot yet name, without waiting on an alias-table
+        # update; QueryPlanner ORs a bounded number of these into the query.
+        "supplementary_search_terms": _safe_terms(
+            [*baseline.supplementary_search_terms, *draft.search_terms]
+        ),
         "compiler": f"stepfun_structured_v2:{model}", "compiler_warnings": [], "planner_diagnostics": diagnostics,
     })
 
 
 def _merge_evaluation(base: EvaluationPolicy, draft: EvaluationPolicy) -> EvaluationPolicy:
     return EvaluationPolicy(reserve_independent_studies=base.reserve_independent_studies or draft.reserve_independent_studies, holdout_unit=base.holdout_unit or draft.holdout_unit, prevent_lineage_leakage=base.prevent_lineage_leakage or draft.prevent_lineage_leakage)
-
-
-def _data_roles_for_modalities(modalities: list[Modality]) -> tuple[list[DataRole], list[DataRole]]:
-    required = {DataRole.CELL_METADATA, DataRole.SAMPLE_METADATA}
-    preferred = {DataRole.RAW_READS, DataRole.PEAK_MATRIX, DataRole.QC_METRICS}
-    atac_modalities = {
-        Modality.SCATAC, Modality.SNATAC, Modality.MULTIOME_RNA_ATAC,
-        Modality.MATCHED_SCRNA_SCATAC, Modality.MULTIOME_ATAC_PROTEIN,
-        Modality.MULTIOME_RNA_ATAC_PROTEIN, Modality.ATAC_OTHER_MULTIOMICS,
-    }
-    if set(modalities) & atac_modalities:
-        required.add(DataRole.FRAGMENTS); preferred.add(DataRole.FRAGMENT_INDEX)
-    if set(modalities) & {Modality.MULTIOME_RNA_ATAC, Modality.MATCHED_SCRNA_SCATAC, Modality.MULTIOME_RNA_ATAC_PROTEIN}:
-        required.add(DataRole.RNA_MATRIX)
-    if set(modalities) & {Modality.MULTIOME_RNA_ATAC, Modality.MULTIOME_ATAC_PROTEIN, Modality.MULTIOME_RNA_ATAC_PROTEIN}:
-        required.add(DataRole.BARCODE_LINKAGE)
-    if set(modalities) & {Modality.MULTIOME_ATAC_PROTEIN, Modality.MULTIOME_RNA_ATAC_PROTEIN}:
-        required.add(DataRole.PROTEIN_MATRIX)
-    return sorted(required, key=str), sorted(preferred, key=str)
 
 
 def _normalize_tasks(values: list[str]) -> list[str]:

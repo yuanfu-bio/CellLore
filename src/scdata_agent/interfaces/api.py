@@ -5,7 +5,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -28,6 +28,10 @@ class CreateRunRequest(BaseModel):
     # Per-repository cap on files enumerated for one dataset. Exceeding it
     # marks the bundle inventory:truncated rather than silently under-reporting.
     max_assets: int = Field(default=500, ge=1, le=100_000)
+    # deep runs the planner's 4-stage sequential analysis (~600s budget) so
+    # the model completes its reasoning instead of racing two calls against a
+    # 30s budget each and falling back to a generic template on timeout.
+    planner_mode: Literal["fast", "deep"] = "deep"
     enable_fulltext_enrichment: bool = True
     max_fulltexts: int = Field(default=5, ge=0, le=100)
     remote_probe_enabled: bool = True
@@ -68,6 +72,7 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             "approved_license_ids": request.approved_license_ids,
             "strict_license": request.strict_license,
             "max_assets": request.max_assets,
+            "planner_mode": request.planner_mode,
             "remote_probe_enabled": request.remote_probe_enabled,
             "remote_probe_concurrency": request.remote_probe_concurrency,
             "remote_probe_timeout_seconds": request.remote_probe_timeout_seconds,

@@ -141,6 +141,28 @@ Asking for *paired* multiome is a constraint, not a topic. Phrasings such as
   rather than excluding it, because pairing is *inferred from text*: many real
   multiome studies never write "same cell" in their abstract.
 
+### How the LLM's understanding reaches the query
+
+`agent-run` defaults to the planner's `deep` mode: four sequential LLM calls
+(intent → study design → critical review → synthesis, ~600s budget) rather than
+`fast` mode's two calls racing a 30s-per-branch budget. `fast` degrades to a
+generic template on timeout; `deep` is what lets the model actually finish
+analysing the question. Pass `--planner-mode fast` (or set
+`SCDATA_AGENT_PLANNER_MODE=fast`) when you want a quick, approximate result
+instead — `compile` and `discover` still default to `fast` for quick iteration.
+
+Whichever mode runs, the LLM's modality recognition and the deterministic
+compiler's now share one alias table (`domain/requirements.py::MODALITY_ALIASES`)
+instead of the LLM path re-implementing a narrower version of it — a mismatch
+that once caused a literal "TEA-seq/DOGMA-seq trimodal" request to compile
+without the trimodal modality. A technology name the LLM identifies that this
+table doesn't cover yet — a future co-assay method, for instance — is not
+discarded: it lands in `ResearchRequirement.supplementary_search_terms` and
+`QueryPlanner` ORs a bounded number of them into the query, so recall for a
+genuinely new assay can improve before anyone updates the alias table for it.
+This is deliberately *additive* rather than letting the LLM draft the query
+outright, matching the deterministic-gates principle above.
+
 Package layout follows a strict dependency direction, asserted by
 `tests/test_architecture.py`:
 
@@ -236,10 +258,12 @@ highest-value contribution right now — see [Roadmap](#roadmap).
 - **Only five repositories are wired up.** ENCODE, CELLxGENE, Single Cell Portal and
   HCA — arguably the most valuable sources for this problem — are not implemented and
   are reported in `QueryPlan.uncovered_sources`.
-- **The offline planner fallback is a template.** If the model's strategy branch
-  exceeds `SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS` (default 30s), a deterministic
-  template takes over. The CLI prints a warning when this happens; the plan is still
-  auditable but is not model-derived.
+- **The offline planner fallback is a template.** In `fast` mode, if the model's
+  strategy branch exceeds `SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS` (default
+  30s), a deterministic template takes over. The CLI prints a warning when this
+  happens; the plan is still auditable but is not model-derived. `agent-run`
+  defaults to `deep` mode specifically to avoid this — pass `--planner-mode fast`
+  only when you accept the risk of degradation in exchange for a faster result.
 
 ## Configuration
 
@@ -252,7 +276,9 @@ Model routing is provider-neutral; StepFun is the default.
 | `SCDATA_AGENT_MODEL_{PLANNER,DISCOVERY,REVIEW,CHAT}` | per-role model overrides |
 | `SCDATA_AGENT_REASONING_EFFORT[_ROLE]` | per-role reasoning effort |
 | `NCBI_EMAIL` / `NCBI_API_KEY` | NCBI E-utilities etiquette and rate limits |
-| `SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS` | planner latency budget before the offline template takes over (default 30) |
+| `SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS` | `fast`-mode planner latency budget before the offline template takes over (default 30) |
+| `SCDATA_AGENT_PLANNER_MODE` | `deep` or `fast`; `compile`/`discover` default here (default `fast`). `agent-run --planner-mode` overrides this per run (default `deep`) |
+| `SCDATA_AGENT_PLANNER_TIMEOUT_SECONDS` | overall planner budget (default 35s for `fast`, 600s for `deep`) |
 | `SCDATA_AGENT_TRACE_MODE` | `local` (default, nothing leaves the machine) or `langsmith` |
 
 **Tracing is local by default.** Setting `SCDATA_AGENT_TRACE_MODE=langsmith` together
