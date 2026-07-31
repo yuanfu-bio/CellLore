@@ -17,6 +17,9 @@
   文件应当保持简短。
 - 发现了新问题？加到它所阻塞的那个阶段下面，并附验收标准。没有验收标准的条目是
   愿望，不是任务。
+- 如果改动涉及门禁、别名表或推断规则，验收标准是一个 scorecard 数字，而不是"测试
+  通过"。见 [`../CONTRIBUTING.md`](../CONTRIBUTING.md) 的
+  *Measuring a judgement change* 一节。
 - 对优先级有不同意见是正常且被鼓励的 —— 直接调整顺序，并在 commit message 里说明
   理由。
 
@@ -56,7 +59,8 @@ Data Card 的可训练数据集**，且全程保留出处与许可依据。
 
 | 事实 | 证据 |
 |---|---|
-| 测试全绿，完全离线 | `pytest` → 184 passed |
+| 测试全绿，完全离线 | `pytest` → 184 passed；`ruff check src tests scripts` 无告警 |
+| 策展判断已可度量 | `scripts/eval_discovery.py` 重放 `eval/records.jsonl`（48 条实网抓取记录）：`pairing_overclaim_rate` 0.40、`modality_recall` 0.52、`deposition_precision` 0.57 |
 | 自然语言 → 审批检查点，实网跑通 | `var/p3_acceptance/stdout.json`：11 个 task 全部 completed，`status = waiting_for_decision`，3 个 recommended bundle，16.27 GB |
 | 配对多组学问题能被正确理解 | 同一次运行，中文同细胞／三模态提问；需求携带了 `minimum_pairing_level` |
 | **从未下载过任何字节** | 所有 `var/*/data/` 均为空目录；任何 sqlite 账本中都不存在 `transfer_execution` / `dataset_curator` / `corpus_governance` 任务 |
@@ -76,11 +80,34 @@ P0 通过之前，P1 和 P2 的任何工作都不应开始。后续每一个功�
 
 | # | 任务 | 状态 | 负责人 | 更新日期 | 验收标准 |
 |---|---|---|---|---|---|
+| P0.0 | 消除流水线对配对关系的高估（见下） | ⬜ | | | `pairing_overclaim_rate` 从 0.40 降向 0；`pairing_recall` 不退化；基线 scorecard 在同一 commit 内更新 |
 | P0.1 | 选定一个小体量、已知良好的试点研究（10x Multiome、许可清晰、个位数 GB），并把 accession 记在本行 | ⬜ | | | accession 已写入本行；对窄问题执行 `agent-run` 能把它判为 `recommended` |
 | P0.2 | 常见 10x 处理后布局 → AnnData/MuData 的转换器 | ⬜ | | | `barcodes.tsv.gz` + `peaks.bed` + `matrix.mtx.gz`（+ `fragments.tsv.gz`）的数据包能产出非空的 `standard_object_path`；配套离线测试须取材于真实 GEO 文件清单 |
 | P0.3 | 首次真实传输执行 | ⬜ | | | 账本中出现带成功回执的 `transfer_execution` 任务；中途打断后恢复，验证断点续传与校验和均成立 |
 | P0.4 | 首次真实物化 | ⬜ | | | `data/curated/<candidate>/<bundle>/` 下同时存在 `DATA_CARD.md`、`provenance.json`、`manifest.json` 和标准对象 |
 | P0.5 | 首个真实语料快照 | ⬜ | | | 快照的 `admitted_bundle_ids` 非空；`corpus_approval` 检查点已解决 |
+
+### P0.0 —— 配对关系被高估
+
+`eval/records.jsonl` 中 30 个 standalone snATAC-seq deposition，有 12 个把自己报
+成**同核配对多组学**。两条成因都在 `infrastructure/sources/common.py`，也都源于把
+别名匹配到一个 join 起来的元数据 blob 上，而不是匹配到正文散文：
+
+- `"gene expression"` 在 `RNA_ALIASES` 里（`common.py:22`），而所有经 GEO 中转的
+  SRA 记录都带 `contact_name="Gene Expression Omnibus (GEO), NCBI, NLM, NIH"`
+  —— 转录组层从投稿人姓名里冒了出来。
+- `_infer_pairing_level` 结尾是一句裸的 `if "multiome" in content` →
+  `SAME_NUCLEUS`（`common.py:137`），于是仅仅引用了一份名为
+  `chromium_multiome_atac_gex.pdf` 协议文件的 ENCODE 记录也被升级了。
+
+这是**假阳性**，所以它不会自己找上门：同细胞请求会静默地收进不具备该性质的
+standalone ATAC 运行，没有任何东西进入 manual review，唯一可见的现象是召回看起来
+变好了。这恰是 `multiome_same_cell` / `matched_scrna_scatac` 拆分要防的错误，只是
+发生在该拆分的下面一层。一期任务恰好依赖这个判断，所以它排在 P0.1 之前 —— 选试点
+研究就意味着信任这些标签。
+
+`eval/golden_questions.yaml` 中的 `forbid_pairing_above` 把它钉住了：在这里，代价
+高昂的是假阳性，而不是漏召。
 
 ### 为什么 P0.2 是硬阻塞
 
@@ -105,7 +132,7 @@ bundle 判入 quarantine，理由为 `anndata_or_mudata_missing`。而
 | P1.3 | ENCODE 适配器 + 许可政策 | ⬜ | | | resolver 能返回资产；政策已在 `domain/licensing.py` 注册；`encode` 已从 `QueryPlan.uncovered_sources` 移除 |
 | P1.4 | CELLxGENE 适配器 + 许可政策 | ⬜ | | | 同上，针对 `cellxgene`。ENCODE 之后价值最高的源：策展过的图谱且许可明确声明，同时它也是唯一能真正触发 `approved` 许可状态的源 —— GEO/SRA 永远只能到 `repository_policy` |
 | P1.5 | 在真实研究上跑通三模态路径 | ⬜ | | | 一个 TEA-seq 或 DOGMA-seq 的 deposition 端到端满足 `multiome_trimodal` |
-| P1.6 | 超越文本推断的配对证据 | ⬜ | | | 实测的逐细胞条码交集，能把 bundle 从 `pairing:unverified` 升级为有 `FILE_OBSERVED` 证据支撑的同细胞判定 |
+| P1.6 | 超越文本推断的配对证据 | ⬜ | | | 实测的逐细胞条码交集，能把 bundle 从 `pairing:unverified` 升级为有 `FILE_OBSERVED` 证据支撑的同细胞判定。这是 P0.0 的根治方案：高估来自文本推断，而实测条码不会说谎 |
 
 ### Data Card 规范化（P1.1）
 
