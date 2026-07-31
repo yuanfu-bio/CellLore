@@ -10,8 +10,8 @@ from pydantic import Field, model_validator
 
 from scdata_agent.domain.models import (
     AccessLevel,
-    DataAsset,
     AssetAvailability,
+    DataAsset,
     DataRole,
     EvidenceClass,
     GateStatus,
@@ -20,7 +20,6 @@ from scdata_agent.domain.models import (
     ValidationStatus,
     utc_now,
 )
-
 
 SCHEMA_VERSION = "2.0"
 
@@ -149,7 +148,7 @@ class EvidenceClaim(StrictModel):
     schema_version: str = SCHEMA_VERSION
 
     @model_validator(mode="after")
-    def require_object_or_value(self) -> "EvidenceClaim":
+    def require_object_or_value(self) -> EvidenceClaim:
         if self.object_id is None and self.value is None:
             raise ValueError("A claim requires object_id or value.")
         return self
@@ -252,7 +251,7 @@ class PreflightBundleReport(StrictModel):
     schema_version: str = SCHEMA_VERSION
 
     @model_validator(mode="after")
-    def require_preflight_decision(self) -> "PreflightBundleReport":
+    def require_preflight_decision(self) -> PreflightBundleReport:
         if self.decision not in {
             BundleStatus.PREFLIGHT_READY,
             BundleStatus.NEEDS_EVIDENCE,
@@ -337,6 +336,10 @@ class MaterializationManifest(StrictModel):
     genome_builds: list[str] = Field(default_factory=list)
     provenance_path: str | None = None
     data_card_path: str | None = None
+    # The structured source the Data Card is rendered from. Kept on the manifest
+    # so tests and downstream consumers can assert on fields rather than parse
+    # markdown, and so a card is never richer than what was actually recorded.
+    data_card_fields: dict[str, Any] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
     schema_version: str = SCHEMA_VERSION
 
