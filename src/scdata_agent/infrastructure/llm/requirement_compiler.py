@@ -9,7 +9,12 @@ from typing import Any, Protocol
 from pydantic import Field
 
 from scdata_agent.domain.models import (
-    AccessLevel, DataRole, EvaluationPolicy, Modality, ResearchRequirement, StrictModel,
+    AccessLevel,
+    DataRole,
+    EvaluationPolicy,
+    Modality,
+    ResearchRequirement,
+    StrictModel,
 )
 from scdata_agent.domain.requirements import (
     TASK_ALIASES,
@@ -131,8 +136,10 @@ def _merge_requirement_draft(baseline: ResearchRequirement, draft: LLMRequiremen
     preferred_roles = _unique([*preferred_roles, *baseline.preferred_data_roles, *draft.preferred_data_roles])
     min_donors = baseline.minimum_donors or draft.minimum_donors
     hard = list(baseline.hard_constraints)
-    if min_donors: hard.append(f"minimum_donors>={min_donors}")
-    if baseline.public_only: hard.append("public_only")
+    if min_donors:
+        hard.append(f"minimum_donors>={min_donors}")
+    if baseline.public_only:
+        hard.append("public_only")
     model = getattr(getattr(client, "settings", None), "model", "configured")
     return baseline.model_copy(update={
         "organisms": _safe_terms([*baseline.organisms, *draft.organisms]),

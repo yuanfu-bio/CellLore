@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 import re
-from typing import Any, Protocol, TypedDict, TypeVar
+from typing import Any, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
@@ -57,9 +57,6 @@ class PlannerState(TypedDict, total=False):
     critique: PlanCritique
     draft: ResearchPlanDraft
     fast_diagnostics: list[str]
-
-
-T = TypeVar("T", bound=BaseModel)
 
 
 class CompactConstraint(BaseModel):
@@ -379,7 +376,7 @@ class MultiStageResearchPlanner:
         }
 
 
-async def _structured_call(
+async def _structured_call[T: BaseModel](
     client: ChatCompletionClient,
     model: type[T],
     system_prompt: str,

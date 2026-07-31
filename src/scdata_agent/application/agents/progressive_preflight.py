@@ -17,7 +17,6 @@ from scdata_agent.domain.lifecycle import (
     SemanticBundle,
 )
 from scdata_agent.domain.models import (
-    AccessLevel,
     DataAsset,
     DataRole,
     GateStatus,

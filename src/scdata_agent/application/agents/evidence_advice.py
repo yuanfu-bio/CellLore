@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from pydantic import BaseModel, Field
 from langchain.tools import tool
+from pydantic import BaseModel, Field
 
 from scdata_agent.application.agents.shared import AgentContext
 from scdata_agent.infrastructure.llm.agent_runtime import run_bounded_agent

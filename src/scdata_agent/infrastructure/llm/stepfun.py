@@ -9,7 +9,6 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-
 DEFAULT_BASE_URL = "https://api.stepfun.com/step_plan/v1"
 DEFAULT_MODEL = "step-3.7-flash"
 VALID_EFFORTS = {"low", "medium", "high"}
@@ -41,7 +40,7 @@ class StepFunSettings(BaseModel):
     timeout_seconds: float = Field(default=180.0, gt=0)
 
     @classmethod
-    def from_environment(cls) -> "StepFunSettings":
+    def from_environment(cls) -> StepFunSettings:
         load_local_env()
         api_key = os.getenv("STEPFUN_API_KEY")
         if not api_key:

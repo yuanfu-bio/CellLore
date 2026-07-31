@@ -10,7 +10,6 @@ from enum import StrEnum
 
 from scdata_agent.domain.models import Identifier
 
-
 ACCESSION_PATTERNS: dict[str, re.Pattern[str]] = {
     "geo_series": re.compile(r"\bGSE\d+\b", re.IGNORECASE),
     "geo_sample": re.compile(r"\bGSM\d+\b", re.IGNORECASE),

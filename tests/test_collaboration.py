@@ -9,7 +9,6 @@ from scdata_agent.domain.models import (
     DiscoveryRunResult,
     FeasibilityReport,
     QueryPlan,
-    ResearchRequirement,
 )
 
 

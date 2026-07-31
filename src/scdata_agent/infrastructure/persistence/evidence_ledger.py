@@ -15,7 +15,6 @@ from scdata_agent.domain.models import (
     utc_now,
 )
 
-
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;

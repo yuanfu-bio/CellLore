@@ -13,7 +13,6 @@ from scdata_agent.infrastructure.llm.research_planner import (
     _mentions_clinical_outcomes,
 )
 
-
 METHODS_QUESTION_ZH = (
     "面向单细胞表观组数据的自监督生物基础模型：聚焦scATAC-seq与单细胞multiome公开数据，"
     "构建数据策展、统一表示、自监督预训练与评估基础模型原型"

@@ -2,8 +2,12 @@ import httpx
 import pytest
 
 from scdata_agent.domain.models import (
-    AccessLevel, AssetAvailability, AssetLocation, DataAsset,
-    DataRole, TransferProtocol,
+    AccessLevel,
+    AssetAvailability,
+    AssetLocation,
+    DataAsset,
+    DataRole,
+    TransferProtocol,
 )
 from scdata_agent.infrastructure.remote_probe import RemoteAvailabilityProbe
 

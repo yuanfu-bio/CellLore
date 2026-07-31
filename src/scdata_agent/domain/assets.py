@@ -8,7 +8,6 @@ from pathlib import PurePosixPath
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.models import AssetBundle, DataAsset, DataRole
 
-
 # Order is significant: the first match wins, so narrower patterns come first.
 # A fragment index name contains the fragment name, and a peak matrix name
 # contains "peak", so those must precede their broader counterparts.

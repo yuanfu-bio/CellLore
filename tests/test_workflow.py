@@ -1,14 +1,14 @@
 import pytest
 
+from scdata_agent.application.discovery import DiscoveryWorkflow
 from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.infrastructure.persistence.evidence_ledger import EvidenceLedger
 from scdata_agent.domain.models import (
     AccessLevel,
     Identifier,
     QuerySpec,
     SourceRecord,
 )
-from scdata_agent.application.discovery import DiscoveryWorkflow
+from scdata_agent.infrastructure.persistence.evidence_ledger import EvidenceLedger
 
 
 class FakeAdapter:

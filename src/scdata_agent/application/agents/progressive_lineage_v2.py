@@ -9,8 +9,12 @@ from scdata_agent.application.agents.shared import AgentContext, latest_artifact
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import (
-    BundleLineageAssessment, LineageFamily, LineageGraphSnapshot,
-    ResourcePointer, SemanticBundle, TransferReceipt,
+    BundleLineageAssessment,
+    LineageFamily,
+    LineageGraphSnapshot,
+    ResourcePointer,
+    SemanticBundle,
+    TransferReceipt,
 )
 from scdata_agent.domain.models import DataAsset
 

@@ -14,7 +14,6 @@ from pydantic import BaseModel
 from scdata_agent.domain.lifecycle import BundleStatus, validate_bundle_transition
 from scdata_agent.domain.models import utc_now
 
-
 CATALOG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_record (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,

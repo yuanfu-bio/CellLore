@@ -9,7 +9,11 @@ from typing import Any, Protocol
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from scdata_agent.infrastructure.llm.stepfun import StepFunChatClient, StepFunSettings, load_local_env
+from scdata_agent.infrastructure.llm.stepfun import (
+    StepFunChatClient,
+    StepFunSettings,
+    load_local_env,
+)
 
 
 class ReasoningProfile(StrEnum):
@@ -121,7 +125,7 @@ class ModelRouter:
         return ChatOpenAI(model=model, api_key=settings.api_key, base_url=settings.base_url, temperature=0.0, extra_body={"reasoning_effort": effort})
 
     @classmethod
-    def from_environment(cls) -> "ModelRouter":
+    def from_environment(cls) -> ModelRouter:
         load_local_env()
         provider = os.getenv("SCDATA_AGENT_MODEL_PROVIDER", "stepfun").lower()
         clients: dict[ReasoningProfile, ChatClient] = {}

@@ -18,11 +18,13 @@ from scdata_agent.application.resource_pipeline import (
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import (
     BundleStatus,
-    RemoteAssetObservation,
     SemanticBundle,
 )
 from scdata_agent.domain.models import (
-    AccessLevel, AssetAvailability, DataAsset, DataRole,
+    AccessLevel,
+    AssetAvailability,
+    DataAsset,
+    DataRole,
 )
 from scdata_agent.domain.requirements import applicable_bundle_schemas
 from scdata_agent.domain.resource_pipeline import (

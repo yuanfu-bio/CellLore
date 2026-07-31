@@ -3,15 +3,31 @@ import pytest
 from scdata_agent.application.agents.acquisition_v2 import AcquisitionStrategistAgent
 from scdata_agent.application.agents.progressive_lineage_v2 import ProgressiveLineageLeakageAgent
 from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import AgentName, ArtifactKind, CollaborationLedger, artifact
+from scdata_agent.application.collaboration import (
+    AgentName,
+    ArtifactKind,
+    CollaborationLedger,
+    artifact,
+)
 from scdata_agent.domain.lifecycle import (
-    BundleLineageAssessment, BundleStatus, LicenseStatus,
-    LineageFamily, LineageGraphSnapshot, PreflightBundleReport, SemanticBundle,
+    BundleLineageAssessment,
+    BundleStatus,
+    LicenseStatus,
+    LineageFamily,
+    LineageGraphSnapshot,
+    PreflightBundleReport,
+    SemanticBundle,
 )
 from scdata_agent.domain.models import (
-    AccessLevel, AssetAvailability, AssetLocation, DataAsset, DataRole,
-    DatasetCandidate, DiscoveryRunResult, Identifier, QueryPlan,
-    ResearchRequirement, TransferProtocol,
+    AssetLocation,
+    DataAsset,
+    DataRole,
+    DatasetCandidate,
+    DiscoveryRunResult,
+    Identifier,
+    QueryPlan,
+    ResearchRequirement,
+    TransferProtocol,
 )
 from scdata_agent.domain.resource_pipeline import BundleAccessStatus, RemoteBundleInventorySummary
 
@@ -129,7 +145,7 @@ async def test_unknown_license_alone_holds_back_an_otherwise_ready_bundle(tmp_pa
     run recommends nothing stays visible rather than being mistaken for a bug.
     """
     candidates = [DatasetCandidate(candidate_id="a", title="a")]
-    ctx = context(tmp_path, candidates)
+    context(tmp_path, candidates)
     bundle = SemanticBundle(
         bundle_id="bundle_a", candidate_id="a", bundle_type="processed",
         asset_ids=["asset_a"], applicable_schema_ids=["scatac_standalone"],
