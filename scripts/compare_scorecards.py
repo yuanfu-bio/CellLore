@@ -91,6 +91,13 @@ def compare(before: dict[str, Any], after: dict[str, Any]) -> int:
         if missing:
             print(f"    NEWLY UNRECALLED: {sorted(missing)}")
             regressions += len(missing)
+        # An absolute check, not a delta: a record the question forbids is a
+        # regression even if the baseline also admitted it. This is the one
+        # place where matching the baseline is not good enough.
+        forbidden = sorted(new_q.get("forbidden_passing_modality_gate", []))
+        if forbidden:
+            print(f"    FORBIDDEN, YET ADMITTED: {forbidden}")
+            regressions += len(forbidden)
 
     print(f"\n{regressions} regression(s)")
     return 1 if regressions else 0

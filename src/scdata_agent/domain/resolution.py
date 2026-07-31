@@ -11,15 +11,40 @@ from scdata_agent.domain.identifiers import (
 )
 from scdata_agent.domain.models import AccessLevel, DatasetCandidate, SourceRecord
 
+# Identifiers that name one deposition, as opposed to the programme that funded
+# it or the archive project it was filed under. Two records that each carry one
+# of these and do not share it are different studies, whatever else they have in
+# common.
+STUDY_NAMESPACES = frozenset({"geo_series", "ega_study"})
+
 
 def merge_source_records(records: list[SourceRecord]) -> list[DatasetCandidate]:
-    """Merge records that share any dataset identifier.
+    """Merge records that share a dataset identifier, unless they disagree.
+
+    Sharing an identifier is evidence of identity, but not all identifiers carry
+    the same weight. ENCODE files every experiment under one BioProject
+    (PRJNA63443) and one SRA study (SRP012412); unioning on those merged 13
+    distinct GEO Series into a single candidate, whose modality list was then the
+    union of everything ENCODE has ever deposited. A same-cell question admitted
+    the whole blob because one member of it was genuinely multiome.
+
+    So study identifiers are applied first, and any later identifier may only
+    merge two groups that do not already disagree about which study they are.
+    This needs no list of which accessions are umbrellas: an umbrella is simply
+    an identifier whose members turn out to disagree.
 
     Records with no dataset identifier remain independent literature candidates.
-    This conservative rule avoids merging biologically similar but distinct studies.
     """
 
     parent = list(range(len(records)))
+    study_ids: list[set[str]] = [
+        {
+            identifier.canonical
+            for identifier in record.identifiers
+            if identifier.namespace.lower() in STUDY_NAMESPACES
+        }
+        for record in records
+    ]
 
     def find(index: int) -> int:
         while parent[index] != index:
@@ -29,17 +54,32 @@ def merge_source_records(records: list[SourceRecord]) -> list[DatasetCandidate]:
 
     def union(left: int, right: int) -> None:
         left_root, right_root = find(left), find(right)
-        if left_root != right_root:
-            parent[right_root] = left_root
+        if left_root == right_root:
+            return
+        left_studies, right_studies = study_ids[left_root], study_ids[right_root]
+        if left_studies and right_studies and left_studies.isdisjoint(right_studies):
+            return
+        parent[right_root] = left_root
+        study_ids[left_root] = left_studies | right_studies
 
+    # Study identifiers first, so that by the time a broader identifier is
+    # considered, the groups it would join already know which study they are.
+    # Sorted within each pass to keep the outcome independent of input order.
+    mentions: list[tuple[int, str, int]] = [
+        (
+            0 if identifier.namespace.lower() in STUDY_NAMESPACES else 1,
+            identifier.canonical,
+            index,
+        )
+        for index, record in enumerate(records)
+        for identifier in record.identifiers
+    ]
     first_seen: dict[str, int] = {}
-    for index, record in enumerate(records):
-        for identifier in record.identifiers:
-            canonical = identifier.canonical
-            if canonical in first_seen:
-                union(index, first_seen[canonical])
-            else:
-                first_seen[canonical] = index
+    for _, canonical, index in sorted(mentions):
+        if canonical in first_seen:
+            union(index, first_seen[canonical])
+        else:
+            first_seen[canonical] = index
 
     groups: dict[int, list[SourceRecord]] = defaultdict(list)
     for index, record in enumerate(records):

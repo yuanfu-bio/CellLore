@@ -63,8 +63,8 @@ Baseline for the daily updates below. Re-verify before disputing a row.
 
 | Fact | Evidence |
 |---|---|
-| Test suite green, fully offline | `pytest` → 184 passed; `ruff check src tests scripts` clean |
-| Curation judgement is measured | `scripts/eval_discovery.py` over `eval/records.jsonl` (48 live-captured records): `pairing_overclaim_rate` 0.40, `modality_recall` 0.52, `deposition_precision` 0.57 |
+| Test suite green, fully offline | `pytest` → 194 passed; `ruff check src tests scripts` clean |
+| Curation judgement is measured | `scripts/eval_discovery.py` over `eval/records.jsonl` (48 live-captured records): `pairing_overclaim_rate` **0.00**, `modality_recall` **1.00**, `layer_recall` 1.00, `pairing_recall` 0.67 |
 | NL → approval checkpoint works live | `var/p3_acceptance/stdout.json`: 11 tasks completed, `status = waiting_for_decision`, 3 recommended bundles, 16.27 GB |
 | Paired-multiome question is understood | Same run, Chinese same-cell/trimodal question; requirement carried `minimum_pairing_level` |
 | **Nothing has ever been downloaded** | every `var/*/data/` is empty; no `transfer_execution` / `dataset_curator` / `corpus_governance` task exists in any sqlite ledger |
@@ -85,37 +85,59 @@ pipe that is not yet connected.
 
 | # | Task | Status | Owner | Updated | Acceptance criterion |
 |---|---|---|---|---|---|
-| P0.0 | Stop the pipeline overclaiming pairing (see below) | ⬜ | | | `pairing_overclaim_rate` drops from 0.40 toward 0; `pairing_recall` does not regress; baseline scorecard updated in the same commit |
+| P0.0 | Stop the pipeline overclaiming pairing (see below) | ✅ | | 2026-07-31 | `pairing_overclaim_rate` 0.40 → **0.00**, `modality_recall` 0.52 → **1.00**, `pairing_recall` held at 0.67; `forbid_modality_pass` empty for every question; baseline updated |
 | P0.1 | Pick a small, known-good pilot study (10x Multiome, clear terms, single-digit GB) and record its accession here | ⬜ | | | Accession written into this row; `agent-run` on a narrow question returns it as `recommended` |
 | P0.2 | Converters for common 10x processed layouts → AnnData/MuData | ⬜ | | | `barcodes.tsv.gz` + `peaks.bed` + `matrix.mtx.gz` (+ `fragments.tsv.gz`) package yields a non-null `standard_object_path`; offline test built from a real GEO listing |
 | P0.3 | First real transfer execution | ⬜ | | | A `transfer_execution` task exists in the ledger with successful receipts; resume interrupted mid-transfer and confirm range continuation + checksum both hold |
 | P0.4 | First real materialization | ⬜ | | | `data/curated/<candidate>/<bundle>/` contains `DATA_CARD.md`, `provenance.json`, `manifest.json` and a standard object |
 | P0.5 | First real corpus snapshot | ⬜ | | | Snapshot with a non-empty `admitted_bundle_ids`; `corpus_approval` checkpoint resolved |
 
-### P0.0 — the pairing overclaim
+### P0.0 — the pairing overclaim (fixed 2026-07-31)
 
 Twelve of the thirty standalone snATAC-seq depositions in `eval/records.jsonl`
-report themselves as **same-nucleus paired multiome**. Two causes, both in
-`infrastructure/sources/common.py`, both from matching aliases against a joined
-metadata blob rather than prose:
+reported themselves as **same-nucleus paired multiome**. A false positive, so it
+never announced itself: a same-cell request silently admitted standalone ATAC
+runs whose data cannot support the claim, nothing entered manual review, and the
+only visible effect was recall looking better.
 
-- `"gene expression"` is in `RNA_ALIASES` (`common.py:22`), and every GEO-brokered
-  SRA record carries `contact_name="Gene Expression Omnibus (GEO), NCBI, NLM,
-  NIH"` — a transcriptome layer appears out of the submitter's name.
-- `_infer_pairing_level` ends with a bare `if "multiome" in content` →
-  `SAME_NUCLEUS` (`common.py:137`), which promotes ENCODE records that merely cite
-  a protocol PDF named `chromium_multiome_atac_gex.pdf`.
+Three causes, not the two first recorded. Each is now pinned by a test in
+`tests/test_pairing_overclaim.py` built from the payload the archive actually
+served:
 
-This is a **false positive**, so it will not announce itself: a same-cell request
-silently admits standalone ATAC runs whose data cannot support the claim, nothing
-enters manual review, and the only visible effect is recall looking better. It is
-the error the `multiome_same_cell` / `matched_scrna_scatac` split exists to
-prevent, occurring one layer below that split. Phase one depends on exactly this
-judgement, which is why it precedes P0.1: picking a pilot study means trusting
-these labels.
+1. **Inference ran on serialised metadata, not prose.** NCBI's SRA ESummary
+   returns raw Experiment XML. `contact_name="Gene Expression Omnibus (GEO),
+   NCBI, NLM, NIH"` appears on every GEO-brokered record, and `gene expression`
+   is an RNA alias — a transcriptome layer materialised out of the submitter's
+   name. A protocol PDF named `Chromium_Multiome_ATAC_GEX.pdf` supplied the
+   pairing claim. Fixed by `prose_text()`, which drops markup with its
+   attributes, URLs and document filenames before any alias is matched.
+2. **Aliases matched as bare substrings.** Now bounded, so `adt` cannot fire
+   inside a longer word. This exposed that `RNA_ALIASES` never named the
+   single-nucleus spellings at all — `snRNA-seq` was only ever reached by
+   `rna-seq` colliding inside it — so they are listed explicitly, mirroring
+   `ATAC_ALIASES`.
+3. **ENCODE's umbrella BioProject was treated as dataset identity.** Every
+   ENCODE experiment is filed under `PRJNA63443` and `SRP012412`. Unioning on
+   those merged **13 distinct GEO Series into one candidate**, whose modality
+   list became the union of the group — so one genuinely multiome member let all
+   the standalone snATAC ones through a same-cell question. Text inference alone
+   would not have caught this: the labels were right and the merge was wrong.
+   `domain/resolution.py` now applies study identifiers first and refuses any
+   later merge between groups that already disagree about which study they are.
+   No list of umbrella accessions is needed — an umbrella is just an identifier
+   whose members turn out to disagree.
 
-`forbid_pairing_above` in `eval/golden_questions.yaml` pins it — here the
-expensive error is the false positive, not the miss.
+Cause 3 is why this took a scorecard rather than a code review: the first two
+fixes moved `pairing_overclaim_rate` to 0.00 while standalone ATAC was still
+reaching a same-cell question by another route.
+
+**Guard against recurrence.** `forbid_pairing_above` bounds what a record may
+claim; `forbid_modality_pass` (added here) names the records a question must
+never admit and is checked **absolutely** — matching the baseline does not
+excuse it, because excluding a record that should never have passed *lowers*
+`deposition_precision`, making a fix and a defect read identically as a delta.
+Two questions' precision did fall for exactly that reason; the reason is written
+into their notes in `eval/golden_questions.yaml`.
 
 ### Why P0.2 is the hard blocker
 

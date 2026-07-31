@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
+from functools import lru_cache
 
 from scdata_agent.domain.models import (
     AssayProfile,
@@ -16,9 +18,15 @@ ATAC_ALIASES = (
     "single nucleus atac", "single-nucleus atac",
     "single cell chromatin accessibility", "chromatin accessibility",
 )
+# Single-nucleus spellings are listed explicitly, mirroring ATAC_ALIASES. They
+# used to be reached only by `rna-seq` matching inside `snRNA-seq`, which a
+# bounded matcher correctly refuses -- the alias table has to name the assay
+# rather than rely on a substring collision.
 RNA_ALIASES = (
-    "scrna", "single cell rna", "single-cell rna", "transcriptome",
-    "transcriptomic", "gene expression", "rna-seq",
+    "scrna", "snrna", "single cell rna", "single-cell rna",
+    "single nucleus rna", "single-nucleus rna",
+    "transcriptome", "transcriptomic", "gene expression",
+    "rna-seq", "rna sequencing",
 )
 PROTEIN_ALIASES = (
     "surface protein", "protein abundance", "antibody-derived tag",
@@ -38,13 +46,39 @@ TECHNOLOGY_PROFILES: tuple[dict, ...] = (
 )
 
 
+# An archive's "description" is not always prose. NCBI's SRA ESummary returns
+# the raw Experiment XML, whose markup carries submitter boilerplate and
+# protocol URLs that describe the *deposition process*, not the assay. Matching
+# assay aliases against that made a transcriptome layer and a same-nucleus
+# pairing claim appear out of `contact_name="Gene Expression Omnibus (GEO),
+# NCBI, NLM, NIH"` and a protocol file named `Chromium_Multiome_ATAC_GEX.pdf`.
+# Only what a human would read as prose may support a claim about the assay.
+_MARKUP_RE = re.compile(r"<[^<>]*>")
+_URL_RE = re.compile(r"(?:https?://|ftp://|www\.)\S+", re.IGNORECASE)
+_PATH_RE = re.compile(r"\S+\.(?:pdf|html?|xlsx?|docx?|csv|txt|zip|gz|tar)\b", re.IGNORECASE)
+
+
+def prose_text(texts: Iterable[str | None]) -> str:
+    """Join source texts, dropping the parts no human would read as prose.
+
+    Markup is removed tag-and-attributes together, because the attribute values
+    are precisely where the submitter boilerplate lives. URLs and document
+    filenames go too: a protocol PDF names the method used to *prepare* a
+    library, and citing one is not a claim about what this record contains.
+    """
+    joined = " ".join(text for text in texts if text)
+    without_markup = _MARKUP_RE.sub(" ", joined)
+    without_urls = _URL_RE.sub(" ", without_markup)
+    return _PATH_RE.sub(" ", without_urls).casefold()
+
+
 def infer_assay_profiles(texts: Iterable[str | None]) -> list[AssayProfile]:
-    content = " ".join(text for text in texts if text).casefold()
-    if not content:
+    content = prose_text(texts)
+    if not content.strip():
         return []
     profiles: list[AssayProfile] = []
     for spec in TECHNOLOGY_PROFILES:
-        matched = [alias for alias in spec["aliases"] if alias in content]
+        matched = [alias for alias in spec["aliases"] if _matches(alias, content)]
         if matched:
             profiles.append(AssayProfile(
                 label=spec["label"],
@@ -129,15 +163,33 @@ def _infer_pairing_level(content: str) -> PairingLevel:
         return PairingLevel.SAME_SAMPLE
     if _has_any(content, ("same donor", "matched donor", "donor-matched", "paired donor")):
         return PairingLevel.SAME_DONOR
-    if _has_any(content, ("paired scrna", "paired scRNA".casefold(), "matched scrna", "paired rna and atac", "matched rna and atac")):
+    if _has_any(content, ("paired scrna", "matched scrna", "paired rna and atac", "matched rna and atac")):
         return PairingLevel.UNVERIFIED
-    if "multiome" in content:
+    # Deliberately only the exact word `multiome`, which names the 10x assay.
+    # `multiomics` and `multi-omics` describe a study design, not a measurement
+    # unit: "single cell multiomics revealed ..." says two layers were profiled
+    # and says nothing about whether one cell yielded both. Accepting those here
+    # reproduces the overclaim this function was fixed to stop, one word wider.
+    if _matches("multiome", content):
         return PairingLevel.SAME_NUCLEUS
     return PairingLevel.STUDY_LEVEL
 
 
+@lru_cache(maxsize=512)
+def _alias_pattern(alias: str) -> re.Pattern[str]:
+    # Bounded so a short alias cannot match inside a longer word: `adt` must not
+    # fire on `adta`, and `protein` must not fire on `proteins`' neighbours in
+    # an accession. Lookarounds rather than `\b` because several aliases begin
+    # or end with punctuation (`snare-seq`, `multiome atac + gene expression`).
+    return re.compile(rf"(?<!\w){re.escape(alias.casefold())}(?!\w)")
+
+
+def _matches(alias: str, content: str) -> bool:
+    return _alias_pattern(alias).search(content) is not None
+
+
 def _has_any(content: str, aliases: tuple[str, ...]) -> bool:
-    return any(alias.casefold() in content for alias in aliases)
+    return any(_matches(alias, content) for alias in aliases)
 
 
 def _unique_profiles(values: list[AssayProfile]) -> list[AssayProfile]:

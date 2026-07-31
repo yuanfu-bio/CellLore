@@ -6,25 +6,12 @@
   },
   "inference": {
     "layer_recall": 1.0,
-    "modality_recall": 0.5161,
+    "modality_recall": 1.0,
     "pairing_missed": [
       "src_a3da53793f8d55a9"
     ],
-    "pairing_overclaim_rate": 0.4,
-    "pairing_overclaimed": [
-      "src_22124b1fe971220e:same_nucleus",
-      "src_54a59c6c4bd45e64:same_nucleus",
-      "src_57248e77a2228f65:same_nucleus",
-      "src_6e868a575fad7a09:same_nucleus",
-      "src_6ffd4533ce4fb5b2:same_nucleus",
-      "src_7733f3dadbdac954:same_nucleus",
-      "src_9ca7465010918413:same_nucleus",
-      "src_a7dc7e03243e8ad6:same_nucleus",
-      "src_ede6bc8daeda20d8:same_nucleus",
-      "src_f82967d4f449c48d:same_nucleus",
-      "src_fbf45617507a9421:same_nucleus",
-      "src_ff437d702fd6c08e:same_nucleus"
-    ],
+    "pairing_overclaim_rate": 0.0,
+    "pairing_overclaimed": [],
     "pairing_recall": 0.6667,
     "profile_inferred_rate": 1.0,
     "profile_missing": [],
@@ -32,18 +19,19 @@
   },
   "questions": [
     {
-      "candidates": 19,
+      "candidates": 35,
       "decisions": {
         "eligible": 0,
         "exclude": 5,
-        "manual_review": 14
+        "manual_review": 30
       },
-      "deposition_precision": 0.5714,
+      "deposition_precision": 0.7667,
       "expected_recall_missing": [],
+      "forbidden_passing_modality_gate": [],
       "id": "scatac_pretraining",
       "modality_gate": {
         "fail": 5,
-        "pass": 14,
+        "pass": 30,
         "unknown": 0,
         "warn": 0
       },
@@ -53,7 +41,8 @@
         "Developing a comprehensive database and search tool for single-cell AT",
         "Highly accurate reference and method selection for universal cross-dat",
         "Semi-parametric empirical bayes method for multiplet detection in snAT",
-        "Single-cell multiomics data integration and generation with scPairing."
+        "Single-cell multiomics data integration and generation with scPairing.",
+        "Somatic variant detection in normal tissues from single-cell sequencin"
       ],
       "question": "public scATAC-seq and snATAC-seq data for self-supervised representation learning",
       "requirement": {
@@ -66,18 +55,19 @@
       }
     },
     {
-      "candidates": 19,
+      "candidates": 35,
       "decisions": {
         "eligible": 0,
-        "exclude": 13,
-        "manual_review": 6
+        "exclude": 30,
+        "manual_review": 5
       },
-      "deposition_precision": 0.6667,
+      "deposition_precision": 0.6,
       "expected_recall_missing": [],
+      "forbidden_passing_modality_gate": [],
       "id": "same_cell_multiome",
       "modality_gate": {
-        "fail": 13,
-        "pass": 6,
+        "fail": 30,
+        "pass": 5,
         "unknown": 0,
         "warn": 0
       },
@@ -95,17 +85,18 @@
       }
     },
     {
-      "candidates": 19,
+      "candidates": 35,
       "decisions": {
         "eligible": 0,
-        "exclude": 7,
+        "exclude": 23,
         "manual_review": 12
       },
-      "deposition_precision": 0.5833,
+      "deposition_precision": 0.5,
       "expected_recall_missing": [],
+      "forbidden_passing_modality_gate": [],
       "id": "non_atac_generality",
       "modality_gate": {
-        "fail": 7,
+        "fail": 23,
         "pass": 12,
         "unknown": 0,
         "warn": 0
@@ -115,7 +106,8 @@
         "Cell type annotation for scATAC-seq via DNA large language model and g",
         "Highly accurate reference and method selection for universal cross-dat",
         "Semi-parametric empirical bayes method for multiplet detection in snAT",
-        "Single-cell multiomics data integration and generation with scPairing."
+        "Single-cell multiomics data integration and generation with scPairing.",
+        "Somatic variant detection in normal tissues from single-cell sequencin"
       ],
       "question": "human single-cell RNA sequencing data for cell type annotation",
       "requirement": {

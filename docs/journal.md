@@ -37,6 +37,28 @@
 - The LLM-derived planner path (`research_planner.py::_compile_contracts`) recognises modalities via the same `MODALITY_ALIASES` table the rule-based compiler scans (`_known_modalities`, matching every applicable modality rather than at most one), instead of a separately maintained, narrower keyword list that could not name trimodal, ASAP-seq/ISSAAC-seq, or matched scRNA/scATAC. Same-cell pairing narrowing (`restrict_modalities_to_pairing`) and role derivation (`roles_for_modalities`) are single shared functions used by both the rule-based compiler and both LLM integration points (`research_planner.py`, `requirement_compiler.py`), replacing three independently drifted copies -- one of which lacked the PROTEIN_MATRIX branch entirely. A technology name that matches no known alias is preserved as `ResearchRequirement.supplementary_search_terms` rather than discarded; `QueryPlanner` ORs a bounded number of these into the query, alongside the deterministic modality terms rather than replacing them.
 - `agent-run` defaults to the planner's `deep` mode (`--planner-mode`, four sequential LLM calls, ~600s budget) instead of `fast` (two parallel calls racing a 30s-per-branch budget, prone to timing out into the offline template on a demanding question). `compile`/`discover` keep defaulting to `fast` for quick iteration.
 
+- Assay inference reads prose, not serialised metadata. `prose_text` strips
+  markup together with its attributes, URLs and document filenames before any
+  alias is matched, and aliases match on word boundaries. This stopped a
+  transcriptome layer appearing out of `contact_name="Gene Expression Omnibus
+  (GEO), NCBI, NLM, NIH"` on every GEO-brokered SRA record, and a same-nucleus
+  pairing claim appearing out of a protocol PDF named
+  `Chromium_Multiome_ATAC_GEX.pdf`. `RNA_ALIASES` now names the single-nucleus
+  spellings explicitly rather than reaching them by substring collision.
+- Candidate merging distinguishes a study identifier from an umbrella. Study
+  identifiers (`geo_series`, `ega_study`) are applied first, and no later
+  identifier may merge two groups that already disagree about which study they
+  are. ENCODE files every experiment under BioProject `PRJNA63443`; unioning on
+  it merged 13 distinct GEO Series into one candidate whose modality list was
+  the union of the group, letting standalone snATAC depositions pass a same-cell
+  question on the strength of one genuinely multiome member. The rule needs no
+  list of umbrella accessions: an umbrella is an identifier whose members
+  disagree.
+- The evaluation harness gained `forbid_modality_pass`, an absolute per-question
+  assertion naming records that must never pass the modality gate. It exists
+  because `deposition_precision` falls when a wrongly-admitted record is
+  correctly excluded, so a rate cannot tell a fix from a regression.
+
 ## Next
 
 Tracked with owners, acceptance criteria and daily status in

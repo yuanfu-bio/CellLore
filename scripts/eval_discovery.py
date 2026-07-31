@@ -239,6 +239,12 @@ async def score_question(
     modality_pass_primary = 0
     modality_pass_total = 0
     methods_papers_passing: list[str] = []
+    # Records this question must *not* admit. `deposition_precision` cannot
+    # express this: excluding a record that should never have passed lowers the
+    # number, so a fix and a regression look alike. A named list does not move
+    # when the corpus does, which is what makes it worth arguing about.
+    forbidden = set(spec.get("forbid_modality_pass", []))
+    forbidden_passing: list[str] = []
 
     for candidate in result.candidates:
         report = reports.get(candidate.candidate_id)
@@ -259,6 +265,9 @@ async def score_question(
             modality_pass_primary += int(is_primary)
             if not is_primary:
                 methods_papers_passing.append(candidate.title[:70])
+            forbidden_passing.extend(
+                sorted(forbidden.intersection(candidate.source_record_ids))
+            )
 
     recalled = set()
     for candidate in result.candidates:
@@ -293,6 +302,9 @@ async def score_question(
             else None
         ),
         "non_primary_passing_modality_gate": sorted(methods_papers_passing),
+        # Must stay empty. Anything here is a record being admitted to a
+        # question its data cannot answer.
+        "forbidden_passing_modality_gate": sorted(set(forbidden_passing)),
         "expected_recall_missing": sorted(
             set(expected_recall) - recalled
         ),

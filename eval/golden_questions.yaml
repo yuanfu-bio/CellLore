@@ -35,6 +35,10 @@ meta:
 #   expect_pairing_at_least  weakest acceptable pairing claim
 #   forbid_pairing_above     strongest pairing the record may claim
 #
+# Question specs additionally take `forbid_modality_pass`: record IDs that must
+# never pass that question's modality gate. Unlike every rate here, it is
+# checked absolutely -- matching the baseline does not excuse it.
+#
 # `forbid_pairing_above` exists because the expensive error here is the false
 # positive, not the miss. A standalone ATAC run that reports itself as
 # same-nucleus paired multiome would be admitted into a corpus that its data
@@ -237,9 +241,38 @@ questions:
     expect_eligible_kinds: [primary_deposition]
     # Only records whose pairing claim reaches the same-cell tier belong here.
     expect_recalled: [src_b5b175ca0b94e758]
+    # The ENCODE snATAC depositions brokered by GEO. Their ESummary blob is what
+    # made them look like same-nucleus multiome; naming them here means the
+    # question can never silently start admitting them again. Kept as an
+    # assertion rather than left to `deposition_precision`, because excluding a
+    # record that should never have passed *lowers* that number -- so the fix
+    # and the defect read identically as a delta.
+    forbid_modality_pass:
+      - src_22124b1fe971220e
+      - src_2df1d11ae03fd153
+      - src_54a59c6c4bd45e64
+      - src_57248e77a2228f65
+      - src_6e868a575fad7a09
+      - src_6ffd4533ce4fb5b2
+      - src_7733f3dadbdac954
+      - src_77a05241bab22efa
+      - src_9ca7465010918413
+      - src_a7dc7e03243e8ad6
+      - src_d1f7a0c326197099
+      - src_ede6bc8daeda20d8
+      - src_f82967d4f449c48d
+      - src_fbf45617507a9421
+      - src_ff437d702fd6c08e
     note: >-
       The narrowing case. GSE340993 declares a 10x Multiome relationship; the
       plain snATAC records must not satisfy a same-cell requirement.
+
+      `deposition_precision` here fell from 0.6667 to 0.6000 when P0.0 was
+      fixed, and that fall is the fix working: the passing set lost primary
+      depositions that were only passing because ENCODE's umbrella BioProject
+      had merged them into a candidate that contained one real multiome record.
+      Read `forbid_modality_pass` before reading the precision number -- the
+      list is the guarantee, the rate is a summary.
 
   - id: non_atac_generality
     question: >-
@@ -249,3 +282,8 @@ questions:
       Not an ATAC question at all. It is here to prove the pipeline is not
       hardwired to one modality -- it must still compile a requirement and
       produce a structured judgement rather than an empty result.
+
+      `deposition_precision` fell from 0.5833 to 0.5000 with the P0.0 fix, for
+      the same reason as `same_cell_multiome`: standalone snATAC depositions
+      stopped passing an scRNA question they never had the data to answer.
+      A rate cannot distinguish a lost right answer from a lost wrong one.
