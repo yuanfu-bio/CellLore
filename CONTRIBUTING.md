@@ -66,6 +66,34 @@ pytest tests/test_architecture.py        # layer boundaries only
 pytest -k schema                         # bundle-schema logic
 ```
 
+## Measuring a judgement change
+
+Changing a gate, an alias table or an inference rule changes what the agent
+recommends. `pytest` proves you did not break a case somebody already thought
+of; it does not tell you whether the change helped overall. The scorecard does.
+
+```bash
+python scripts/eval_discovery.py --out var/scorecard_mine.json
+python scripts/compare_scorecards.py eval/baseline_scorecard.json var/scorecard_mine.json
+```
+
+It replays `eval/records.jsonl` — 48 records captured from live Europe PMC, GEO
+and SRA runs — through the real compiler, planner, merge and feasibility path.
+No network, no API key, no LLM, so the numbers are reproducible by everyone.
+
+The corpus deliberately stores only raw archive fields; assay profiles and
+modalities are re-derived on every run. That is what makes an inference change
+visible instead of frozen into the fixture.
+
+CI runs the comparison and fails on a regression. **When your change improves a
+metric on purpose, update `eval/baseline_scorecard.json` in the same commit** —
+otherwise the next person inherits a baseline that no longer describes `main`.
+Say in the commit message which number moved and why.
+
+New labels go in `eval/golden_questions.yaml`. Label the record for what the
+archive actually says, and write the reason down when it is a judgement call
+rather than a fact — the next person needs to be able to argue with it.
+
 ## Adding a data source
 
 Most valuable contribution right now. See the roadmap in `README.md`.

@@ -1,0 +1,131 @@
+{
+  "by_kind": {
+    "methods_paper": 7,
+    "primary_deposition": 39,
+    "resource_paper": 2
+  },
+  "inference": {
+    "layer_recall": 1.0,
+    "modality_recall": 0.5161,
+    "pairing_missed": [
+      "src_a3da53793f8d55a9"
+    ],
+    "pairing_overclaim_rate": 0.4,
+    "pairing_overclaimed": [
+      "src_22124b1fe971220e:same_nucleus",
+      "src_54a59c6c4bd45e64:same_nucleus",
+      "src_57248e77a2228f65:same_nucleus",
+      "src_6e868a575fad7a09:same_nucleus",
+      "src_6ffd4533ce4fb5b2:same_nucleus",
+      "src_7733f3dadbdac954:same_nucleus",
+      "src_9ca7465010918413:same_nucleus",
+      "src_a7dc7e03243e8ad6:same_nucleus",
+      "src_ede6bc8daeda20d8:same_nucleus",
+      "src_f82967d4f449c48d:same_nucleus",
+      "src_fbf45617507a9421:same_nucleus",
+      "src_ff437d702fd6c08e:same_nucleus"
+    ],
+    "pairing_recall": 0.6667,
+    "profile_inferred_rate": 1.0,
+    "profile_missing": [],
+    "records_labelled": 48
+  },
+  "questions": [
+    {
+      "candidates": 19,
+      "decisions": {
+        "eligible": 0,
+        "exclude": 5,
+        "manual_review": 14
+      },
+      "deposition_precision": 0.5714,
+      "expected_recall_missing": [],
+      "id": "scatac_pretraining",
+      "modality_gate": {
+        "fail": 5,
+        "pass": 14,
+        "unknown": 0,
+        "warn": 0
+      },
+      "non_primary_passing_modality_gate": [
+        "Alignment-free integration of single-nucleus ATAC-seq across species w",
+        "Cell type annotation for scATAC-seq via DNA large language model and g",
+        "Developing a comprehensive database and search tool for single-cell AT",
+        "Highly accurate reference and method selection for universal cross-dat",
+        "Semi-parametric empirical bayes method for multiplet detection in snAT",
+        "Single-cell multiomics data integration and generation with scPairing."
+      ],
+      "question": "public scATAC-seq and snATAC-seq data for self-supervised representation learning",
+      "requirement": {
+        "compiler": "rule_based_v1",
+        "minimum_pairing_level": null,
+        "modalities": [
+          "snatac_seq",
+          "scatac_seq"
+        ]
+      }
+    },
+    {
+      "candidates": 19,
+      "decisions": {
+        "eligible": 0,
+        "exclude": 13,
+        "manual_review": 6
+      },
+      "deposition_precision": 0.6667,
+      "expected_recall_missing": [],
+      "id": "same_cell_multiome",
+      "modality_gate": {
+        "fail": 13,
+        "pass": 6,
+        "unknown": 0,
+        "warn": 0
+      },
+      "non_primary_passing_modality_gate": [
+        "ATAClone: Cancer Clone Identification and Copy Number Estimation from ",
+        "Assessment and applications of joint profiling of single-cell chromati"
+      ],
+      "question": "paired single-cell multiome data measuring chromatin accessibility and the transcriptome in the same cell, 10x Multiome or SNARE-seq, for self-supervised pretraining",
+      "requirement": {
+        "compiler": "rule_based_v1",
+        "minimum_pairing_level": "same_cell",
+        "modalities": [
+          "multiome_rna_atac"
+        ]
+      }
+    },
+    {
+      "candidates": 19,
+      "decisions": {
+        "eligible": 0,
+        "exclude": 7,
+        "manual_review": 12
+      },
+      "deposition_precision": 0.5833,
+      "expected_recall_missing": [],
+      "id": "non_atac_generality",
+      "modality_gate": {
+        "fail": 7,
+        "pass": 12,
+        "unknown": 0,
+        "warn": 0
+      },
+      "non_primary_passing_modality_gate": [
+        "Alignment-free integration of single-nucleus ATAC-seq across species w",
+        "Cell type annotation for scATAC-seq via DNA large language model and g",
+        "Highly accurate reference and method selection for universal cross-dat",
+        "Semi-parametric empirical bayes method for multiplet detection in snAT",
+        "Single-cell multiomics data integration and generation with scPairing."
+      ],
+      "question": "human single-cell RNA sequencing data for cell type annotation",
+      "requirement": {
+        "compiler": "rule_based_v1",
+        "minimum_pairing_level": null,
+        "modalities": [
+          "scrna_seq"
+        ]
+      }
+    }
+  ],
+  "records": 48
+}
