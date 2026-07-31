@@ -51,6 +51,8 @@ dev = [
   "pytest>=9,<10",
   "pytest-asyncio>=1,<2",
   "langgraph-cli[inmem]>=0.4,<1",
+  "ruff>=0.9,<1",
+  "pyyaml>=6,<7",
 ]
 
 curation = [
@@ -70,7 +72,30 @@ Issues = "https://github.com/yuanfu-bio/scdata_agent/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The distribution declares "Typing :: Typed"; without this the marker is not
+# shipped and the claim is unenforceable for anyone installing the wheel.
+scdata_agent = ["py.typed"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+# Deliberately narrow. Two people merging into one branch all week need a linter
+# that catches real defects (unused imports, shadowed builtins, mutable defaults)
+# without generating a reformatting diff that hides the substantive change.
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "C4"]
+ignore = [
+  "B008",  # Typer and FastAPI both declare defaults by calling a function.
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The layering test imports modules for their side effects on sys.modules.
+"tests/test_architecture.py" = ["F401"]
 

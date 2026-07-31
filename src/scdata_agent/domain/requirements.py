@@ -15,7 +15,6 @@ from scdata_agent.domain.models import (
     pairing_rank,
 )
 
-
 # An AnnData/MuData object carries the matrix and the cell axis together, so it
 # satisfies any group it appears in. Naming it once keeps that intent explicit.
 _ACCESSIBILITY = [DataRole.FRAGMENTS, DataRole.PEAK_MATRIX, DataRole.STANDARD_OBJECT]

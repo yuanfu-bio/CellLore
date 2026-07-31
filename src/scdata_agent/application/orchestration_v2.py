@@ -14,29 +14,29 @@ from langgraph.types import Command, interrupt
 from scdata_agent.application.agents.acquisition_v2 import (
     AcquisitionStrategistAgent,
 )
+from scdata_agent.application.agents.curator import DatasetCuratorAgent
+from scdata_agent.application.agents.discovery import ResourceDiscoveryAgent
 from scdata_agent.application.agents.evidence_escalation import (
     EvidenceEscalationAgent,
 )
 from scdata_agent.application.agents.inventory_reconcile import (
     InventoryReconcileAgent,
 )
+from scdata_agent.application.agents.materialized_quality import (
+    MaterializedQualityAssessmentAgent,
+)
+from scdata_agent.application.agents.planning import ResearchPlannerAgent
 from scdata_agent.application.agents.progressive_asset_scout import (
     ProgressiveAssetScoutAgent,
 )
 from scdata_agent.application.agents.progressive_evidence import (
     ProgressiveEvidenceCuratorAgent,
 )
-from scdata_agent.application.agents.curator import DatasetCuratorAgent
-from scdata_agent.application.agents.discovery import ResourceDiscoveryAgent
-from scdata_agent.application.agents.materialized_quality import (
-    MaterializedQualityAssessmentAgent,
-)
-from scdata_agent.application.agents.planning import ResearchPlannerAgent
-from scdata_agent.application.agents.progressive_preflight import (
-    ProgressivePreflightAssessmentAgent,
-)
 from scdata_agent.application.agents.progressive_lineage_v2 import (
     ProgressiveLineageLeakageAgent,
+)
+from scdata_agent.application.agents.progressive_preflight import (
+    ProgressivePreflightAssessmentAgent,
 )
 from scdata_agent.application.agents.shared import (
     AgentContext,
@@ -61,7 +61,12 @@ from scdata_agent.application.collaboration import (
     artifact,
 )
 from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.domain.lifecycle import AcquisitionPlan, BundleStatus, CorpusSnapshot, PreflightBundleReport
+from scdata_agent.domain.lifecycle import (
+    AcquisitionPlan,
+    BundleStatus,
+    CorpusSnapshot,
+    PreflightBundleReport,
+)
 from scdata_agent.domain.models import DiscoveryRunResult, ResearchRequirement
 from scdata_agent.domain.planning import PlanReadiness, ResearchPlan
 from scdata_agent.domain.resource_pipeline import (

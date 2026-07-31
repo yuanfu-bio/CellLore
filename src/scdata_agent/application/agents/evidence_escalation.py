@@ -19,7 +19,6 @@ from scdata_agent.domain.resource_pipeline import (
     ScoutPhase,
 )
 
-
 _PAIRED_MODALITIES = {
     Modality.MULTIOME_RNA_ATAC,
     Modality.MATCHED_SCRNA_SCATAC,

@@ -11,7 +11,6 @@ from scdata_agent.domain.resource_pipeline import (
     ResourcePointerBatch,
 )
 
-
 _POINTER_STATUS_PRIORITY = {
     PointerStatus.INFERRED: 0,
     PointerStatus.REPORTED: 1,

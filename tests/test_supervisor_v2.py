@@ -8,6 +8,10 @@ from scdata_agent.application.collaboration import (
     CollaborationLedger,
     RunStatus,
 )
+from scdata_agent.domain.lifecycle import (
+    TransferReceipt,
+    TransferReceiptStatus,
+)
 from scdata_agent.domain.models import (
     AccessLevel,
     AssetAvailability,
@@ -19,15 +23,10 @@ from scdata_agent.domain.models import (
     DatasetCandidate,
     DiscoveryRunResult,
     FeasibilityReport,
-    GateStatus,
     Identifier,
     Modality,
     QueryPlan,
     TransferProtocol,
-)
-from scdata_agent.domain.lifecycle import (
-    TransferReceipt,
-    TransferReceiptStatus,
 )
 
 

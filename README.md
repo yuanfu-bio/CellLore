@@ -290,7 +290,8 @@ See [`.env.example`](.env.example) for the complete list.
 ## Development
 
 ```bash
-mamba run -n scdata-agent pytest              # 61 tests, fully offline
+mamba run -n scdata-agent pytest              # 184 tests, fully offline
+mamba run -n scdata-agent ruff check src tests                # lint
 mamba run -n scdata-agent pytest tests/test_architecture.py   # layer boundaries
 ```
 

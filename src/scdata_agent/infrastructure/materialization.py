@@ -19,8 +19,8 @@ from scdata_agent.domain.lifecycle import (
 )
 from scdata_agent.domain.models import DataAsset, DataRole, GateStatus
 from scdata_agent.infrastructure.qc_metrics import compute_role_metrics
-
 from scdata_agent.infrastructure.standard_object_qc import inspect_standard_object
+
 
 class DatasetMaterializer:
     def materialize(

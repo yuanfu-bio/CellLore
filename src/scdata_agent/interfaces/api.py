@@ -1,16 +1,20 @@
 """Local FastAPI + HTMX control surface for the multi-agent system."""
 from __future__ import annotations
+
 import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
+
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
 from scdata_agent.application.collaboration import CollaborationLedger
+
 
 class CreateRunRequest(BaseModel):
     question: str = Field(min_length=3)

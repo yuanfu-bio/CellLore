@@ -14,7 +14,6 @@ from scdata_agent.domain.models import (
     TransferPlan,
 )
 
-
 PUBLIC_ACCESS = {
     AccessLevel.PUBLIC_VERIFIED,
     AccessLevel.PUBLIC_DECLARED,

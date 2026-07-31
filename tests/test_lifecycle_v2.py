@@ -30,11 +30,11 @@ from scdata_agent.infrastructure.materialization import (
     MaterializedQualityInspector,
 )
 from scdata_agent.infrastructure.persistence.catalog import Catalog
-from scdata_agent.infrastructure.sources.asset_registry import (
-    AssetResolverRegistry,
-)
 from scdata_agent.infrastructure.sources.article_access import (
     OpenArticleAccessService,
+)
+from scdata_agent.infrastructure.sources.asset_registry import (
+    AssetResolverRegistry,
 )
 from scdata_agent.infrastructure.transfer_executor import TransferExecutor
 

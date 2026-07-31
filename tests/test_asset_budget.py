@@ -22,7 +22,6 @@ from scdata_agent.domain.models import (
     DataAsset,
     DataRole,
     DatasetCandidate,
-    Identifier,
     TransferProtocol,
 )
 from scdata_agent.infrastructure.sources.asset_registry import (

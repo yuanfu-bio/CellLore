@@ -1,0 +1,251 @@
+# Labelled evaluation set for discovery and curation judgement.
+#
+# Every record in eval/records.jsonl was returned by a live run against Europe
+# PMC, GEO and SRA (captured in var/competition_test/discover_result.json and
+# var/smoke_run.json). Nothing here is invented: the titles, descriptions and
+# accessions are what the archives actually served, which is why this set
+# catches cases that hand-written fixtures do not.
+#
+# The replay corpus deliberately stores only the *raw* fields. Assay profiles
+# and modalities are re-derived on every run, so a change to inference shows up
+# in the scorecard instead of being frozen into the fixture.
+#
+# Run:  python scripts/eval_discovery.py
+# Diff: python scripts/compare_scorecards.py eval/baseline_scorecard.json <new>
+
+meta:
+  captured_from:
+    - var/competition_test/discover_result.json
+    - var/smoke_run.json
+  # Most of the repository records are ENCODE depositions mirrored into GEO and
+  # SRA. That is a coincidence of what the live queries returned, but a useful
+  # one: it is the same data the planned ENCODE adapter will have to handle.
+  note: >-
+    Labels for repository records are mechanical (the archive states the assay).
+    Labels for publications are editorial judgements about whether the paper
+    announces data of its own; each carries a reason so it can be argued with.
+
+# ---------------------------------------------------------------------------
+# Per-record labels. Independent of any question.
+#
+#   kind             primary_deposition | methods_paper | resource_paper
+#   expect_profile   an assay profile must be inferable from the text alone
+#   expect_modalities  modalities that must all appear (only where unambiguous)
+#   expect_layers    omics layers that must all appear
+#   expect_pairing_at_least  weakest acceptable pairing claim
+#   forbid_pairing_above     strongest pairing the record may claim
+#
+# `forbid_pairing_above` exists because the expensive error here is the false
+# positive, not the miss. A standalone ATAC run that reports itself as
+# same-nucleus paired multiome would be admitted into a corpus that its data
+# cannot support, and nothing downstream would catch it.
+# ---------------------------------------------------------------------------
+records:
+
+  # --- ENCODE snATAC-seq series mirrored into GEO --------------------------
+  # Titles read "snATAC-seq from <biosample> (ENCSRxxxxxx)". Standalone
+  # accessibility: there is no second layer to pair with.
+  src_02f424ebf34515a5: &encode_snatac
+    kind: primary_deposition
+    expect_profile: true
+    expect_modalities: [snatac_seq]
+    expect_layers: [chromatin_accessibility]
+    forbid_pairing_above: study_level
+  src_18a010ab5e2fbbfe: *encode_snatac
+  src_225b32d68d85a362: *encode_snatac
+  src_39cae164144a2995: *encode_snatac
+  src_57d375973cdfb249: *encode_snatac
+  src_654ee03e96787ded: *encode_snatac
+  src_89e3b52525366b48: *encode_snatac
+  src_8c18b41a098d6fcf: *encode_snatac
+  src_bb5bb0b4e0ff6ea9: *encode_snatac
+  src_bed2807774e8af6f: *encode_snatac
+  src_c8ff6996beae3eb8: *encode_snatac
+  src_cfc8ae090fbdfd59: *encode_snatac
+  src_d1254f8b8dc0ef47: *encode_snatac
+  src_ef710e7a8bb5e72a: *encode_snatac
+  src_f6a4d8f347d1955d: *encode_snatac
+
+  # The one GEO record that is half of a 10x Multiome pair. Its description
+  # says so outright: "part of 10x multiome and has a corresponding snRNA
+  # experiment (ENCSR460MGC)". A same-cell request must recall this and must
+  # not recall its plain-snATAC neighbours.
+  src_b5b175ca0b94e758:
+    kind: primary_deposition
+    expect_profile: true
+    expect_modalities: [multiome_rna_atac]
+    expect_layers: [chromatin_accessibility, transcriptome]
+    expect_pairing_at_least: same_nucleus
+    note: GSE340993 -- ATAC half of a declared 10x Multiome experiment.
+
+  # --- The same ENCODE depositions seen from SRA ---------------------------
+  # These arrive with no usable title ("NCBI record 45847608"); the assay is
+  # only in the ESummary expxml, which is why they are labelled from the
+  # description. Fixing the title extraction must not change these labels.
+  #
+  # Every one of them is standalone snATAC-seq, and every one of them is a
+  # deposition brokered by GEO -- which means its ESummary carries the string
+  # `contact_name="Gene Expression Omnibus (GEO), NCBI, NLM, NIH"` and, for the
+  # ENCODE ones, a protocol filename `chromium_multiome_atac_gex.pdf`. Matching
+  # assay aliases against that blob makes a transcriptome layer and a multiome
+  # pairing claim appear out of submitter boilerplate. `forbid_pairing_above`
+  # is what pins that down.
+  src_22124b1fe971220e: &encode_sra
+    kind: primary_deposition
+    expect_profile: true
+    expect_modalities: [snatac_seq]
+    expect_layers: [chromatin_accessibility]
+    forbid_pairing_above: study_level
+  src_2df1d11ae03fd153: *encode_sra
+  src_54a59c6c4bd45e64: *encode_sra
+  src_57248e77a2228f65: *encode_sra
+  src_6e868a575fad7a09: *encode_sra
+  src_6ffd4533ce4fb5b2: *encode_sra
+  src_7733f3dadbdac954: *encode_sra
+  src_77a05241bab22efa: *encode_sra
+  src_9ca7465010918413: *encode_sra
+  src_a7dc7e03243e8ad6: *encode_sra
+  src_d1f7a0c326197099: *encode_sra
+  src_ede6bc8daeda20d8: *encode_sra
+  src_f82967d4f449c48d: *encode_sra
+  src_fbf45617507a9421: *encode_sra
+  src_ff437d702fd6c08e: *encode_sra
+
+  # --- Publications that announce data of their own -----------------------
+  src_a3da53793f8d55a9:
+    kind: primary_deposition
+    expect_profile: true
+    expect_layers: [chromatin_accessibility, transcriptome]
+    expect_pairing_at_least: same_nucleus
+    note: >-
+      "An integrative single-nucleus multiomic atlas of the human left
+      ventricle" -- an atlas paper; the atlas is the contribution.
+
+  src_d0078a6526f54d97:
+    kind: primary_deposition
+    expect_profile: true
+    expect_layers: [chromatin_accessibility, transcriptome]
+    expect_pairing_at_least: same_nucleus
+    note: Single-nucleus multi-omics of tumour progression.
+
+  src_e59419eab003451a:
+    kind: primary_deposition
+    expect_profile: true
+    expect_layers: [chromatin_accessibility, transcriptome]
+    note: >-
+      "Single cell multiomics revealed fibrotic trajectories of endometrial
+      cells" -- says multiomics but never states the pairing unit, so no
+      pairing floor is asserted here.
+
+  src_205de27bcece8945:
+    kind: primary_deposition
+    expect_profile: true
+    expect_layers: [chromatin_accessibility, transcriptome]
+    note: Single cell multiomics of EMT tumour states.
+
+  src_eeb9b6d9b862b058:
+    kind: primary_deposition
+    expect_profile: true
+    expect_layers: [chromatin_accessibility]
+    note: snATAC-seq of fibrolamellar carcinoma.
+
+  src_23b8df9f210a57ad:
+    kind: primary_deposition
+    expect_profile: true
+    expect_layers: [chromatin_accessibility]
+    note: Erythropoietin and the hippocampal chromatin landscape.
+
+  src_61ef17de432711a7:
+    kind: primary_deposition
+    expect_profile: true
+    expect_layers: [chromatin_accessibility]
+    note: RXR-mediated chromatin remodelling in APP mouse brain.
+
+  src_30410bebaf1d986e:
+    kind: primary_deposition
+    expect_profile: true
+    expect_layers: [chromatin_accessibility]
+    note: >-
+      Somatic mutation in developing and ageing brain. Judgement call: it
+      generates its own single-cell data, but the emphasis is analytical.
+
+  # --- Methods, tools and resources: topically relevant, not curatable ----
+  # Every one of these passed `modality_relevance` in a live run, because their
+  # abstracts are full of scATAC terminology. That is correct for a topic
+  # filter and wrong for a training corpus. None may reach the eligible tier.
+  src_961d390986102a1b:
+    kind: methods_paper
+    expect_profile: true
+    note: ATAClone -- copy-number estimation from scATAC-seq.
+  src_df5fa8db18007400:
+    kind: methods_paper
+    expect_profile: true
+    note: sPYce -- alignment-free cross-species integration.
+  src_26240dc34619510d:
+    kind: methods_paper
+    expect_profile: true
+    note: scPairing -- multiomics integration and generation.
+  src_b632f8062e0e0412:
+    kind: methods_paper
+    expect_profile: true
+    note: Cell type annotation via DNA language model and graph domain adaptation.
+  src_dc83cc0db3dfd509:
+    kind: methods_paper
+    expect_profile: true
+    note: Empirical Bayes multiplet detection in snATAC-seq.
+  src_d8de29329983feba:
+    kind: methods_paper
+    expect_profile: false
+    note: >-
+      Reference and method selection for cross-dataset annotation. Benchmark
+      study; no assay of its own is asserted.
+  src_abe5a6d82f66ba39:
+    kind: methods_paper
+    expect_profile: false
+    note: Somatic variant detection from single-cell sequencing data.
+  src_6b482af92f0f4476:
+    kind: resource_paper
+    expect_profile: true
+    note: >-
+      A database and search tool for scATAC-seq data. Points at other people's
+      depositions; owns none.
+  src_f5b21454c664af18:
+    kind: resource_paper
+    expect_profile: true
+    note: >-
+      "Assessment and applications of joint profiling..." -- an assessment of
+      the technology, not a deposition using it.
+
+# ---------------------------------------------------------------------------
+# Questions. Each is compiled by the offline rule-based compiler and scored
+# against the replay corpus, so the whole harness runs without network or key.
+# ---------------------------------------------------------------------------
+questions:
+  - id: scatac_pretraining
+    question: >-
+      public scATAC-seq and snATAC-seq data for self-supervised representation
+      learning
+    expect_eligible_kinds: [primary_deposition]
+    note: The broad corpus-building case. Standalone accessibility must qualify.
+
+  - id: same_cell_multiome
+    question: >-
+      paired single-cell multiome data measuring chromatin accessibility and
+      the transcriptome in the same cell, 10x Multiome or SNARE-seq, for
+      self-supervised pretraining
+    requires_pairing: same_cell
+    expect_eligible_kinds: [primary_deposition]
+    # Only records whose pairing claim reaches the same-cell tier belong here.
+    expect_recalled: [src_b5b175ca0b94e758]
+    note: >-
+      The narrowing case. GSE340993 declares a 10x Multiome relationship; the
+      plain snATAC records must not satisfy a same-cell requirement.
+
+  - id: non_atac_generality
+    question: >-
+      human single-cell RNA sequencing data for cell type annotation
+    expect_eligible_kinds: [primary_deposition]
+    note: >-
+      Not an ATAC question at all. It is here to prove the pipeline is not
+      hardwired to one modality -- it must still compile a requirement and
+      produce a structured judgement rather than an empty result.

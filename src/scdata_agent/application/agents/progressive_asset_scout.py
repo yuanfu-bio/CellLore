@@ -34,10 +34,10 @@ from scdata_agent.domain.resource_pipeline import (
     PointerBatchStage,
     ScoutPhase,
 )
+from scdata_agent.infrastructure.remote_probe import RemoteAvailabilityProbe
 from scdata_agent.infrastructure.sources.asset_registry import (
     AssetResolverRegistry,
 )
-from scdata_agent.infrastructure.remote_probe import RemoteAvailabilityProbe
 
 
 class ProgressiveAssetScoutAgent:

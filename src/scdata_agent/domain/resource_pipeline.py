@@ -9,7 +9,6 @@ from pydantic import Field
 from scdata_agent.domain.lifecycle import RemoteAssetObservation, ResourcePointer
 from scdata_agent.domain.models import DataAsset, StrictModel
 
-
 RESOURCE_PIPELINE_SCHEMA_VERSION = "2.2"
 
 

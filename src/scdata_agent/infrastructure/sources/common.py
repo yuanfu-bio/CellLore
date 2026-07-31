@@ -11,7 +11,6 @@ from scdata_agent.domain.models import (
     PairingLevel,
 )
 
-
 ATAC_ALIASES = (
     "scatac", "snatac", "single cell atac", "single-cell atac",
     "single nucleus atac", "single-nucleus atac",

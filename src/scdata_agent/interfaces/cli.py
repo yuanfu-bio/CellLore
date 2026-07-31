@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
-import inspect
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Annotated
 
@@ -14,18 +13,16 @@ from rich.console import Console
 from rich.table import Table
 
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
-from scdata_agent.domain.assets import build_asset_bundle
 from scdata_agent.application.collaboration import CollaborationLedger
-from scdata_agent.infrastructure.persistence.evidence_ledger import EvidenceLedger
-from scdata_agent.infrastructure.llm.stepfun import StepFunChatClient, StepFunSettings
-from scdata_agent.domain.models import DataRole
-from scdata_agent.domain.requirements import QueryPlanner
-from scdata_agent.infrastructure.sources.ena import ENAAssetResolver
-from scdata_agent.domain.transfer import TransferPlanner
 from scdata_agent.application.discovery import default_corpus_workflow, default_workflow
 from scdata_agent.application.research_planning import configured_research_planner
-from scdata_agent.infrastructure.persistence.catalog import Catalog
-
+from scdata_agent.domain.assets import build_asset_bundle
+from scdata_agent.domain.models import DataRole
+from scdata_agent.domain.requirements import QueryPlanner
+from scdata_agent.domain.transfer import TransferPlanner
+from scdata_agent.infrastructure.llm.stepfun import StepFunChatClient, StepFunSettings
+from scdata_agent.infrastructure.persistence.evidence_ledger import EvidenceLedger
+from scdata_agent.infrastructure.sources.ena import ENAAssetResolver
 
 app = typer.Typer(
     no_args_is_help=True,

@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from scdata_agent.infrastructure.llm.requirement_compiler import StepFunRequirementCompiler
 from scdata_agent.domain.models import DataRole, Modality
+from scdata_agent.infrastructure.llm.requirement_compiler import StepFunRequirementCompiler
 
 
 class FakeStepFun:

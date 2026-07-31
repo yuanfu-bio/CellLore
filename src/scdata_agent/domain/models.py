@@ -84,6 +84,19 @@ def pairing_satisfies(observed: PairingLevel, minimum: PairingLevel | None) -> b
     return pairing_rank(observed) >= pairing_rank(minimum)
 
 
+class ProfileBasis(StrEnum):
+    """How an assay profile was arrived at.
+
+    A named technology ("10x Multiome") states the pairing relationship by
+    definition; layers assembled from separate mentions of RNA and ATAC only
+    suggest one. Recording which happened lets downstream gates weigh the claim
+    instead of treating both as equally established.
+    """
+
+    NAMED_TECHNOLOGY = "named_technology"
+    LAYER_INFERENCE = "layer_inference"
+
+
 class AssayProfile(StrictModel):
     label: str
     modalities: list[Modality] = Field(default_factory=list)
@@ -92,6 +105,7 @@ class AssayProfile(StrictModel):
     technology_terms: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     rationale: str
+    inferred_from: ProfileBasis = ProfileBasis.LAYER_INFERENCE
     evidence_ids: list[str] = Field(default_factory=list)
 
 
@@ -136,6 +150,25 @@ class AccessLevel(StrEnum):
     CONTROLLED = "controlled"
     EMBARGOED = "embargoed"
     WITHDRAWN = "withdrawn"
+    UNKNOWN = "unknown"
+
+
+class DepositionRelation(StrEnum):
+    """How a record relates to the data it names.
+
+    A methods paper and a data deposition both mention accessions and both read
+    as topically relevant, but only one of them owns data anybody can curate.
+    Keeping the relation explicit is what stops a copy-number-estimation tool
+    from being recommended as a training corpus.
+    """
+
+    #: The record announces a deposition of its own.
+    PRIMARY = "primary"
+    #: The record analyses data somebody else deposited.
+    REUSED = "reused"
+    #: An accession appears, but only as a citation or a pointer.
+    REFERENCED = "referenced"
+    #: Nothing in the text settles the question. Not the same as REUSED.
     UNKNOWN = "unknown"
 
 
@@ -314,6 +347,7 @@ class SourceRecord(StrictModel):
     organisms: list[str] = Field(default_factory=list)
     modalities: list[Modality] = Field(default_factory=list)
     assay_profiles: list[AssayProfile] = Field(default_factory=list)
+    deposition_relation: DepositionRelation = DepositionRelation.UNKNOWN
     access_level: AccessLevel = AccessLevel.UNKNOWN
     raw_metadata: dict[str, Any] = Field(default_factory=dict)
     evidence: list[Evidence] = Field(default_factory=list)
@@ -332,6 +366,10 @@ class DatasetCandidate(StrictModel):
     diseases: list[str] = Field(default_factory=list)
     modalities: list[Modality] = Field(default_factory=list)
     assay_profiles: list[AssayProfile] = Field(default_factory=list)
+    # Whether this candidate owns the data it names. Resolution unions the
+    # source records, so a paper that reuses a dataset alongside a repository
+    # record that deposits it resolves to PRIMARY -- the deposition exists.
+    deposition_relation: DepositionRelation = DepositionRelation.UNKNOWN
     observed_data_roles: list[DataRole] = Field(default_factory=list)
     donor_count: int | None = Field(default=None, ge=0)
     sample_count: int | None = Field(default=None, ge=0)

@@ -13,7 +13,6 @@ from scdata_agent.domain.models import (
     FeasibilityReport,
 )
 
-
 DISALLOWED_ACCESS = {
     AccessLevel.CONTROLLED,
     AccessLevel.EMBARGOED,

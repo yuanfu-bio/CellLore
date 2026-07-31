@@ -20,7 +20,6 @@ from scdata_agent.domain.models import (
 )
 from scdata_agent.infrastructure.sources.base import default_async_client, request_with_retry
 
-
 SUPPORTED_NAMESPACES = {"sra_project", "sra_run"}
 
 
