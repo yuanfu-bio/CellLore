@@ -317,7 +317,9 @@ Ordered by value to a single-cell epigenomics foundation-model corpus:
 7. A corpus optimiser for diversity, rarity, redundancy caps and auditable sampling
    weights.
 
-See [`docs/journal.md`](docs/journal.md) for the detailed internal roadmap.
+[`docs/roadmap.md`](docs/roadmap.md) tracks this with owners, acceptance criteria
+and daily status ([中文](docs/roadmap.zh-CN.md)); [`docs/journal.md`](docs/journal.md)
+records the architecture and what is already implemented.
 
 ## Licence
 

@@ -39,11 +39,19 @@
 
 ## Next
 
+Tracked with owners, acceptance criteria and daily status in
+[`roadmap.md`](roadmap.md) ([中文](roadmap.zh-CN.md)). That file is the working
+plan; the list below is the unordered backlog it draws from. When something ships,
+move it up into *Implemented* above and drop its roadmap row to a single line.
+
+- Convert common 10x processed layouts to AnnData/MuData. Governance quarantines
+  any bundle without a `standard_object_path`, and typical GEO depositions ship
+  mtx/tsv/bed rather than `.h5ad`, so today a successful download still ends with
+  an empty admitted list. FASTQ-to-matrix remains a separate high-cost workflow.
 - Preserve the semantic relation of every extracted accession (`primary_data_deposition`, `reused_dataset`, `supplementary_reference`); only primary deposition should form a paper-owned Bundle by default.
 - Read archive manifests after transfer so `archive:uninspected` Bundles can be assessed rather than parked in manual review; roughly 40% of remotely observed GEO assets are archives, and this is now the main brake on the recommended tier.
 - Register a licence policy for each new repository adapter in `domain/licensing.py`; an adapter without one leaves its Bundles at `license:unknown`.
 - Add ENCODE, BioStudies/ArrayExpress, Single Cell Portal, and HCA adapters; keep EGA/dbGaP metadata-only.
 - Add normalized donor/sample/cell entities and ontology IDs so lineage can move beyond accession and checksum families.
 - Add reference-backed TSS enrichment, doublet methods, full matrix sparsity, and explicit RNA/ATAC barcode intersection.
-- Add converters for common 10x processed layouts to AnnData/MuData; FASTQ-to-matrix remains an explicit high-cost workflow.
 - Add a corpus optimizer for diversity, rarity, redundancy caps, license constraints, and auditable sampling weights.

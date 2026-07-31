@@ -68,7 +68,9 @@ pytest -k schema                         # bundle-schema logic
 
 ## Adding a data source
 
-Most valuable contribution right now. See the roadmap in `README.md`.
+One of the most valuable contributions right now. See
+[`docs/roadmap.md`](docs/roadmap.md) for which sources are prioritised and why —
+ENCODE and CELLxGENE come first.
 
 1. Add an adapter under `infrastructure/sources/` implementing the resolver
    protocol in `base.py`, and register it in `asset_registry.py`.
