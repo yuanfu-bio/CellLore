@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+
+from scdata_agent.infrastructure.llm.tracing import emit as emit_llm_event
 
 DEFAULT_BASE_URL = "https://api.stepfun.com/step_plan/v1"
 DEFAULT_MODEL = "step-3.7-flash"
@@ -37,7 +40,11 @@ class StepFunSettings(BaseModel):
     base_url: str = DEFAULT_BASE_URL
     model: str = DEFAULT_MODEL
     reasoning_effort: str = "medium"
-    timeout_seconds: float = Field(default=180.0, gt=0)
+    # 180s was sized for the original ~5k-token synthesis budget; raising that
+    # budget to 16k (see research_planner.py) to stop truncation-driven
+    # fallback made a slow-but-otherwise-fine synthesis call hit this ceiling
+    # and ReadTimeout instead, discarding a good plan.
+    timeout_seconds: float = Field(default=240.0, gt=0)
 
     @classmethod
     def from_environment(cls) -> StepFunSettings:
@@ -111,6 +118,13 @@ class StepFunChatClient:
     ) -> str:
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(timeout=self.settings.timeout_seconds)
+        system_prompt = next(
+            (m["content"] for m in messages if m.get("role") == "system"), ""
+        )
+        user_content = next(
+            (m["content"] for m in messages if m.get("role") == "user"), ""
+        )
+        started = time.perf_counter()
         try:
             request_payload = {
                 "model": self.settings.model,
@@ -133,23 +147,70 @@ class StepFunChatClient:
                 choice = payload["choices"][0]
                 message = choice["message"]
                 content = message.get("content")
+                reasoning_content = message.get("reasoning_content")
                 truncated = choice.get("finish_reason") == "length"
                 if isinstance(content, str) and content.strip() and not truncated:
+                    emit_llm_event(
+                        client="stepfun",
+                        role=getattr(self, "role", None),
+                        model=self.settings.model,
+                        system_prompt=system_prompt,
+                        user_payload=user_content,
+                        raw_reply=content,
+                        reasoning_content=reasoning_content,
+                        usage=payload.get("usage"),
+                        latency_ms=round((time.perf_counter() - started) * 1000),
+                        attempt=attempt,
+                        truncated=False,
+                        error=None,
+                    )
                     return content
                 empty_diagnostic = (
                     f"finish_reason={choice.get('finish_reason')};"
                     f"content_chars={len(content or '')};"
-                    f"reasoning_chars={len(message.get('reasoning_content') or '')}"
+                    f"reasoning_chars={len(reasoning_content or '')}"
                 )
                 if attempt == 0:
                     request_payload["max_tokens"] = min(
                         max(int(request_payload["max_tokens"]) * 2, 4_000),
-                        12_000,
+                        32_000,
+                    )
+                else:
+                    emit_llm_event(
+                        client="stepfun",
+                        role=getattr(self, "role", None),
+                        model=self.settings.model,
+                        system_prompt=system_prompt,
+                        user_payload=user_content,
+                        raw_reply=content,
+                        reasoning_content=reasoning_content,
+                        usage=payload.get("usage"),
+                        latency_ms=round((time.perf_counter() - started) * 1000),
+                        attempt=attempt,
+                        truncated=truncated,
+                        error="empty_or_truncated_after_retry: " + empty_diagnostic,
                     )
             raise RuntimeError(
                 "StepFun returned an empty or truncated chat-completion message after retry; "
                 + empty_diagnostic
             )
+        except Exception as error:
+            if not isinstance(error, RuntimeError) or "after retry" not in str(error):
+                emit_llm_event(
+                    client="stepfun",
+                    role=getattr(self, "role", None),
+                    model=self.settings.model,
+                    system_prompt=system_prompt,
+                    user_payload=user_content,
+                    raw_reply=None,
+                    reasoning_content=None,
+                    usage=None,
+                    latency_ms=round((time.perf_counter() - started) * 1000),
+                    attempt=None,
+                    truncated=None,
+                    error=f"{type(error).__name__}: {error}",
+                )
+            raise
         finally:
             if owns_client:
                 await client.aclose()

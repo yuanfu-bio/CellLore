@@ -36,6 +36,7 @@ from scdata_agent.domain.requirements import (
     restrict_modalities_to_pairing,
     roles_for_modalities,
 )
+from scdata_agent.infrastructure.llm import tracing
 from scdata_agent.infrastructure.llm.requirement_compiler import _safe_terms
 
 
@@ -248,8 +249,10 @@ class MultiStageResearchPlanner:
             },
             max_tokens=2_600,
         )
-        intent_task = asyncio.create_task(intent_call)
-        strategy_task = asyncio.create_task(strategy_call)
+        with tracing.stage("fast_intent"):
+            intent_task = asyncio.create_task(intent_call)
+        with tracing.stage("fast_strategy"):
+            strategy_task = asyncio.create_task(strategy_call)
         branch_timeout = float(
             os.getenv("SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS", "30")
         )
@@ -287,8 +290,8 @@ class MultiStageResearchPlanner:
         }
 
     async def _intent_analysis(self, state: PlannerState) -> dict[str, Any]:
-        return {
-            "intent": await _structured_call(
+        with tracing.stage("intent_analysis"):
+            intent = await _structured_call(
                 self.planner_client,
                 ResearchIntent,
                 (
@@ -299,13 +302,13 @@ class MultiStageResearchPlanner:
                     "dataset exists or is accessible. Be concise: at most 4 items per list and one sentence per item. Return JSON only."
                 ),
                 {"question": state["question"]},
-                max_tokens=2_400,
+                max_tokens=6_000,
             )
-        }
+        return {"intent": intent}
 
     async def _study_design(self, state: PlannerState) -> dict[str, Any]:
-        return {
-            "strategy": await _structured_call(
+        with tracing.stage("study_design"):
+            strategy = await _structured_call(
                 self.planner_client,
                 StudyStrategyDraft,
                 (
@@ -323,13 +326,13 @@ class MultiStageResearchPlanner:
                     "intent": state["intent"].model_dump(mode="json"),
                     "available_capabilities": state["capabilities"],
                 },
-                max_tokens=4_000,
+                max_tokens=16_000,
             )
-        }
+        return {"strategy": strategy}
 
     async def _critical_review(self, state: PlannerState) -> dict[str, Any]:
-        return {
-            "critique": await _structured_call(
+        with tracing.stage("critical_review"):
+            critique = await _structured_call(
                 self.review_client,
                 PlanCritique,
                 (
@@ -346,13 +349,13 @@ class MultiStageResearchPlanner:
                     "strategy": state["strategy"].model_dump(mode="json"),
                     "available_capabilities": state["capabilities"],
                 },
-                max_tokens=2_800,
+                max_tokens=10_000,
             )
-        }
+        return {"critique": critique}
 
     async def _synthesis(self, state: PlannerState) -> dict[str, Any]:
-        return {
-            "draft": await _structured_call(
+        with tracing.stage("synthesis"):
+            draft = await _structured_call(
                 self.planner_client,
                 ResearchPlanDraft,
                 (
@@ -371,9 +374,9 @@ class MultiStageResearchPlanner:
                     "critique": state["critique"].model_dump(mode="json"),
                     "available_capabilities": state["capabilities"],
                 },
-                max_tokens=5_000,
+                max_tokens=16_000,
             )
-        }
+        return {"draft": draft}
 
 
 async def _structured_call[T: BaseModel](

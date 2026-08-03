@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -14,6 +15,7 @@ from scdata_agent.infrastructure.llm.stepfun import (
     StepFunSettings,
     load_local_env,
 )
+from scdata_agent.infrastructure.llm.tracing import emit as emit_llm_event
 
 
 class ReasoningProfile(StrEnum):
@@ -48,13 +50,32 @@ class OpenAICompatibleClient:
         payload: dict[str, Any] = {"model": self.settings.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
         if self.settings.reasoning_effort:
             payload["reasoning_effort"] = self.settings.reasoning_effort
+        started = time.perf_counter()
+        system_prompt = next((m["content"] for m in messages if m.get("role") == "system"), "")
+        user_content = next((m["content"] for m in messages if m.get("role") == "user"), "")
         try:
             response = await client.post(f"{self.settings.base_url.rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {self.settings.api_key}"}, json=payload)
             response.raise_for_status()
-            content = response.json()["choices"][0]["message"].get("content")
+            body = response.json()
+            message = body["choices"][0]["message"]
+            content = message.get("content")
             if not isinstance(content, str) or not content.strip():
                 raise RuntimeError("OpenAI-compatible provider returned an empty message.")
+            emit_llm_event(
+                client="openai_compatible", role=getattr(self, "role", None), model=self.settings.model,
+                system_prompt=system_prompt, user_payload=user_content, raw_reply=content,
+                reasoning_content=message.get("reasoning_content"), usage=body.get("usage"),
+                latency_ms=round((time.perf_counter() - started) * 1000), attempt=0, truncated=False, error=None,
+            )
             return content
+        except Exception as error:
+            emit_llm_event(
+                client="openai_compatible", role=getattr(self, "role", None), model=self.settings.model,
+                system_prompt=system_prompt, user_payload=user_content, raw_reply=None, reasoning_content=None,
+                usage=None, latency_ms=round((time.perf_counter() - started) * 1000), attempt=None, truncated=None,
+                error=f"{type(error).__name__}: {error}",
+            )
+            raise
         finally:
             if owns_client:
                 await client.aclose()
@@ -77,14 +98,30 @@ class AnthropicClient:
         turns = [{"role": item["role"], "content": item["content"]} for item in messages if item.get("role") != "system"]
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(timeout=60.0)
+        started = time.perf_counter()
         try:
             response = await client.post(f"{self.settings.base_url.rstrip('/')}/messages", headers={"x-api-key": self.settings.api_key, "anthropic-version": "2023-06-01"}, json={"model": self.settings.model, "system": system, "messages": turns, "temperature": temperature, "max_tokens": max_tokens})
             response.raise_for_status()
             blocks = response.json().get("content", [])
             text = "".join(item.get("text", "") for item in blocks if item.get("type") == "text")
+            thinking = "".join(item.get("thinking", "") for item in blocks if item.get("type") == "thinking")
             if not text.strip():
                 raise RuntimeError("Anthropic provider returned an empty message.")
+            emit_llm_event(
+                client="anthropic", role=getattr(self, "role", None), model=self.settings.model,
+                system_prompt=system, user_payload=turns[-1]["content"] if turns else "", raw_reply=text,
+                reasoning_content=thinking or None, usage=None,
+                latency_ms=round((time.perf_counter() - started) * 1000), attempt=0, truncated=False, error=None,
+            )
             return text
+        except Exception as error:
+            emit_llm_event(
+                client="anthropic", role=getattr(self, "role", None), model=self.settings.model,
+                system_prompt=system, user_payload=turns[-1]["content"] if turns else "", raw_reply=None,
+                reasoning_content=None, usage=None, latency_ms=round((time.perf_counter() - started) * 1000),
+                attempt=None, truncated=None, error=f"{type(error).__name__}: {error}",
+            )
+            raise
         finally:
             if owns_client:
                 await client.aclose()
@@ -145,6 +182,7 @@ class ModelRouter:
             else:
                 settings = StepFunSettings.from_environment()
                 clients[profile] = StepFunChatClient(settings.model_copy(update={"model": _profile_value(profile, settings.model, "MODEL"), "reasoning_effort": _profile_effort(profile, settings.reasoning_effort)}))
+            clients[profile].role = profile.value
         return cls(clients)
 
 

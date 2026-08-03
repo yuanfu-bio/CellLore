@@ -1,4 +1,4 @@
-"""Local FastAPI + HTMX control surface for the multi-agent system."""
+"""Local FastAPI control surface for the multi-agent system."""
 from __future__ import annotations
 
 import asyncio
@@ -8,12 +8,21 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
 from scdata_agent.application.collaboration import CollaborationLedger
+
+_STATUS_COLOR = {
+    "queued": "gray", "running": "blue", "waiting_for_decision": "amber",
+    "completed": "green", "failed": "red", "cancelled": "gray",
+}
+
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates.env.globals["status_color"] = lambda status: _STATUS_COLOR.get(status, "gray")
 
 
 class CreateRunRequest(BaseModel):
@@ -112,12 +121,15 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             ]
         return records
 
-    @app.get("/ui/runs/{run_id}", response_class=HTMLResponse)
-    async def run_page(run_id: str) -> str:
+    @app.get("/ui/runs/{run_id}")
+    async def run_page(request: Request, run_id: str):
         try:
-            return _run_html(ledger, run_id)
+            payload = _run_payload(ledger, run_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+        return templates.TemplateResponse(
+            request, "run.html", {"run_id": run_id, "initial_data": payload}
+        )
 
     @app.get("/runs/{run_id}/graph-state")
     async def graph_state(run_id: str) -> dict[str, Any]:
@@ -129,23 +141,9 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
     @app.get("/runs/{run_id}")
     async def get_run(run_id: str) -> dict[str, Any]:
         try:
-            run = ledger.get_run(run_id)
+            return _run_payload(ledger, run_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
-        artifacts = ledger.list_artifacts(run_id)
-        plan_artifacts = [item for item in artifacts if item.kind.value == "research_plan"]
-        research_plan = plan_artifacts[-1].payload if plan_artifacts else None
-        return {
-            "run": run.model_dump(mode="json"),
-            "tasks": [task.model_dump(mode="json") for task in ledger.list_tasks(run_id)],
-            "artifacts": [item.model_dump(mode="json") for item in artifacts],
-            "messages": [item.model_dump(mode="json") for item in ledger.list_messages(run_id)],
-            "checkpoints": [item.model_dump(mode="json") for item in ledger.list_checkpoints(run_id)],
-            "research_plan": research_plan,
-            "planning_readiness": research_plan.get("readiness") if research_plan else None,
-            "capability_gaps": research_plan.get("capability_gaps", []) if research_plan else [],
-            "executable_contracts": research_plan.get("executable_contracts", []) if research_plan else [],
-        }
 
     @app.get("/runs/{run_id}/events")
     async def events(run_id: str, after: int = 0) -> StreamingResponse:
@@ -154,10 +152,10 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             while True:
                 for event in ledger.events_since(run_id, cursor):
                     cursor = event["event_id"]
-                    yield f"id: {cursor}\\nevent: {event['type']}\\ndata: {json.dumps(event, ensure_ascii=False)}\\n\\n"
+                    yield f"id: {cursor}\nevent: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                 run = ledger.get_run(run_id)
                 if run.status.value in {"completed", "failed", "cancelled"}:
-                    yield "event: end\\ndata: {}\\n\\n"
+                    yield "event: end\ndata: {}\n\n"
                     return
                 await asyncio.sleep(0.5)
         return StreamingResponse(stream(), media_type="text/event-stream")
@@ -191,51 +189,42 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             raise HTTPException(status_code=404, detail=str(error)) from error
         return response.model_dump(mode="json")
 
-    @app.get("/", response_class=HTMLResponse)
-    async def dashboard() -> str:
-        return _dashboard_html(ledger)
+    @app.get("/")
+    async def dashboard(request: Request):
+        return templates.TemplateResponse(
+            request, "dashboard.html", {"runs": ledger.list_runs()[:20]}
+        )
+
     return app
 
-def _dashboard_html(ledger: CollaborationLedger) -> str:
-    cards = "".join(f"<li><a href='/ui/runs/{run.run_id}'>{run.run_id}</a> · {run.status.value} · {run.question}</li>" for run in ledger.list_runs()[:20]) or "<li>No runs yet.</li>"
-    return f"""<!doctype html>
-<html><head><meta charset='utf-8'><title>scdata-agent</title><script src='https://unpkg.com/htmx.org@2.0.4'></script><style>body{{font-family:system-ui;max-width:960px;margin:2rem auto;padding:0 1rem}} textarea{{width:100%;min-height:5rem}} button{{padding:.5rem 1rem}} code{{background:#eee;padding:.15rem}} .card{{border:1px solid #ddd;padding:1rem;margin:1rem 0;border-radius:.5rem}}</style></head><body>
-<h1>scdata-agent multi-agent control room</h1><div class='card'><h2>Start a research run</h2>
-<form onsubmit=\"event.preventDefault(); fetch('/runs', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:this.question.value,max_results:Number(this.max_results.value),use_llm:this.use_llm.checked}})}}).then(r=>r.json()).then(x=>document.querySelector('#result').textContent=JSON.stringify(x,null,2))\"><textarea name='question' placeholder='Describe your research question' required></textarea><br><label>Maximum results <input name='max_results' type='number' value='20' min='1' max='100'></label><label><input name='use_llm' type='checkbox' checked> Use configured LLM</label><button type='submit'>Run agents</button></form><pre id='result'></pre></div>
-<div class='card'><h2>Recent runs</h2><ul>{cards}</ul></div><div class='card'><p>Use <code>GET /runs/{{run_id}}/events</code> for live SSE events, and <code>POST /runs/{{run_id}}/chat</code> for natural-language control messages.</p></div></body></html>"""
 
-
-def _run_html(ledger: CollaborationLedger, run_id: str) -> str:
+def _run_payload(ledger: CollaborationLedger, run_id: str) -> dict[str, Any]:
+    """Everything the run-monitoring panel needs, in one shape shared by the
+    JSON API and the server-rendered page's initial hydration."""
     run = ledger.get_run(run_id)
-    tasks = ledger.list_tasks(run_id)
     artifacts = ledger.list_artifacts(run_id)
-    checkpoints = ledger.list_checkpoints(run_id)
-    task_rows = "".join(
-        f"<li><b>{task.agent.value}</b> — {task.status.value} {('<small>' + task.error + '</small>') if task.error else ''}</li>"
-        for task in tasks
-    )
-    artifact_rows = "".join(
-        f"<li>{item.kind.value} · {item.producer.value}</li>" for item in artifacts
-    )
-    checkpoint_rows = "".join(
-        f"<div class='checkpoint'><b>{item.title}</b><p>{item.recommendation}</p>"
-        + "".join(
-            f"<button onclick=\"resolveCheckpoint('{item.checkpoint_id}','{option['id']}')\">{option['label']}</button> "
-            for option in item.options
-        ) + "</div>"
-        for item in checkpoints if item.status.value == "open"
-    ) or "<p>No open decisions.</p>"
-    return f"""<!doctype html><html><head><meta charset='utf-8'><title>{run.run_id}</title>
-<script src='https://unpkg.com/htmx.org@2.0.4'></script><style>body{{font-family:system-ui;max-width:960px;margin:2rem auto;padding:0 1rem}} .card{{border:1px solid #ddd;padding:1rem;margin:1rem 0;border-radius:.5rem}} textarea{{width:100%;min-height:4rem}} button{{padding:.4rem .8rem;margin:.2rem}} small{{color:#a00}}</style></head><body>
-<a href='/'>← Runs</a><h1>Run {run.run_id}</h1><p><b>Status:</b> <span id='status'>{run.status.value}</span></p>
-<div class='card'><h2>Agent tasks</h2><ul id='tasks'>{task_rows}</ul></div>
-<div class='card'><h2>Artifacts</h2><ul>{artifact_rows}</ul></div>
-<div class='card'><h2>Decision checkpoint</h2><div id='checkpoint'>{checkpoint_rows}</div></div>
-<div class='card'><h2>Talk to the Supervisor</h2><form onsubmit=\"sendChat(event)\"><textarea id='message' placeholder='Ask about the run, priorities, or the current decision'></textarea><br><button>Send</button></form><pre id='reply'></pre></div>
-<script>
-const runId={json.dumps(run_id)};
-function sendChat(event){{event.preventDefault();fetch(`/runs/${{runId}}/chat`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{message:document.querySelector('#message').value}})}}).then(r=>r.json()).then(x=>document.querySelector('#reply').textContent=x.payload.assistant)}}
-function resolveCheckpoint(id, option){{fetch(`/checkpoints/${{id}}/resolve`,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{resolution:{{option}}}})}}).then(()=>location.reload())}}
-const stream=new EventSource(`/runs/${{runId}}/events`);stream.onmessage=()=>setTimeout(()=>location.reload(),300);</script></body></html>"""
+    plan_artifacts = [item for item in artifacts if item.kind.value == "research_plan"]
+    research_plan = plan_artifacts[-1].payload if plan_artifacts else None
+    llm_calls = [
+        {**item.payload, "created_at": item.created_at.isoformat()}
+        for item in artifacts
+        if item.kind.value == "llm_call"
+    ]
+    acquisition_artifacts = [item for item in artifacts if item.kind.value == "acquisition_plan"]
+    acquisition_plan = acquisition_artifacts[-1].payload if acquisition_artifacts else None
+    return {
+        "run": run.model_dump(mode="json"),
+        "tasks": [task.model_dump(mode="json") for task in ledger.list_tasks(run_id)],
+        "artifacts": [item.model_dump(mode="json") for item in artifacts],
+        "messages": [item.model_dump(mode="json") for item in ledger.list_messages(run_id)],
+        "checkpoints": [item.model_dump(mode="json") for item in ledger.list_checkpoints(run_id)],
+        "research_plan": research_plan,
+        "planning_readiness": research_plan.get("readiness") if research_plan else None,
+        "capability_gaps": research_plan.get("capability_gaps", []) if research_plan else [],
+        "executable_contracts": research_plan.get("executable_contracts", []) if research_plan else [],
+        "llm_calls": llm_calls,
+        "acquisition_plan": acquisition_plan,
+    }
+
 
 app = create_app(os.getenv("SCDATA_AGENT_DATABASE", "var/scdata_agent.sqlite"))

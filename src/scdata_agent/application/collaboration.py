@@ -68,6 +68,7 @@ class ArtifactKind(StrEnum):
     LINEAGE_REPORT = "lineage_report"
     CORPUS_REPORT = "corpus_report"
     CHAT = "chat"
+    LLM_CALL = "llm_call"
 
 
 class CheckpointStatus(StrEnum):

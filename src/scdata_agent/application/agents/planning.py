@@ -1,9 +1,12 @@
 """Research intent to open-world strategy and executable contracts."""
 
+from typing import Any
+
 from scdata_agent.application.agents.shared import AgentContext
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.research_planning import configured_research_planner
 from scdata_agent.domain.requirements import QueryPlanner
+from scdata_agent.infrastructure.llm import tracing
 
 
 class ResearchPlannerAgent:
@@ -14,7 +17,14 @@ class ResearchPlannerAgent:
             context.policy.get("use_llm", True),
             mode=context.policy.get("planner_mode"),
         )
-        research_plan = await planner.plan(context.question)
+
+        def _persist_llm_event(event: dict[str, Any]) -> None:
+            context.ledger.add_artifact(
+                artifact(context.run_id, ArtifactKind.LLM_CALL, self.name, event)
+            )
+
+        with tracing.sink(_persist_llm_event):
+            research_plan = await planner.plan(context.question)
         requirement = research_plan.executable_contracts[0]
         context.research_plan = research_plan
         context.requirement = requirement

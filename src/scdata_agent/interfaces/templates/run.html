@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+{% block title %}{{ run_id }} · scdata-agent{% endblock %}
+{% block nav %}<a href="/">← All runs</a>{% endblock %}
+{% block content %}
+
+<div class="card" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+  <div style="min-width:0;flex:1;">
+    <div class="faint" style="font-family:var(--mono);font-size:11.5px;margin-bottom:.35rem;">{{ run_id }}</div>
+    <div id="question-text" style="font-size:16px;font-weight:550;line-height:1.5;"></div>
+    <div id="policy-chips" style="margin-top:.6rem;display:flex;gap:.4rem;flex-wrap:wrap;"></div>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.5rem;">
+    <span id="status-pill" class="pill gray">—</span>
+    <button id="cancel-btn" style="font-size:12px;padding:.3rem .7rem;">Cancel run</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Pipeline</h2>
+  <div id="pipeline-timeline"></div>
+</div>
+
+<div class="card">
+  <h2>Model thinking &amp; replies</h2>
+  <p class="faint" style="margin-top:-.4rem;font-size:12px;">
+    Every research-planner LLM call, captured verbatim as it happens — prompt, hidden reasoning (when the
+    provider returns it), and the raw reply, before any parsing.
+  </p>
+  <div id="llm-calls"></div>
+</div>
+
+<div class="card" id="results-card" style="display:none;">
+  <h2>Downstream results</h2>
+  <div id="results-panel"></div>
+</div>
+
+<div class="card" id="checkpoint-card" style="display:none;">
+  <h2>Decision checkpoint</h2>
+  <div id="checkpoint-panel"></div>
+</div>
+
+<div class="card">
+  <h2>Talk to the supervisor</h2>
+  <form id="chat-form">
+    <textarea id="chat-message" rows="2" placeholder="Ask about the run, priorities, or the current decision…"></textarea>
+    <button class="primary" type="submit" style="margin-top:.5rem;">Send</button>
+  </form>
+  <pre id="chat-reply" style="display:none;margin-top:.6rem;"></pre>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Raw artifact ledger (<span id="artifact-count">0</span>)</summary>
+    <div id="artifacts-raw" style="margin-top:.6rem;"></div>
+  </details>
+</div>
+
+<script>
+const RUN_ID = {{ run_id | tojson }};
+let latest = {{ initial_data | tojson }};
+
+const STATUS_COLOR = {
+  queued: 'gray', running: 'blue', waiting_for_decision: 'amber',
+  completed: 'green', failed: 'red', cancelled: 'gray',
+};
+const TASK_COLOR = {
+  pending: 'gray', running: 'blue', completed: 'green', failed: 'red', skipped: 'gray',
+};
+const AGENT_LABELS = {
+  supervisor: 'Supervisor', research_planner: 'Research Planner', resource_discovery: 'Resource Discovery',
+  evidence_curator: 'Evidence Curator', asset_scout: 'Asset Scout', preflight_assessment: 'Preflight',
+  acquisition_strategist: 'Acquisition', dataset_curator: 'Dataset Curator', asset_transfer: 'Transfer',
+  quality_assessment: 'Quality QC', lineage_leakage: 'Lineage & Leakage', corpus_governance: 'Governance',
+};
+const STAGE_COLOR = {
+  intent_analysis: 'blue', study_design: 'cyan', critical_review: 'amber', synthesis: 'green',
+  fast_intent: 'blue', fast_strategy: 'cyan',
+};
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function syntaxHighlight(value) {
+  let json = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  json = escapeHtml(json);
+  return json.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    (match) => {
+      let cls = 'jnum';
+      if (/^"/.test(match)) cls = /:$/.test(match) ? 'jkey' : 'jstr';
+      else if (/true|false/.test(match)) cls = 'jbool';
+      else if (/null/.test(match)) cls = 'jnull';
+      return `<span class="${cls}">${match}</span>`;
+    }
+  );
+}
+
+function prettyJsonMaybe(text) {
+  if (text === null || text === undefined) return '';
+  if (typeof text !== 'string') return syntaxHighlight(text);
+  let cleaned = text.trim();
+  const fenced = cleaned.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  if (fenced) cleaned = fenced[1];
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      const parsed = JSON.parse(cleaned.slice(start, end + 1));
+      return syntaxHighlight(parsed);
+    } catch (e) { /* fall through */ }
+  }
+  return escapeHtml(text);
+}
+
+function humanBytes(n) {
+  if (n === null || n === undefined) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 5) return 'just now';
+  if (diff < 60) return `${Math.floor(diff)}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return d.toLocaleString();
+}
+
+function renderStatus(data) {
+  const status = data.run.status;
+  const pill = document.getElementById('status-pill');
+  pill.className = `pill ${STATUS_COLOR[status] || 'gray'}`;
+  const spinner = status === 'running' ? '<span class="pulse"></span>' : '';
+  pill.innerHTML = `${spinner}${status}`;
+  document.getElementById('cancel-btn').style.display =
+    (status === 'running' || status === 'queued') ? '' : 'none';
+}
+
+function renderQuestion(data) {
+  document.getElementById('question-text').textContent = data.run.question;
+  const policy = data.run.policy || {};
+  const keys = ['planner_mode', 'max_results', 'use_llm', 'remote_probe_enabled', 'strict_license', 'max_assets'];
+  const chips = keys
+    .filter((k) => policy[k] !== undefined && policy[k] !== null)
+    .map((k) => `<span class="chip">${k}=${policy[k]}</span>`)
+    .join('');
+  document.getElementById('policy-chips').innerHTML = chips;
+}
+
+function renderPipeline(data) {
+  const tasks = [...data.tasks].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  if (!tasks.length) {
+    document.getElementById('pipeline-timeline').innerHTML = '<p class="empty">No agent tasks yet.</p>';
+    return;
+  }
+  const rows = tasks.map((t) => {
+    const color = TASK_COLOR[t.status] || 'gray';
+    const label = AGENT_LABELS[t.agent] || t.agent;
+    const icon = { completed: '✓', failed: '✕', running: '', pending: '', skipped: '–' }[t.status] ?? '';
+    return `
+      <div style="display:flex;gap:.7rem;align-items:flex-start;padding:.35rem 0;">
+        <div style="display:flex;flex-direction:column;align-items:center;width:18px;flex-shrink:0;">
+          <span class="pill ${color}" style="width:16px;height:16px;padding:0;justify-content:center;border-radius:50%;">${t.status === 'running' ? '<span class="pulse"></span>' : icon}</span>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;">
+            <b>${escapeHtml(label)}</b>
+            <span class="pill ${color}" style="padding:.05rem .45rem;">${t.status}</span>
+            <span class="faint" style="font-size:11.5px;">${timeAgo(t.updated_at)}</span>
+          </div>
+          ${t.error ? `<div style="color:var(--danger);font-size:12.5px;margin-top:.2rem;">${escapeHtml(t.error)}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  document.getElementById('pipeline-timeline').innerHTML = rows;
+}
+
+function renderLlmCalls(data) {
+  const calls = data.llm_calls || [];
+  const container = document.getElementById('llm-calls');
+  if (!calls.length) {
+    container.innerHTML = '<p class="empty">No LLM calls captured yet — waiting on the research planner…</p>';
+    return;
+  }
+  const wasNearBottom = true;
+  container.innerHTML = calls.map((c, i) => {
+    const isLast = i === calls.length - 1;
+    const color = c.error ? 'red' : (STAGE_COLOR[c.stage] || 'gray');
+    const reasoningBlock = c.reasoning_content
+      ? `<details ${isLast ? 'open' : ''}><summary>Thinking (${c.reasoning_content.length.toLocaleString()} chars)</summary>
+           <pre style="font-style:italic;color:var(--text-muted);">${escapeHtml(c.reasoning_content)}</pre></details>`
+      : '';
+    const usage = c.usage ? Object.entries(c.usage).map(([k, v]) => `<span class="chip">${k}=${v}</span>`).join('') : '';
+    return `
+      <div class="card" style="background:var(--bg-sunken);box-shadow:none;margin-bottom:.7rem;">
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+          <span class="pill ${color}">${escapeHtml(c.stage || 'unknown')}</span>
+          ${c.role ? `<span class="chip">${escapeHtml(c.role)}</span>` : ''}
+          ${c.model ? `<span class="chip">${escapeHtml(c.model)}</span>` : ''}
+          ${c.latency_ms !== undefined && c.latency_ms !== null ? `<span class="chip">${(c.latency_ms / 1000).toFixed(1)}s</span>` : ''}
+          ${usage}
+          ${c.truncated ? '<span class="pill amber">truncated</span>' : ''}
+          <span class="faint" style="margin-left:auto;font-size:11.5px;">${timeAgo(c.created_at)}</span>
+        </div>
+        ${c.error ? `<div style="color:var(--danger);font-size:12.5px;margin-top:.5rem;">⚠ ${escapeHtml(c.error)}</div>` : ''}
+        <details style="margin-top:.6rem;">
+          <summary>Prompt sent</summary>
+          <pre>${escapeHtml(c.system_prompt || '')}</pre>
+          <pre>${prettyJsonMaybe(c.user_payload)}</pre>
+        </details>
+        ${reasoningBlock}
+        ${c.raw_reply ? `<details ${isLast ? 'open' : ''}><summary>Reply</summary><pre>${prettyJsonMaybe(c.raw_reply)}</pre></details>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function candidateTitleMap(data) {
+  const map = {};
+  for (const a of data.artifacts) {
+    if (a.kind === 'discovery_result' && Array.isArray(a.payload.candidates)) {
+      for (const cand of a.payload.candidates) map[cand.candidate_id] = cand.title;
+    }
+  }
+  return map;
+}
+
+function renderResults(data) {
+  const card = document.getElementById('results-card');
+  const plan = data.acquisition_plan;
+  if (!plan || !Array.isArray(plan.bundles) || !plan.bundles.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  const titles = candidateTitleMap(data);
+  const tierColor = { recommended: 'green', manual_review: 'amber', excluded: 'red' };
+  const bundles = [...plan.bundles].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const summary = `<div class="faint" style="margin-bottom:.6rem;font-size:12.5px;">
+      ${plan.recommended_bundle_ids.length} recommended · ${plan.manual_review_bundle_ids.length} manual review ·
+      ${plan.excluded_bundle_ids.length} excluded · ${humanBytes(plan.total_expected_bytes)} known
+    </div>`;
+  const rows = bundles.map((b) => {
+    const title = titles[b.candidate_id] || b.candidate_id;
+    const risks = (b.risks || []).map((r) => `<span class="chip" style="color:var(--danger);border-color:var(--danger-soft);">${escapeHtml(r)}</span>`).join(' ');
+    return `
+      <div style="padding:.6rem 0;border-top:1px solid var(--border);">
+        <div style="display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;">
+          <span class="pill ${tierColor[b.decision_tier] || 'gray'}">${b.decision_tier}</span>
+          <b style="flex:1;min-width:0;">${escapeHtml(title)}</b>
+          <span class="faint" style="font-size:12px;">score ${b.score}</span>
+          <span class="faint" style="font-size:12px;">${humanBytes(b.expected_bytes)}</span>
+        </div>
+        ${risks ? `<div style="margin-top:.4rem;">${risks}</div>` : ''}
+      </div>`;
+  }).join('');
+  document.getElementById('results-panel').innerHTML = summary + rows;
+}
+
+async function resolveCheckpoint(id, option) {
+  await fetch(`/checkpoints/${id}/resolve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resolution: { option } }),
+  });
+  refresh();
+}
+window.resolveCheckpoint = resolveCheckpoint;
+
+function renderCheckpoints(data) {
+  const card = document.getElementById('checkpoint-card');
+  const open = data.checkpoints.filter((c) => c.status === 'open');
+  if (!open.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('checkpoint-panel').innerHTML = open.map((c) => `
+    <div style="padding:.6rem 0;">
+      <b>${escapeHtml(c.title)}</b>
+      <p class="muted" style="margin:.3rem 0;">${escapeHtml(c.recommendation)}</p>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+        ${c.options.map((o) => `<button ${o.id === 'recommended' ? 'class="primary"' : ''} onclick="resolveCheckpoint('${c.checkpoint_id}','${o.id}')">${escapeHtml(o.label)}</button>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function renderArtifacts(data) {
+  document.getElementById('artifact-count').textContent = data.artifacts.length;
+  document.getElementById('artifacts-raw').innerHTML = data.artifacts.map((a) => `
+    <div style="display:flex;gap:.6rem;padding:.3rem 0;border-top:1px solid var(--border);font-size:12.5px;">
+      <span class="chip">${a.kind}</span><span class="faint">${a.producer}</span>
+      <span class="faint" style="margin-left:auto;">${timeAgo(a.created_at)}</span>
+    </div>`).join('') || '<p class="empty">No artifacts yet.</p>';
+}
+
+function render(data) {
+  latest = data;
+  renderStatus(data);
+  renderQuestion(data);
+  renderPipeline(data);
+  renderLlmCalls(data);
+  renderResults(data);
+  renderCheckpoints(data);
+  renderArtifacts(data);
+}
+
+async function refresh() {
+  const res = await fetch(`/runs/${RUN_ID}`);
+  if (res.ok) render(await res.json());
+}
+
+document.getElementById('cancel-btn').addEventListener('click', async () => {
+  await fetch(`/runs/${RUN_ID}/cancel`, { method: 'POST' });
+  refresh();
+});
+
+document.getElementById('chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = document.getElementById('chat-message').value;
+  if (!message.trim()) return;
+  const res = await fetch(`/runs/${RUN_ID}/chat`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }),
+  });
+  const data = await res.json();
+  const pre = document.getElementById('chat-reply');
+  pre.style.display = 'block';
+  pre.textContent = (data.payload && data.payload.assistant) || JSON.stringify(data, null, 2);
+});
+
+render(latest);
+const stream = new EventSource(`/runs/${RUN_ID}/events`);
+stream.onmessage = () => refresh();
+stream.addEventListener('end', () => stream.close());
+</script>
+{% endblock %}
