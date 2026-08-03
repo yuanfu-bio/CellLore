@@ -62,7 +62,7 @@ class TransferExecutionAgent:
             ) & ready_ids
         if context.catalog is not None:
             for bundle_id in selected_ids:
-                current = context.catalog.bundle_status(bundle_id)
+                current = context.catalog.bundle_status(bundle_id, run_id=context.run_id)
                 if current == BundleStatus.PREFLIGHT_READY:
                     context.catalog.transition_bundle(
                         bundle_id, BundleStatus.PROPOSED, run_id=context.run_id

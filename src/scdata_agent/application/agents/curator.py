@@ -66,7 +66,7 @@ class DatasetCuratorAgent:
                     MaterializationStatus.RAW_ONLY: BundleStatus.RAW_ONLY,
                     MaterializationStatus.FAILED: BundleStatus.MATERIALIZATION_FAILED,
                 }[item.status]
-                if context.catalog.bundle_status(item.bundle_id) == BundleStatus.TRANSFER_FAILED:
+                if context.catalog.bundle_status(item.bundle_id, run_id=context.run_id) == BundleStatus.TRANSFER_FAILED:
                     continue
                 context.catalog.transition_bundle(
                     item.bundle_id, target, run_id=context.run_id

@@ -53,7 +53,7 @@ class MaterializedQualityAssessmentAgent:
                     GateStatus.UNKNOWN: BundleStatus.QC_WARN,
                     GateStatus.FAIL: BundleStatus.QUARANTINED,
                 }[report.status]
-                current = context.catalog.bundle_status(report.bundle_id)
+                current = context.catalog.bundle_status(report.bundle_id, run_id=context.run_id)
                 if current == BundleStatus.RAW_ONLY:
                     target = BundleStatus.QUARANTINED
                 context.catalog.transition_bundle(

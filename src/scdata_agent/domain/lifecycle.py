@@ -79,7 +79,11 @@ ALLOWED_BUNDLE_TRANSITIONS: dict[BundleStatus, set[BundleStatus]] = {
         BundleStatus.NEEDS_EVIDENCE,
         BundleStatus.REJECTED,
     },
-    BundleStatus.PREFLIGHT_READY: {BundleStatus.PROPOSED, BundleStatus.REJECTED},
+    BundleStatus.PREFLIGHT_READY: {
+        BundleStatus.PROPOSED,
+        BundleStatus.REJECTED,
+        BundleStatus.QUARANTINED,
+    },
     BundleStatus.PROPOSED: {BundleStatus.APPROVED, BundleStatus.EXCLUDED},
     BundleStatus.APPROVED: {
         BundleStatus.TRANSFERRED,

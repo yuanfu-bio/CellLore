@@ -122,3 +122,85 @@ async def test_governance_excludes_evaluation_lineage_and_admits_verified_bundle
     assert snapshot["admitted_bundle_ids"] == ["bundle_2"]
     assert catalog.bundle_status("bundle_1") == BundleStatus.EXCLUDED
     assert catalog.bundle_status("bundle_2") == BundleStatus.ADMITTED
+
+
+@pytest.mark.asyncio
+async def test_governance_does_not_overwrite_a_rejected_bundle(tmp_path):
+    database = tmp_path / "rejected_bundle.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run("test")
+    catalog = Catalog(database)
+    report = PreflightBundleReport(
+        report_id="preflight_1",
+        bundle_id="bundle_1",
+        candidate_id="candidate_1",
+        dimensions={},
+        license_status=LicenseStatus.REPOSITORY_POLICY,
+        decision=BundleStatus.REJECTED,
+    )
+    preflight_artifact = artifact(
+        run.run_id,
+        ArtifactKind.PREFLIGHT_REPORT,
+        AgentName.PREFLIGHT_ASSESSMENT,
+        {"reports": [report.model_dump(mode="json")]},
+    )
+    ledger.add_artifact(preflight_artifact)
+    catalog.transition_bundle(
+        "bundle_1", BundleStatus.REJECTED, run_id=run.run_id
+    )
+
+    outputs = await SnapshotCorpusGovernanceAgent().run(
+        AgentContext(
+            run_id=run.run_id,
+            question="test",
+            database_path=str(database),
+            ledger=ledger,
+            artifacts=[preflight_artifact],
+            catalog=catalog,
+        )
+    )
+
+    snapshot = outputs[1].payload
+    assert snapshot["quarantined_bundle_ids"] == ["bundle_1"]
+    assert catalog.bundle_status("bundle_1") == BundleStatus.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_governance_quarantines_preflight_ready_bundle_without_materialization(tmp_path):
+    database = tmp_path / "preflight_ready_bundle.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run("test")
+    catalog = Catalog(database)
+    report = PreflightBundleReport(
+        report_id="preflight_1",
+        bundle_id="bundle_1",
+        candidate_id="candidate_1",
+        dimensions={},
+        license_status=LicenseStatus.REPOSITORY_POLICY,
+        decision=BundleStatus.PREFLIGHT_READY,
+    )
+    preflight_artifact = artifact(
+        run.run_id,
+        ArtifactKind.PREFLIGHT_REPORT,
+        AgentName.PREFLIGHT_ASSESSMENT,
+        {"reports": [report.model_dump(mode="json")]},
+    )
+    ledger.add_artifact(preflight_artifact)
+    catalog.transition_bundle(
+        "bundle_1", BundleStatus.PREFLIGHT_READY, run_id=run.run_id
+    )
+
+    outputs = await SnapshotCorpusGovernanceAgent().run(
+        AgentContext(
+            run_id=run.run_id,
+            question="test",
+            database_path=str(database),
+            ledger=ledger,
+            artifacts=[preflight_artifact],
+            catalog=catalog,
+        )
+    )
+
+    snapshot = outputs[1].payload
+    assert snapshot["quarantined_bundle_ids"] == ["bundle_1"]
+    assert catalog.bundle_status("bundle_1") == BundleStatus.QUARANTINED

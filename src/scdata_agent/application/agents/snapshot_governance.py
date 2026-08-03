@@ -180,7 +180,16 @@ class SnapshotCorpusGovernanceAgent:
                     "quarantine": BundleStatus.QUARANTINED,
                     "exclude": BundleStatus.EXCLUDED,
                 }[decision.pool]
-                current = context.catalog.bundle_status(decision.bundle_id)
+                current = context.catalog.bundle_status(decision.bundle_id, run_id=context.run_id)
+                # Terminal lifecycle states preserve prior audit outcomes.
+                # Governance records its decision in the snapshot without
+                # attempting an invalid rewrite of the catalog state.
+                if current in {
+                    BundleStatus.REJECTED,
+                    BundleStatus.ADMITTED,
+                    BundleStatus.EXCLUDED,
+                }:
+                    continue
                 if current is not None and current != target:
                     context.catalog.transition_bundle(
                         decision.bundle_id, target, run_id=context.run_id

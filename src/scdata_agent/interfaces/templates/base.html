@@ -65,7 +65,7 @@ body {
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-.shell { max-width: 1180px; margin: 0 auto; padding: 1.5rem 1.5rem 4rem; }
+.shell { width:100%; max-width:none; margin:0; padding:clamp(.8rem,2vw,2rem) clamp(.8rem,2.5vw,3rem) 3rem; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: .9rem 1.5rem; border-bottom: 1px solid var(--border);
@@ -131,7 +131,7 @@ details > summary { cursor: pointer; user-select: none; color: var(--text-muted)
 details[open] > summary { margin-bottom: .5rem; }
 
 .jkey { color: #a855f7; }
-.jstr { color: #16a34a; }
+.jstr { color: #087443; }
 .jnum { color: #2563eb; }
 .jbool { color: #db2777; }
 .jnull { color: var(--text-faint); }
@@ -144,6 +144,33 @@ details[open] > summary { margin-bottom: .5rem; }
 .faint { color: var(--text-faint); }
 ::-webkit-scrollbar { height: 8px; width: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+.run-grid { display:grid; grid-template-columns:minmax(0,1.08fr) minmax(360px,.92fr); gap:1rem; align-items:start; }
+.workflow-card { min-height:620px; }
+.workflow-row { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin:1.1rem 0; align-items:center; }
+.workflow-row.branch { grid-template-columns:1fr 1fr; max-width:72%; margin-left:auto; margin-right:auto; }
+.flow-node { min-height:78px; padding:.65rem; border:2px solid var(--accent); border-radius:11px; background:linear-gradient(135deg,var(--accent-soft),var(--bg-elevated)); position:relative; text-align:center; }
+.flow-node.completed { border-color:var(--success); } .flow-node.running { border-color:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); animation:glow 1.6s ease-in-out infinite; } .flow-node.failed { border-color:var(--danger); background:var(--danger-soft); }
+.flow-node.evidence { border-color:#3b82f6; } .flow-node.assets { border-color:#6366f1; } .flow-node.governance { border-color:#8b5cf6; } .flow-node.gate { border-color:#22c55e; } @keyframes glow{50%{box-shadow:0 0 0 8px var(--accent-soft)}}
+.flow-node .flow-status { font-size:11px; margin-top:.25rem; color:var(--text-muted); } .flow-node .flow-time { font-size:10px; color:var(--text-faint); }
+.flow-arrow { color:var(--accent); text-align:center; font-size:25px; line-height:.6; } .topology-legend{display:flex;gap:.7rem;flex-wrap:wrap;font-size:11px;color:var(--text-muted)}
+.help-tip { display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border:1px solid var(--border); border-radius:50%; color:var(--text-muted); font-size:11px; cursor:help; position:relative; }
+.help-tip:hover::after { content:attr(data-tip); position:absolute; z-index:30; width:220px; left:50%; top:22px; transform:translateX(-50%); padding:.5rem .6rem; border-radius:7px; background:var(--text); color:var(--bg-elevated); font-size:11px; line-height:1.4; box-shadow:var(--shadow); }
+.execution-list details { border-top:1px solid var(--border); padding:.55rem 0; } .execution-list summary { display:flex; align-items:center; gap:.5rem; }
+.result-table { width:100%; border-collapse:collapse; font-size:12px; } .result-table th { text-align:left; color:var(--text-muted); font-weight:600; } .result-table th,.result-table td { padding:.45rem .3rem; border-bottom:1px solid var(--border); vertical-align:top; }
+@media (max-width:900px) { .run-grid { grid-template-columns:1fr; } .workflow-card { position:static; } .workflow-row { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:540px) { .topbar { padding:.7rem .8rem; } .topbar nav { display:none; } .theme-switcher button { padding:.2rem .35rem; } .workflow-row { grid-template-columns:1fr 1fr; } }
+.theme-switcher { display:flex; gap:.25rem; padding:.2rem; border:1px solid var(--border); border-radius:9px; background:var(--bg-sunken); }
+.theme-switcher button { padding:.22rem .48rem; border:0; font-size:11px; background:transparent; }
+.theme-switcher button.active { background:var(--bg-elevated); color:var(--accent); box-shadow:var(--shadow); }
+html[data-theme="light"] { color-scheme:light; --bg:#f5f6f8; --bg-elevated:#fff; --bg-sunken:#eef0f3; --border:#e1e4ea; --text:#1a1d24; --text-muted:#6b7280; --text-faint:#9aa1ac; --accent:#4f46e5; --accent-soft:#eef0ff; --success:#15803d; --success-soft:#dcfce7; --warning:#b45309; --warning-soft:#fef3c7; --danger:#b91c1c; --danger-soft:#fee2e2; --info:#0e7490; --info-soft:#cffafe; }
+html[data-theme="dark"] { color-scheme:dark; --bg:#0d0f14; --bg-elevated:#151821; --bg-sunken:#0a0c10; --border:#262b36; --text:#e7e9ee; --text-muted:#9199a8; --text-faint:#666e7d; --accent:#8b85f5; --accent-soft:#1c1a3a; --success:#4ade80; --success-soft:#0f2a1a; --warning:#fbbf24; --warning-soft:#332708; --danger:#f87171; --danger-soft:#331613; --info:#22d3ee; --info-soft:#0b2a30; }
+.dag { display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:.55rem; }
+.dag-node { border:1px solid var(--border); border-radius:8px; padding:.55rem; font-size:12px; background:var(--bg-sunken); }
+.dag-node.completed { border-color:var(--success); } .dag-node.running { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); } .dag-node.failed { border-color:var(--danger); }
+.insight-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(175px,1fr)); gap:.7rem; }
+.insight { background:var(--bg-sunken); border:1px solid var(--border); border-radius:8px; padding:.75rem; }
+.insight b { display:block; font-size:18px; margin-top:.2rem; }
+.decision-risk { margin:.55rem 0; padding:.55rem .7rem; border-left:3px solid var(--warning); background:var(--warning-soft); color:var(--warning); border-radius:4px; font-size:12.5px; }
 </style>
 {% block head %}{% endblock %}
 </head>
@@ -151,9 +178,17 @@ details[open] > summary { margin-bottom: .5rem; }
 <div class="topbar">
   <a class="brand" href="/"><span class="dot"></span> scdata-agent</a>
   <nav>{% block nav %}{% endblock %}</nav>
+  <div class="theme-switcher" role="group" aria-label="Theme">
+    <button type="button" data-theme="light">Light</button>
+    <button type="button" data-theme="system">System</button>
+    <button type="button" data-theme="dark">Dark</button>
+  </div>
 </div>
 <div class="shell">
 {% block content %}{% endblock %}
 </div>
+<script>
+(() => { const root=document.documentElement, key='scdata-agent-theme'; const set=(value)=>{ if(value==='system') root.removeAttribute('data-theme'); else root.dataset.theme=value; localStorage.setItem(key,value); document.querySelectorAll('[data-theme]').forEach(b=>b.classList.toggle('active',b.dataset.theme===value)); }; set(localStorage.getItem(key)||'system'); document.querySelectorAll('[data-theme]').forEach(b=>b.addEventListener('click',()=>set(b.dataset.theme))); })();
+</script>
 </body>
 </html>

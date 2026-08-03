@@ -210,10 +210,13 @@ def _run_payload(ledger: CollaborationLedger, run_id: str) -> dict[str, Any]:
         for item in artifacts
         if item.kind.value == "llm_call"
     ]
+    failed_tasks = [task for task in ledger.list_tasks(run_id) if task.status.value == "failed"]
+    run_error = failed_tasks[-1].error if failed_tasks else None
     acquisition_artifacts = [item for item in artifacts if item.kind.value == "acquisition_plan"]
     acquisition_plan = acquisition_artifacts[-1].payload if acquisition_artifacts else None
     return {
         "run": run.model_dump(mode="json"),
+        "run_error": run_error,
         "tasks": [task.model_dump(mode="json") for task in ledger.list_tasks(run_id)],
         "artifacts": [item.model_dump(mode="json") for item in artifacts],
         "messages": [item.model_dump(mode="json") for item in ledger.list_messages(run_id)],

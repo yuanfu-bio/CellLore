@@ -143,10 +143,11 @@ class Catalog:
         initial: BundleStatus | None = None,
     ) -> BundleStatus:
         now = utc_now().isoformat()
+        state_key = f"{run_id}:{bundle_id}"
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT status, version FROM catalog_bundle_state WHERE bundle_id=?",
-                (bundle_id,),
+                (state_key,),
             ).fetchone()
             if row is None:
                 current = initial or target
@@ -158,7 +159,7 @@ class Catalog:
                     (bundle_id, status, version, run_id, updated_at)
                     VALUES (?, ?, 1, ?, ?)
                     """,
-                    (bundle_id, target.value, run_id, now),
+                    (state_key, target.value, run_id, now),
                 )
                 return current if initial is None else target
             current = BundleStatus(row["status"])
@@ -169,16 +170,24 @@ class Catalog:
                 SET status=?, version=?, run_id=?, updated_at=?
                 WHERE bundle_id=?
                 """,
-                (target.value, int(row["version"]) + 1, run_id, now, bundle_id),
+                (target.value, int(row["version"]) + 1, run_id, now, state_key),
             )
         return target
 
-    def bundle_status(self, bundle_id: str) -> BundleStatus | None:
+    def bundle_status(
+        self, bundle_id: str, *, run_id: str | None = None
+    ) -> BundleStatus | None:
         with self.connect() as connection:
-            row = connection.execute(
-                "SELECT status FROM catalog_bundle_state WHERE bundle_id=?",
-                (bundle_id,),
-            ).fetchone()
+            if run_id is not None:
+                row = connection.execute(
+                    "SELECT status FROM catalog_bundle_state WHERE bundle_id=?",
+                    (f"{run_id}:{bundle_id}",),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT status FROM catalog_bundle_state WHERE bundle_id=? OR bundle_id LIKE ? ORDER BY updated_at DESC LIMIT 1",
+                    (bundle_id, f"%:{bundle_id}"),
+                ).fetchone()
         return BundleStatus(row["status"]) if row else None
 
     @staticmethod
