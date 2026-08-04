@@ -176,11 +176,20 @@ class MaterializedQualityInspector:
                         hdf5 = GateStatus.FAIL
                         reasons.append(f"Invalid HDF5 signature: {path}")
                 if path.name.casefold().endswith(".gz"):
+                    # The full stream, not a 1 MiB sample: a 260 MB fragments
+                    # file truncated at byte 200,000,000 reads fine for the
+                    # first megabyte and only fails decompression later.
+                    total_bytes = 0
                     with gzip.open(path, "rb") as handle:
-                        sample = handle.read(1024 * 1024)
-                    if not sample:
+                        while chunk := handle.read(1024 * 1024):
+                            total_bytes += len(chunk)
+                    if total_bytes == 0:
                         compression = GateStatus.WARN
-                if "fragment" in path.name.casefold():
+                # Gated by role, not filename: a *.fragments.tsv.gz.tbi.gz
+                # index also has "fragment" in its name but is a binary index,
+                # not a tab-separated fragments file, and must never reach the
+                # fragments parser.
+                if manifest.source_asset_roles.get(receipt.asset_id) == DataRole.FRAGMENTS:
                     rows, barcodes = _sample_fragments(path)
                     tabular_rows_sampled += rows
                     observed_barcodes.update(barcodes)
@@ -190,10 +199,15 @@ class MaterializedQualityInspector:
 
         checks["readability"] = readability
         checks["compression"] = compression
+        # A check that could not run at all (no standard object was supplied
+        # to inspect) is a gap in what we know, not a WARN-worthy finding.
+        # Recording it as "absent" here rather than GateStatus.UNKNOWN keeps
+        # that distinction out of the status-collapsing logic below.
+        structurally_unavailable: list[str] = []
         if manifest.standard_object_path:
             checks["standard_object_hdf5"] = hdf5
         else:
-            checks["standard_object_hdf5"] = GateStatus.UNKNOWN
+            structurally_unavailable.append("standard_object")
         metrics["fragment_rows_sampled"] = tabular_rows_sampled
         metrics["sampled_fragment_barcodes"] = len(observed_barcodes)
         unavailable = ["tss_enrichment", "frip", "doublet_rate"]
@@ -206,6 +220,7 @@ class MaterializedQualityInspector:
         except Exception as error:
             checks["semantic_role_metrics"] = GateStatus.FAIL
             reasons.append(f"Role-aware QC failed: {type(error).__name__}: {error}")
+        unavailable = [*unavailable, *structurally_unavailable]
         if manifest.standard_object_path:
             object_checks, object_metrics, object_unavailable = inspect_standard_object(
                 manifest.standard_object_path
@@ -215,6 +230,14 @@ class MaterializedQualityInspector:
             unavailable.extend(
                 item for item in object_unavailable if item not in unavailable
             )
+        # A check nobody could run (e.g. barcode_linkage or frip_computable on
+        # a native mtx/fragments package, with no standard object to derive
+        # them from) is a boundary of what we know, not a quality finding.
+        # Move it out of `checks` so it cannot be read as a WARN.
+        for key in [item for item, value in checks.items() if value == GateStatus.UNKNOWN]:
+            del checks[key]
+            if key not in unavailable:
+                unavailable.append(key)
         if any(value == GateStatus.FAIL for value in checks.values()):
             status = GateStatus.FAIL
         elif manifest.status == MaterializationStatus.RAW_ONLY:
@@ -222,15 +245,7 @@ class MaterializedQualityInspector:
             reasons.append(
                 "FASTQ-only bundle retained; processed training object not produced."
             )
-        elif not manifest.standard_object_path:
-            status = GateStatus.WARN
-            reasons.append(
-                "Processed assets exist but no AnnData/MuData object was supplied."
-            )
-        elif any(
-            value in {GateStatus.WARN, GateStatus.UNKNOWN}
-            for value in checks.values()
-        ):
+        elif any(value == GateStatus.WARN for value in checks.values()):
             status = GateStatus.WARN
         else:
             status = GateStatus.PASS

@@ -13,6 +13,7 @@ from __future__ import annotations
 from scdata_agent.application.agents.shared import AgentContext
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.manifest_ingestion import ingest_manifest
+from scdata_agent.application.resource_pipeline import summarize_bundle
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import BundleStatus
 from scdata_agent.domain.manifest import ManifestIngestion
@@ -36,14 +37,20 @@ class ManifestIngestAgent:
         )
 
         assets, observations = result.assets, list(result.observations)
+        bundle_summaries = result.bundle_summaries
         if bool(context.policy.get("remote_probe_enabled", True)):
             assets, observations = await self._probe(context, result, assets, observations)
+            # The probe rewrites asset location availability/access_level, and
+            # the pre-probe summaries in `result` were computed before that --
+            # recomputing is what turns a probed bundle from declared_only
+            # into verified instead of preflight silently seeing stale data.
+            bundle_summaries = self._resummarize(result, assets)
 
         context.requirement = result.requirement
         context.discovery = result.discovery
 
         if context.catalog is not None:
-            self._record(context, result, assets, observations)
+            self._record(context, result, assets, observations, bundle_summaries)
 
         pointer_batch = ResourcePointerBatch(
             batch_id=stable_id("pointer_batch", f"{context.run_id}:curated_manifest"),
@@ -78,7 +85,7 @@ class ManifestIngestAgent:
                 "observations": [item.model_dump(mode="json") for item in observations],
                 "bundles": [item.model_dump(mode="json") for item in result.bundles],
                 "bundle_summaries": [
-                    item.model_dump(mode="json") for item in result.bundle_summaries
+                    item.model_dump(mode="json") for item in bundle_summaries
                 ],
                 "errors": list(result.errors),
                 "delta_ids": [],
@@ -116,7 +123,21 @@ class ManifestIngestAgent:
         merged_assets = [probed_by_id.get(item.asset_id, item) for item in assets]
         return merged_assets, [*observations, *probe_observations]
 
-    def _record(self, context, result: ManifestIngestion, assets, observations) -> None:
+    @staticmethod
+    def _resummarize(result: ManifestIngestion, assets):
+        candidates_by_id = {item.candidate_id: item for item in result.discovery.candidates}
+        assets_by_id = {item.asset_id: item for item in assets}
+        return [
+            summarize_bundle(
+                bundle,
+                [assets_by_id[asset_id] for asset_id in bundle.asset_ids if asset_id in assets_by_id],
+                candidates_by_id[bundle.candidate_id],
+                [],
+            )
+            for bundle in result.bundles
+        ]
+
+    def _record(self, context, result: ManifestIngestion, assets, observations, bundle_summaries) -> None:
         for item in assets:
             context.catalog.append(
                 record_id=item.asset_id, record_type="data_asset",
@@ -135,7 +156,7 @@ class ManifestIngestAgent:
             context.catalog.transition_bundle(
                 item.bundle_id, BundleStatus.REMOTE_INVENTORIED, run_id=context.run_id,
             )
-        for item in result.bundle_summaries:
+        for item in bundle_summaries:
             context.catalog.append(
                 record_id=item.summary_id, record_type="remote_bundle_inventory_summary",
                 run_id=context.run_id, value=item,

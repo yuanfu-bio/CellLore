@@ -34,9 +34,9 @@ def _ingest(**policy):
 
 def test_direct_rows_produce_one_bundle_per_pair_unit() -> None:
     _, result = _ingest()
-    assert result.pair_unit_count == 5
-    assert len(result.bundles) == 5
-    assert result.row_count == 14  # 15 rows minus the one portal row, excluded by default
+    assert result.pair_unit_count == 6
+    assert len(result.bundles) == 6
+    assert result.row_count == 19  # 20 rows minus the one portal row, excluded by default
 
 
 def test_neatseq_pair_unit_satisfies_multiome_same_cell() -> None:
@@ -184,7 +184,7 @@ async def test_ingest_agent_produces_four_artifacts_without_probing(tmp_path) ->
     assert len(context.discovery.candidates) == 5
 
     inventory = artifacts[2]
-    assert len(inventory.payload["bundles"]) == 5
+    assert len(inventory.payload["bundles"]) == 6
     for asset in inventory.payload["assets"]:
         for location in asset["locations"]:
             assert location["availability"] != "observed"

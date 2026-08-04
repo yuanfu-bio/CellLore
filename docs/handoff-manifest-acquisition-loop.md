@@ -1,11 +1,13 @@
 # Handoff: 打通 scdata-agent 的下载 → 整理 → 归档闭环
 
-> **交接文档**。S1 已完成并入库，S2 刚开始。本文件包含继续这项工作所需的全部上下文：
-> 为什么做、已探明的代码实情、已完成什么、下一步怎么做。
+> **交接文档**。S1–S4 已完成并入库，**里程碑 0 已用真实字节达成**。本文件包含继续这项工作
+> （S5 起）所需的全部上下文：为什么做、已探明的代码实情、已完成什么、下一步怎么做。
 >
-> - 分支：`manifest-acquisition-loop`（基于 `main` @ `7c894e0`）
 > - 完整原始方案：`/data/home/yfu/.claude/plans/data-collab-ai-multiomics-yfu-02-agent-imperative-fountain.md`
-> - 状态：**S1 完成**（241 tests passed, ruff clean）→ **S2 进行中**（仅完成 2 项预备改动）
+> - 状态：**S1–S4 完成**（254 tests passed, ruff clean, scorecard delta 0）→ **里程碑 0 已达成**：
+>   `scdata-agent manifest-run` 对 `GSE178707_NEATseq / CD4_memory_lane2_GSM5396336__GSM5396337`
+>   跑通真实端到端（真连 NCBI GEO，338 MB 真字节），`admitted_bundle_ids` 非空，
+>   `DATA_CARD.md`/`provenance.json`/`manifest.json` 均已生成并人工核对通过。**S5（aria2）待做**。
 
 ---
 
@@ -154,7 +156,7 @@ $P/python scripts/compare_scorecards.py eval/baseline_scorecard.json var/scoreca
 | `src/scdata_agent/domain/repository_urls.py`         | 96        | `geo_static_url()` / `geo_bucket()` / `geo_namespace()` / `is_geo_accession()` / `canonical_assembly()`。从原型 `:171-190`、`:161-169` 移植，纯字符串运算，零依赖                                                                                                                                           |
 | `src/scdata_agent/domain/manifest.py`                | 621       | `ManifestDialect` / `ManifestRow` / `ManifestDocument` / `ManifestIssue` / `IssueSeverity`、`CANONICAL_FIELDS` / `REQUIRED_FIELDS`、`PAIRED_MULTIOME_ZH_V1` 方言、`detect_dialect()` / `dialect_by_id()` / `normalize_row()` / `preflight_manifest()` / `parse_size()` / `summarize_issues()` |
 | `src/scdata_agent/infrastructure/manifest_reader.py` | 134       | `read_tabular()`（按后缀分派 csv/tsv/xlsx）/ `read_manifest()` / `file_sha256()`；XLSX 走 lazy import + `XLSX_EXTRA_HINT`                                                                                                                                                                                         |
-| `tests/data/manifest_paired_multiome_sample.csv`     | 15 行数据 | **从真实 manifest 逐字节抽取**，保留 BOM 与中文表头：3 行 BMMC、5 行 NEATseq CD4_memory_lane2、3 行 kidney SHARED_METADATA、2 行 Zenodo、1 行 10x portal、1 行 DOGMA `GSM5065531`                                                                                                                                 |
+| `tests/data/manifest_paired_multiome_sample.csv`     | 20 行数据 | **从真实 manifest 逐字节抽取**，保留 BOM 与中文表头：3 行 BMMC、5 行 NEATseq CD4_memory_lane2、5 行 NEATseq CD4_memory_lane1（S3 加，跟 lane2 同 dataset 不同 pair unit，用来钉住 C3）、3 行 kidney SHARED_METADATA、2 行 Zenodo、1 行 10x portal、1 行 DOGMA `GSM5065531`                                                                                                                                 |
 | `tests/test_manifest_dialect.py`                     | 113       | 方言识别、必需列缺失、XLSX extra 错误串、`parse_size` 参数化（含空值 → `None` 而非 `0`）                                                                                                                                                                                                                           |
 | `tests/test_geo_static_url.py`                       | 105       | 真实 accession 的精确 URL、bucket 算术、百分号编码、非 GEO accession 拒绝、`canonical_assembly` 参数化                                                                                                                                                                                                                  |
 | `tests/test_manifest_role_mapping.py`                | 106       | 20 个角色全映射、未知角色 → ERROR、真实 DOGMA 行上 manifest 角色胜出、`.tbi` 不被当 fragments                                                                                                                                                                                                                          |
@@ -194,9 +196,20 @@ issues: 0 error, 5 warning, 5 info      # warning 全是 role_inference_disagree
 
 ---
 
-## 5. 未完成的工作
+## 5. S2–S4 已完成；S5 起未完成
 
-### S2 — manifest 摄取（进行中，只完成了 2 项预备改动）
+> 以下 S2/S3/S4 三节的详细设计文字保留原样（作为「为什么这么做」的历史记录），
+> 但**方案已按此实现并入库**。真正未完成的是 §5 末尾开始的 S5–S8。
+
+### S2 — manifest 摄取 ✅ 已完成
+
+`application/manifest_ingestion.py`（纯函数 `ingest_manifest()`）+
+`application/agents/manifest_ingest.py`（`ManifestIngestAgent`，含可选
+`RemoteAvailabilityProbe` 升级路径）+ `tests/test_manifest_ingestion.py`（12 测试）。
+过程中发现并修的分层问题：`filter_manifest_rows`/`filter_manifest_issues` 从
+`interfaces/cli.py` 下沉到 `domain/manifest.py`（application 不能反向 import
+interfaces）。Schema 满足度判定从 `InventoryReconcileAgent` 提成
+`application/resource_pipeline.py:bundle_shape_for()`，两条路径共用。
 
 **已完成**：`AgentName.MANIFEST_INGEST` / `ArtifactKind.MANIFEST_INGESTION` 枚举成员；`summarize_bundle()` 提取。
 
@@ -234,7 +247,16 @@ def ingest_manifest(document, *, run_id, filters, policy) -> ManifestIngestion
 
 ---
 
-### S3 — ManifestRunSupervisor 图 + C3 修复
+### S3 — ManifestRunSupervisor 图 + C3 修复 ✅ 已完成
+
+`orchestration_manifest.py` 按下方设计原样落地；`CollaborationLedger.get_checkpoint()`
+已加；`cli.py` 的 `resume`/`graph-state` 已改用 `supervisor_for_run`；新增
+`scdata-agent manifest-run` 命令（暂不含 S5 才有意义的 `--downloader`/`--profile`/
+`--contact-email`/`--manifest-layout` 等参数——加了也是空转，等 S5 一起加）。C3 修复见
+`acquisition_v2.py:_grouping_key()` 与 `progressive_lineage_v2.py`（`candidate_ids`
+而非 `bundle_ids` 计数）；archive 警告修复见 `progressive_preflight.py:archive_may_explain_gap`。
+端到端测试 `tests/test_manifest_graph.py` 用真实 fixture（`GSE178707_NEATseq` 现有两个
+pair unit）钉住 C3：两个 bundle 都进 `recommended`，而非一个代表压制另一个。
 
 新建 `src/scdata_agent/application/orchestration_manifest.py`（~90 行）。**用子类，不改图**：`orchestration_v2.py` 是冻结接缝，且图无条件跑 `initialize_run → research_planner → planning_gate → resource_discovery`（`:304-311`）并覆写 `state["discovery"]`，所以 CLI 预先播种 artifact 的方案不可行。
 
@@ -286,7 +308,31 @@ archive_may_explain_gap = bool(archive_assets) and not bundle.satisfied_schema_i
 
 ---
 
-### S4 — 解除 governance 阻塞 →【里程碑 0】
+### S4 — 解除 governance 阻塞 →【里程碑 0】 ✅ 已完成，里程碑 0 已达成
+
+四处改动按下方设计原样落地。`tests/test_lifecycle_v2.py`/`test_supervisor_v2.py` 的
+断言已按预期更新（`"warn"→"pass"` + `"standard_object" in unavailable_metrics`；新增
+`assert snapshot["admitted_bundle_ids"]`）。
+
+**真实端到端验证**（唯一碰网络的一步，已完整跑过一次）：
+
+```
+$ scdata-agent manifest-run $M --dataset GSE178707_NEATseq \
+    --pair-unit CD4_memory_lane2_GSM5396336__GSM5396337 \
+    --data-root var/milestone0/data --database var/milestone0/agent_run.sqlite
+# → download_selection checkpoint, "Recommended bundles: 1; known expected bytes: 362787706."
+$ scdata-agent resume <download-checkpoint-id> --option recommended -d var/milestone0/agent_run.sqlite
+# → 真连 ftp.ncbi.nlm.nih.gov 下载 5 个文件、261 MB fragments + 83 MB matrix 等，
+#   materialized_quality: status=pass, unavailable_metrics 含 standard_object/
+#   barcode_linkage/frip_computable（C1 生效：跑不了的检查不拖累状态）
+# → corpus_governance: "Admit 1, quarantine 0, exclude 0 bundle(s)."
+$ scdata-agent resume <corpus-checkpoint-id> --option approve_snapshot -d var/milestone0/agent_run.sqlite
+# → run status: completed; admitted_bundle_ids: ['manifest_bundle_9f2f4b634d68d797']
+```
+
+人工核对：`DATA_CARD.md` licence 一节正确写 `repository_policy` 并点名 NCBI；
+`provenance.json` 里全部 5 条 asset 的 evidence class 都是 `user_corrected`（无一是
+`file_observed`）。§8 列的 barcode 交集六字段是 S6 工作，本轮尚未触及，如实留白。
 
 **`application/agents/snapshot_governance.py:115-138`**：
 

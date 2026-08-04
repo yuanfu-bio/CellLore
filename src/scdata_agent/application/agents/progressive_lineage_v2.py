@@ -132,17 +132,20 @@ class ProgressiveLineageLeakageAgent:
         for bundle in bundles:
             family_id = family_by_candidate.get(bundle.candidate_id)
             family = next((item for item in families if item.family_id == family_id), None)
-            family_size = len(family.bundle_ids) if family else 1
+            # Redundancy is about the same data being seen under more than one
+            # candidate, not about a candidate having more than one bundle (a
+            # dataset can legitimately have many samples in one family).
+            candidate_count = len(family.candidate_ids) if family else 1
             leaked = family_id in evaluation_family_ids
             assessments.append(BundleLineageAssessment(
                 bundle_id=bundle.bundle_id,
                 candidate_id=bundle.candidate_id,
                 family_ids=[family_id] if family_id else [],
                 evaluation_leakage=leaked,
-                redundancy_status="candidate" if family_size > 1 else "unique",
+                redundancy_status="candidate" if candidate_count > 1 else "unique",
                 reason_codes=[
                     *( ["evaluation_family"] if leaked else [] ),
-                    *( ["related_bundle_candidates"] if family_size > 1 else [] ),
+                    *( ["related_bundle_candidates"] if candidate_count > 1 else [] ),
                 ],
             ))
         snapshot = LineageGraphSnapshot(

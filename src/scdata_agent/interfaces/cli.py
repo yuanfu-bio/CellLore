@@ -15,6 +15,10 @@ from rich.table import Table
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
 from scdata_agent.application.collaboration import CollaborationLedger
 from scdata_agent.application.discovery import default_corpus_workflow, default_workflow
+from scdata_agent.application.orchestration_manifest import (
+    ManifestRunSupervisor,
+    supervisor_for_run,
+)
 from scdata_agent.application.research_planning import configured_research_planner
 from scdata_agent.domain.assets import build_asset_bundle
 from scdata_agent.domain.manifest import (
@@ -88,6 +92,105 @@ def manifest_check(
     _render_manifest_report(document, rows, issues)
     if any(item.severity == IssueSeverity.ERROR for item in issues):
         raise typer.Exit(code=2)
+
+
+@app.command("manifest-run")
+def manifest_run(
+    manifest: Annotated[Path, typer.Argument(help="Curated manifest CSV/TSV/XLSX path.")],
+    dialect: Annotated[
+        str | None,
+        typer.Option("--dialect", help="Manifest dialect ID; auto-detected when omitted."),
+    ] = None,
+    dataset: Annotated[
+        list[str] | None, typer.Option("--dataset", help="Keep only these dataset IDs; repeatable.")
+    ] = None,
+    pair_unit: Annotated[
+        list[str] | None,
+        typer.Option("--pair-unit", help="Keep only these pair unit IDs; repeatable."),
+    ] = None,
+    stage: Annotated[
+        list[str] | None, typer.Option("--stage", help="Keep only these download stages; repeatable.")
+    ] = None,
+    include_portal: Annotated[
+        bool,
+        typer.Option(
+            "--include-portal/--direct-only",
+            help=(
+                "A portal row is a click-through landing page, not a file; "
+                "including it only seeds a dead-end manual_review bundle "
+                "(non-negotiable #4: no automated click-through resolution)."
+            ),
+        ),
+    ] = False,
+    database: Annotated[Path, typer.Option("--database", "-d")] = Path(
+        "var/scdata_agent.sqlite"
+    ),
+    data_root: Annotated[
+        Path, typer.Option("--data-root", help="Raw and curated data root.")
+    ] = Path("data"),
+    max_download_bytes: Annotated[
+        int | None, typer.Option("--max-download-bytes", min=1)
+    ] = None,
+    remote_probe: Annotated[
+        bool,
+        typer.Option(
+            "--remote-probe/--no-remote-probe",
+            help="HEAD/Range-probe declared URLs before preflight. Metadata only.",
+        ),
+    ] = True,
+    require_standard_object: Annotated[
+        bool,
+        typer.Option(
+            "--require-standard-object/--allow-native-package",
+            help="Native mtx/tsv.gz/fragments packages are admissible by default (S4).",
+        ),
+    ] = False,
+    approved_license_candidate: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--approved-license-candidate",
+            help="Candidate ID to admit on repository-policy licence terms; repeatable.",
+        ),
+    ] = None,
+    trace_mode: Annotated[str, typer.Option("--trace-mode", help="local or langsmith.")] = "local",
+) -> None:
+    """Run a curated manifest through the same downstream path as a discovered one."""
+    try:
+        document = read_manifest(manifest, dialect)
+    except ManifestFormatError as error:
+        raise typer.BadParameter(str(error)) from error
+    if document.has_errors:
+        raise typer.BadParameter(
+            f"{manifest} has parse errors; run `manifest-check` first and fix them."
+        )
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run(
+        f"Curated manifest ingestion: {document.source_path}",
+        {
+            "source": "manifest",
+            "manifest_path": str(manifest),
+            "manifest_dialect": document.dialect_id,
+            "manifest_filters": {
+                "dataset": dataset or [],
+                "pair_unit": pair_unit or [],
+                "stage": stage or [],
+            },
+            "include_portal": include_portal,
+            "data_root": str(data_root),
+            "max_download_bytes": max_download_bytes,
+            "remote_probe_enabled": remote_probe,
+            "require_standard_object": require_standard_object,
+            "approved_license_candidate_ids": approved_license_candidate or [],
+        },
+    )
+    supervisor = ManifestRunSupervisor(ledger, str(database), trace_mode=trace_mode)
+    asyncio.run(supervisor.execute(run.run_id))
+    payload = {
+        "run": ledger.get_run(run.run_id).model_dump(mode="json"),
+        "tasks": [task.model_dump(mode="json") for task in ledger.list_tasks(run.run_id)],
+        "checkpoints": [item.model_dump(mode="json") for item in ledger.list_checkpoints(run.run_id)],
+    }
+    console.print_json(json.dumps(payload, ensure_ascii=False))
 
 
 def _render_manifest_report(
@@ -262,7 +365,9 @@ def resume(
     trace_mode: Annotated[str, typer.Option("--trace-mode")] = "local",
 ) -> None:
     """Resume a persisted LangGraph run after a human decision."""
-    supervisor = MultiAgentSupervisor(CollaborationLedger(database), str(database), trace_mode=trace_mode)
+    ledger = CollaborationLedger(database)
+    run_id = ledger.get_checkpoint(checkpoint_id).run_id
+    supervisor = supervisor_for_run(ledger, str(database), run_id, trace_mode=trace_mode)
     checkpoint = asyncio.run(supervisor.resume_checkpoint(checkpoint_id, {"option": option}))
     console.print_json(checkpoint.model_dump_json())
 
@@ -274,7 +379,8 @@ def graph_state(
     trace_mode: Annotated[str, typer.Option("--trace-mode")] = "local",
 ) -> None:
     """Inspect the persisted LangGraph state for a run."""
-    supervisor = MultiAgentSupervisor(CollaborationLedger(database), str(database), trace_mode=trace_mode)
+    ledger = CollaborationLedger(database)
+    supervisor = supervisor_for_run(ledger, str(database), run_id, trace_mode=trace_mode)
     console.print_json(json.dumps(asyncio.run(supervisor.graph_state(run_id)), ensure_ascii=False, default=str))
 
 

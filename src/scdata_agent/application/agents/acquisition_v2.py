@@ -52,14 +52,20 @@ class AcquisitionStrategistAgent:
             )
         )
         assessments = {item.bundle_id: item for item in lineage.bundle_assessments}
+        # A family is only a duplicate-coverage signal when it spans more than
+        # one candidate. A dataset with several samples produces one family per
+        # candidate with several bundles in it -- collapsing those to a single
+        # representative would reject every sample but one from a study that
+        # was never duplicated at all.
+        family_candidates = {item.family_id: set(item.candidate_ids) for item in lineage.families}
         family_groups: dict[str, list[SemanticBundle]] = defaultdict(list)
         for bundle in bundles:
             assessment = assessments.get(bundle.bundle_id)
-            family_id = assessment.family_ids[0] if assessment and assessment.family_ids else f"bundle:{bundle.bundle_id}"
-            family_groups[family_id].append(bundle)
+            key = self._grouping_key(bundle, assessment, family_candidates)
+            family_groups[key].append(bundle)
         representatives = {
-            family_id: self._representative(items, reports, summaries).bundle_id
-            for family_id, items in family_groups.items()
+            key: self._representative(items, reports, summaries).bundle_id
+            for key, items in family_groups.items()
         }
 
         decisions: list[AcquisitionBundle] = []
@@ -69,8 +75,8 @@ class AcquisitionStrategistAgent:
             assessment = assessments.get(bundle.bundle_id, BundleLineageAssessment(
                 bundle_id=bundle.bundle_id, candidate_id=bundle.candidate_id
             ))
-            family_id = assessment.family_ids[0] if assessment.family_ids else f"bundle:{bundle.bundle_id}"
-            representative = representatives[family_id]
+            key = self._grouping_key(bundle, assessment, family_candidates)
+            representative = representatives[key]
             hard_blockers = list(report.hard_blockers if report else ["preflight:missing"])
             if report and report.decision == BundleStatus.REJECTED:
                 hard_blockers.append("preflight:rejected")
@@ -187,6 +193,13 @@ class AcquisitionStrategistAgent:
             "modality_pairing": 10.0 if report and report.dimensions.get("modality_authenticity") == GateStatus.PASS else 0.0,
             "known_size": 5.0 if summary and summary.total_bytes is not None else 0.0,
         }
+
+    @staticmethod
+    def _grouping_key(bundle, assessment, family_candidates: dict[str, set[str]]) -> str:
+        family_id = assessment.family_ids[0] if assessment and assessment.family_ids else None
+        if family_id and len(family_candidates.get(family_id, ())) > 1:
+            return family_id
+        return f"bundle:{bundle.bundle_id}"
 
     @classmethod
     def _representative(cls, bundles, reports, summaries):

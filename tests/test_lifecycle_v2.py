@@ -287,5 +287,11 @@ def test_processed_first_materialization_and_bounded_local_qc(tmp_path):
     assert Path(manifest.data_card_path).is_file()
     assert report.metrics["fragment_rows_sampled"] == 2
     assert report.metrics["sampled_fragment_barcodes"] == 2
-    assert report.status.value == "warn"
+    # A native fragments-only package with no AnnData/MuData object is a
+    # legitimate training input (S4): format is a recorded dimension, not a
+    # WARN-worthy gap. Every check that could not run without a standard
+    # object -- including this bundle's own -- lands in unavailable_metrics
+    # instead of dragging the status down.
+    assert report.status.value == "pass"
     assert "tss_enrichment" in report.unavailable_metrics
+    assert "standard_object" in report.unavailable_metrics

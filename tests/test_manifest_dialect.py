@@ -1,6 +1,6 @@
 """Dialect detection, size parsing, and the XLSX seam.
 
-The fixture is 15 rows copied verbatim out of the real curated manifest,
+The fixture is 20 rows copied verbatim out of the real curated manifest,
 including its BOM and its Chinese headers, so these tests fail if the reader
 stops handling what a curator actually produces.
 """
@@ -34,7 +34,7 @@ def test_detects_the_real_chinese_header_row() -> None:
     # "﻿dataset_id" and every lookup silently misses.
     assert headers[0] == "dataset_id"
     assert "GSM/文件accession" in headers
-    assert len(rows) == 15
+    assert len(rows) == 20
     assert detect_dialect(headers) is PAIRED_MULTIOME_ZH_V1
 
 

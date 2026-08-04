@@ -115,7 +115,15 @@ class SnapshotCorpusGovernanceAgent:
             elif manifest is None or manifest.status != MaterializationStatus.MATERIALIZED:
                 pool = "quarantine"
                 reasons.append("standard_package_incomplete")
-            elif manifest.standard_object_path is None:
+            # A native mtx/tsv.gz/fragments package with a manifest, a data
+            # card, provenance and passing checksums is a legitimate training
+            # input. Requiring AnnData here made file format the admission
+            # gate and quality an afterthought; format is now a dimension the
+            # snapshot records rather than a hard gate, unless the caller
+            # opts into requiring it.
+            elif manifest.standard_object_path is None and context.policy.get(
+                "require_standard_object", False
+            ):
                 pool = "quarantine"
                 reasons.append("anndata_or_mudata_missing")
             elif qc is None or qc.status == GateStatus.FAIL:
@@ -129,6 +137,11 @@ class SnapshotCorpusGovernanceAgent:
             else:
                 pool = "pretrain"
                 reasons.append("hard_gates_passed")
+                if manifest.standard_object_path is None:
+                    # Travels with the snapshot rather than being silently
+                    # dropped: the data card and provenance must be able to
+                    # say what format the admitted bundle is actually in.
+                    reasons.append("standard_object:absent")
                 # Admitting on archive terms rather than a read licence is a
                 # weaker basis; it must travel with the snapshot, not be lost.
                 if report.license_status == LicenseStatus.REPOSITORY_POLICY:

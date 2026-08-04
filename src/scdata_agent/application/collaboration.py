@@ -337,6 +337,13 @@ class CollaborationLedger:
             rows = connection.execute("SELECT checkpoint_json FROM decision_checkpoint WHERE run_id=? ORDER BY created_at", (run_id,)).fetchall()
         return [DecisionCheckpoint.model_validate_json(row["checkpoint_json"]) for row in rows]
 
+    def get_checkpoint(self, checkpoint_id: str) -> DecisionCheckpoint:
+        with self.connect() as connection:
+            row = connection.execute("SELECT checkpoint_json FROM decision_checkpoint WHERE checkpoint_id=?", (checkpoint_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown checkpoint_id: {checkpoint_id}")
+        return DecisionCheckpoint.model_validate_json(row["checkpoint_json"])
+
     def resolve_checkpoint(self, checkpoint_id: str, resolution: dict[str, Any]) -> DecisionCheckpoint:
         with self.connect() as connection:
             row = connection.execute("SELECT checkpoint_json FROM decision_checkpoint WHERE checkpoint_id=?", (checkpoint_id,)).fetchone()

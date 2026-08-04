@@ -240,9 +240,12 @@ class ProgressivePreflightAssessmentAgent:
             archive_assets = [
                 item for item in bundle_assets if item.role == DataRole.ARCHIVE
             ]
-            archive_only = bool(bundle_assets) and len(archive_assets) == len(
-                bundle_assets
-            )
+            # An archive sitting alongside a metadata file (e.g. donor_metadata
+            # + multiome_archive) can still be the reason no schema is
+            # satisfied yet -- restricting this to "every asset is an archive"
+            # would judge the unopened archive's contents as verified-absent
+            # whenever anything else happens to be in the bundle.
+            archive_may_explain_gap = bool(archive_assets) and not bundle.satisfied_schema_ids
             warnings = []
             if access_status != BundleAccessStatus.VERIFIED:
                 warnings.append(f"access:{access_status.value}")
@@ -258,7 +261,7 @@ class ProgressivePreflightAssessmentAgent:
                 )
             if not bundle.complete:
                 warnings.append(
-                    "archive:uninspected" if archive_only else "bundle:missing_roles"
+                    "archive:uninspected" if archive_may_explain_gap else "bundle:missing_roles"
                 )
             elif archive_assets:
                 warnings.append("archive:uninspected")
@@ -347,7 +350,7 @@ class ProgressivePreflightAssessmentAgent:
                         else (
                             "Contents are archived and were not opened; "
                             "completeness is unknown, not disproven."
-                            if archive_only
+                            if archive_may_explain_gap
                             else "Satisfies none of "
                             f"{', '.join(bundle.applicable_schema_ids) or 'n/a'}; "
                             f"observed roles: "

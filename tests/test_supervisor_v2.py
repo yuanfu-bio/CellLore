@@ -217,3 +217,9 @@ async def test_supervisor_requires_download_then_corpus_approval(
         record_type="corpus_snapshot", run_id=run.run_id
     )
     assert snapshots[-1]["payload"]["approved"] is True
+    # The point of this whole branch (S4): a native fragments/cell-metadata
+    # package with no AnnData/MuData object is no longer hard-quarantined for
+    # its format, so it reaches "pretrain" on its actual QC and licence
+    # standing. Before that fix this assertion would have failed silently
+    # unnoticed -- the test above only checked that a snapshot exists.
+    assert snapshots[-1]["payload"]["admitted_bundle_ids"]
