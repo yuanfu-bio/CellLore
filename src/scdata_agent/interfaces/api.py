@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
+from scdata_agent.application.orchestration_v2 import workflow_topology
 from scdata_agent.application.collaboration import CollaborationLedger
 
 _STATUS_COLOR = {
@@ -216,6 +217,60 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
     return app
 
 
+def _workflow_topology_trace(ledger: CollaborationLedger, run_id: str) -> dict[str, Any]:
+    topology = workflow_topology()
+    canonical_node_ids = {node["id"] for node in topology["nodes"]}
+    executed_nodes: set[str] = set()
+    task_node_ids: dict[str, str] = {}
+    transitions: set[tuple[str, str, str | None]] = set()
+    for event in ledger.events_since(run_id):
+        payload = event["payload"]
+        if event["type"] in {"graph_node_started", "graph_node_finished", "graph_node_failed", "graph_topology_node"}:
+            node_id = payload.get("node")
+            if node_id in canonical_node_ids:
+                executed_nodes.add(node_id)
+            task_id = payload.get("task_id")
+            if node_id in canonical_node_ids and task_id:
+                task_node_ids[task_id] = node_id
+        if event["type"] == "graph_topology_transition":
+            source, target = payload.get("source"), payload.get("target")
+            if source and target:
+                executed_nodes.update({source, target})
+                transitions.add((source, target, payload.get("condition")))
+    for checkpoint in ledger.list_checkpoints(run_id):
+        if checkpoint.kind == "download_selection":
+            executed_nodes.add("download_approval")
+            option = (checkpoint.resolution or {}).get("option")
+            if option:
+                route = (
+                    "transfer"
+                    if option in {"recommended", "all_with_unknown_size"}
+                    else "stop"
+                )
+                transitions.add(
+                    (
+                        "download_approval",
+                        "transfer_execution" if route == "transfer" else "finalize",
+                        route,
+                    )
+                )
+        elif checkpoint.kind == "corpus_snapshot":
+            executed_nodes.add("corpus_approval")
+    executed_edges = {
+        edge["id"]
+        for edge in topology["edges"]
+        if (edge["source"], edge["target"], edge.get("condition")) in transitions
+        or (not edge.get("condition") and edge["source"] in executed_nodes and edge["target"] in executed_nodes)
+    }
+    return {
+        **topology,
+        "executed_node_ids": sorted(executed_nodes),
+        "executed_edge_ids": sorted(executed_edges),
+        "task_node_ids": task_node_ids,
+        "trace_available": bool(task_node_ids or transitions),
+        "trace_complete": len(task_node_ids) >= len(ledger.list_tasks(run_id)),
+    }
+
 def _run_payload(ledger: CollaborationLedger, run_id: str) -> dict[str, Any]:
     """Everything the run-monitoring panel needs, in one shape shared by the
     JSON API and the server-rendered page's initial hydration."""
@@ -234,6 +289,7 @@ def _run_payload(ledger: CollaborationLedger, run_id: str) -> dict[str, Any]:
     acquisition_plan = acquisition_artifacts[-1].payload if acquisition_artifacts else None
     return {
         "run": run.model_dump(mode="json"),
+        "workflow_topology": _workflow_topology_trace(ledger, run_id),
         "run_error": run_error,
         "tasks": [task.model_dump(mode="json") for task in ledger.list_tasks(run_id)],
         "artifacts": [item.model_dump(mode="json") for item in artifacts],

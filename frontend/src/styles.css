@@ -53,3 +53,42 @@ html{scroll-behavior:smooth}.home-main{scroll-snap-type:y proximity;overscroll-b
 .atlas-hero>.hero-logo{position:absolute;top:clamp(1.35rem,3vw,3.25rem);left:clamp(1.35rem,3.5vw,4.5rem);z-index:2;margin:0;font-size:clamp(1.1rem,1.6vw,1.4rem)}.atlas-hero>.hero-logo img{width:clamp(4.2rem,6vw,6.5rem);height:clamp(4.2rem,6vw,6.5rem)}
 /* One continuous canvas treatment from the hero through the workspace. */
 .home-main::before{position:fixed;inset:0;z-index:1;pointer-events:none;content:"";background:radial-gradient(circle at 50% 48%,transparent 12%,rgba(4,5,17,.18) 47%,rgba(3,4,14,.82) 100%)}.home-main>.atlas-canvas{z-index:0}.atlas-hero,.home-workspace{z-index:2}.atlas-vignette{display:none}.home-workspace{background:transparent}
+
+/* Give the Z-fold map clear breathing room and keep arrows in its gaps. */
+.z-workflow{min-width:650px}.workflow-scroll{padding:22px 0;min-height:760px}.workflow-links path{stroke-linecap:round}.audit-explainer{max-width:none;white-space:nowrap}.output-stage .stage-copy{align-content:center}@media(max-width:760px){.audit-explainer{white-space:normal}}
+
+/* Fit the collapsed stage inspector into the first viewport. */
+.output-panel{display:flex;flex-direction:column;height:calc(100svh - 235px);min-height:0}.output-panel .section-heading{margin-bottom:.6rem}.output-panel .panel-intro{margin:-.2rem 0 .55rem;font-size:11px}.output-list{min-height:0;flex:1;gap:.28rem;overflow-y:auto}.output-stage summary,.stage-toggle{min-height:42px;padding:.38rem .55rem;gap:.5rem}.stage-index{font-size:10px}.stage-copy b{font-size:12px}.output-stage .pill{padding:.16rem .45rem;font-size:9px}.stage-chevron{width:16px;height:16px;font-size:16px}.stage-body{padding:0 .6rem .6rem}.artifact-summary{gap:.45rem;padding:.55rem}.artifact-summary-heading strong{font-size:12px}@media(max-width:900px){.output-panel{height:auto;max-height:none}.output-list{overflow:visible}}
+
+/* Keep the map and inspector deliberately equal in the desktop console. */
+@media(min-width:901px){.console-grid{--console-panel-height:clamp(800px,calc(100svh - 190px),900px);align-items:stretch}.topology-card,.output-panel{height:var(--console-panel-height);min-height:0}.topology-card{display:flex;flex-direction:column}.topology-card .workflow-graph{display:flex;min-height:0;flex:1;flex-direction:column}.topology-card .workflow-scroll{min-height:0;max-height:none;flex:1;overflow:auto}.output-panel{max-height:none}}
+
+/* Expanded inspector stages remain reachable inside the equal-height panel. */
+.output-list{scroll-behavior:smooth}.output-stage{scroll-margin-block:.45rem}.output-stage:has(.stage-body){flex-shrink:0}.output-stage .stage-body{overflow:visible}
+
+/* Detail inspection expands the entire console row instead of clipping inside it. */
+@media(min-width:901px){.console-grid{--console-panel-min-height:clamp(800px,calc(100svh - 190px),900px)}.topology-card,.output-panel{height:auto;min-height:var(--console-panel-min-height)}.output-list{flex:0 0 auto;overflow:visible}.topology-card .workflow-scroll{min-height:0;overflow:auto}}
+
+@media(min-width:901px){.console-grid{--console-panel-min-height:clamp(750px,calc(100svh - 230px),850px)}}
+
+/* A denser but more legible collapsed inspector. */
+@media(min-width:901px){.console-grid{--console-panel-min-height:clamp(700px,calc(100svh - 270px),800px)}}.output-stage summary,.stage-toggle{min-height:46px;padding:.44rem .6rem}.stage-index{font-size:11px}.stage-copy b{font-size:13px}.output-stage .pill{font-size:10px}
+
+/* Compact the process map without losing the folded reading order. */
+@media(min-width:901px){.console-grid{--console-panel-min-height:clamp(670px,calc(100svh - 300px),760px)}}.workflow-links path{stroke-width:2.15}.workflow-scroll{padding:16px 0}
+/* Compact logical DAG nodes while preserving clear branch joins. */
+.graph-node{height:70px;padding:.55rem .66rem}.graph-node b{font-size:13px}.node-status{margin-top:.32rem}.node-order{top:.36rem}.graph-node .help-tip{top:.36rem}.workflow-links path{stroke-width:2.1}
+
+/* Canonical topology uses active paths from the backend; dormant branches stay quiet. */
+.workflow-links path.inactive{opacity:.16}.workflow-links path.executed{opacity:.9}.graph-node.gate{border-style:dashed;background:var(--sunken)}.graph-node:disabled{cursor:default;opacity:.56}.graph-node:disabled:hover{transform:none;box-shadow:0 4px 10px #00000012}
+/* Keep the invitation independent from the hero headline, near the fold. */
+.atlas-hero .hero-copy h1{margin-bottom:0}.atlas-hero .scroll-cue{position:absolute;bottom:clamp(2.5rem,8svh,5.75rem);left:50%;transform:translateX(-50%)}
+@media(max-width:640px){.atlas-hero .scroll-cue{bottom:2rem}}
+/* The plan-only route is a real condition, but it should travel quietly on the map edge. */
+.workflow-links path.stop-branch{opacity:.28;stroke-dasharray:5 5}.workflow-links path.stop-branch.executed{opacity:.52}
+/* Dense four-lane DAG: compact enough for one inspector-height viewport. */
+.z-workflow{min-width:680px}.graph-node{width:145px;height:64px;padding:.4rem .5rem}.graph-node b{padding-bottom:0;font-size:11.5px;line-height:1.18}.node-status{margin-top:.08rem;font-size:9px}.node-order{left:.5rem;top:.28rem;font-size:9px}.graph-node .help-tip{right:.42rem;top:.28rem;width:16px;height:16px;font-size:10px}.workflow-scroll{padding:14px 0}
+/* Scale the complete map—not just its container—so the full topology is visible at rest. */
+.workflow-fit{position:relative;flex:0 0 auto}.topology-card .workflow-scroll{display:flex;align-items:flex-start;justify-content:center}
+/* Slightly quieter labels in the compact process map. */
+.graph-node b{font-size:11px}.topology-trace-note{margin:.45rem 0 0;color:var(--muted);font-size:10px;line-height:1.35;text-align:center}

@@ -88,9 +88,77 @@ class SupervisorState(TypedDict, total=False):
     planning_iterations: int
     planning_replan: bool
     discovery: DiscoveryRunResult
+
     evidence_route: str
     resolution: dict[str, Any]
     corpus_resolution: dict[str, Any]
+def workflow_topology() -> dict[str, Any]:
+    """Canonical supervisor DAG exposed to the control-room UI."""
+    nodes = [
+        ("initialize_run", "Initialize run", "gate", 20, 20),
+        ("research_planner", "Research planner", "agent", 185, 20),
+        ("planning_gate", "Planning gate", "gate", 350, 20),
+        ("resource_discovery", "Resource discovery", "agent", 515, 20),
+        ("asset_scout_direct", "Asset scout · direct", "agent", 20, 100),
+        ("evidence_metadata", "Evidence curator · metadata", "agent", 350, 100),
+        ("evidence_escalation_gate", "Evidence escalation", "gate", 185, 180),
+        ("evidence_fulltext", "Evidence curator · full text", "agent", 350, 180),
+        ("asset_scout_enriched", "Asset scout · enriched", "agent", 515, 260),
+        ("inventory_reconcile", "Inventory reconcile", "agent", 350, 260),
+        ("preflight_assessment", "Preflight assessment", "agent", 185, 340),
+        ("early_lineage", "Early lineage", "agent", 515, 340),
+        ("acquisition_strategy", "Acquisition strategy", "agent", 350, 420),
+        ("download_approval", "Download approval", "gate", 515, 420),
+        ("transfer_execution", "Transfer execution", "agent", 20, 500),
+        ("dataset_curator", "Dataset curator", "agent", 185, 500),
+        ("materialized_quality", "Materialized quality", "agent", 350, 500),
+        ("late_lineage", "Late lineage", "agent", 515, 500),
+        ("corpus_governance", "Corpus governance", "agent", 350, 580),
+        ("corpus_approval", "Corpus approval", "gate", 185, 580),
+        ("finalize", "Finalize run", "gate", 20, 580),
+    ]
+    edges = [
+        ("initialize_run", "research_planner", None),
+        ("research_planner", "planning_gate", None),
+        ("planning_gate", "research_planner", "replan"),
+        ("planning_gate", "resource_discovery", "discover"),
+        ("resource_discovery", "asset_scout_direct", None),
+        ("resource_discovery", "evidence_metadata", None),
+        ("asset_scout_direct", "evidence_escalation_gate", None),
+        ("evidence_metadata", "evidence_escalation_gate", None),
+        ("evidence_escalation_gate", "evidence_fulltext", "fulltext"),
+        ("evidence_escalation_gate", "asset_scout_enriched", "scout"),
+        ("evidence_fulltext", "asset_scout_enriched", None),
+        ("asset_scout_enriched", "inventory_reconcile", None),
+        ("inventory_reconcile", "preflight_assessment", None),
+        ("inventory_reconcile", "early_lineage", None),
+        ("preflight_assessment", "acquisition_strategy", None),
+        ("early_lineage", "acquisition_strategy", None),
+        ("acquisition_strategy", "download_approval", None),
+        ("download_approval", "finalize", "stop"),
+        ("download_approval", "transfer_execution", "transfer"),
+        ("transfer_execution", "dataset_curator", None),
+        ("dataset_curator", "materialized_quality", None),
+        ("materialized_quality", "late_lineage", None),
+        ("late_lineage", "corpus_governance", None),
+        ("corpus_governance", "corpus_approval", None),
+        ("corpus_approval", "finalize", None),
+    ]
+    return {
+        "nodes": [
+            {"id": node_id, "label": label, "kind": kind, "x": x, "y": y}
+            for node_id, label, kind, x, y in nodes
+        ],
+        "edges": [
+            {
+                "id": f"{source}->{target}:{condition or 'direct'}",
+                "source": source,
+                "target": target,
+                "condition": condition,
+            }
+            for source, target, condition in edges
+        ],
+    }
 
 
 class MultiAgentSupervisor:
@@ -232,71 +300,59 @@ class MultiAgentSupervisor:
         graph.add_node("resource_discovery", self._discovery)
         graph.add_node(
             "evidence_metadata",
-            self._specialist(
-                AgentName.EVIDENCE_CURATOR, self.evidence_metadata
-            ),
+            self._specialist(AgentName.EVIDENCE_CURATOR, self.evidence_metadata, "evidence_metadata"),
         )
         graph.add_node(
             "asset_scout_direct",
-            self._specialist(
-                AgentName.ASSET_SCOUT, self.asset_scout_direct
-            ),
+            self._specialist(AgentName.ASSET_SCOUT, self.asset_scout_direct, "asset_scout_direct"),
         )
         graph.add_node(
             "evidence_escalation_gate", self._evidence_escalation_gate
         )
         graph.add_node(
             "evidence_fulltext",
-            self._specialist(
-                AgentName.EVIDENCE_CURATOR, self.evidence_fulltext
-            ),
+            self._specialist(AgentName.EVIDENCE_CURATOR, self.evidence_fulltext, "evidence_fulltext"),
         )
         graph.add_node(
             "asset_scout_enriched",
-            self._specialist(
-                AgentName.ASSET_SCOUT, self.asset_scout_enriched
-            ),
+            self._specialist(AgentName.ASSET_SCOUT, self.asset_scout_enriched, "asset_scout_enriched"),
         )
         graph.add_node(
             "inventory_reconcile",
-            self._specialist(
-                AgentName.ASSET_SCOUT, self.inventory_reconcile
-            ),
+            self._specialist(AgentName.ASSET_SCOUT, self.inventory_reconcile, "inventory_reconcile"),
         )
         graph.add_node(
             "preflight_assessment",
-            self._specialist(AgentName.PREFLIGHT_ASSESSMENT),
+            self._specialist(AgentName.PREFLIGHT_ASSESSMENT, node_id="preflight_assessment"),
         )
         graph.add_node(
             "early_lineage",
-            self._specialist(
-                AgentName.LINEAGE_LEAKAGE, self.early_lineage
-            ),
+            self._specialist(AgentName.LINEAGE_LEAKAGE, self.early_lineage, "early_lineage"),
         )
         graph.add_node(
             "acquisition_strategy",
-            self._specialist(AgentName.ACQUISITION_STRATEGIST),
+            self._specialist(AgentName.ACQUISITION_STRATEGIST, node_id="acquisition_strategy"),
         )
         graph.add_node("download_approval", self._download_approval)
         graph.add_node(
             "transfer_execution",
-            self._specialist(AgentName.ASSET_TRANSFER),
+            self._specialist(AgentName.ASSET_TRANSFER, node_id="transfer_execution"),
         )
         graph.add_node(
             "dataset_curator",
-            self._specialist(AgentName.DATASET_CURATOR),
+            self._specialist(AgentName.DATASET_CURATOR, node_id="dataset_curator"),
         )
         graph.add_node(
             "materialized_quality",
-            self._specialist(AgentName.QUALITY_ASSESSMENT),
+            self._specialist(AgentName.QUALITY_ASSESSMENT, node_id="materialized_quality"),
         )
         graph.add_node(
             "late_lineage",
-            self._specialist(AgentName.LINEAGE_LEAKAGE, self.late_lineage),
+            self._specialist(AgentName.LINEAGE_LEAKAGE, self.late_lineage, "late_lineage"),
         )
         graph.add_node(
             "corpus_governance",
-            self._specialist(AgentName.CORPUS_GOVERNANCE),
+            self._specialist(AgentName.CORPUS_GOVERNANCE, node_id="corpus_governance"),
         )
         graph.add_node("corpus_approval", self._corpus_approval)
         graph.add_node("finalize", self._finalize)
@@ -358,6 +414,7 @@ class MultiAgentSupervisor:
                 raise ValueError("question is required to start a run.")
             run = self.ledger.create_run(question, state.get("policy", {}))
         self.ledger.set_run_status(run.run_id, RunStatus.RUNNING)
+        self.ledger.add_event(run.run_id, "graph_topology_node", {"node": "initialize_run"})
         return {
             "run_id": run.run_id,
             "question": run.question,
@@ -370,7 +427,7 @@ class MultiAgentSupervisor:
 
     async def _planner(self, state: SupervisorState) -> dict[str, Any]:
         context = self._context(state)
-        await self._dispatch(context, AgentName.RESEARCH_PLANNER)
+        await self._dispatch(context, AgentName.RESEARCH_PLANNER, node_id="research_planner")
         assert context.research_plan is not None
         assert context.requirement is not None
         return {
@@ -382,8 +439,18 @@ class MultiAgentSupervisor:
     async def _planning_gate(
         self, state: SupervisorState
     ) -> dict[str, Any]:
+        self.ledger.add_event(state["run_id"], "graph_topology_node", {"node": "planning_gate"})
         plan = ResearchPlan.model_validate(state["research_plan"])
         if plan.readiness != PlanReadiness.BLOCKED:
+            self.ledger.add_event(
+                state["run_id"],
+                "graph_topology_transition",
+                {
+                    "source": "planning_gate",
+                    "target": "resource_discovery",
+                    "condition": "discover",
+                },
+            )
             return {"planning_replan": False}
         iteration = state.get("planning_iterations", 0)
         checkpoint = self._open_planning_checkpoint(
@@ -401,6 +468,15 @@ class MultiAgentSupervisor:
         )
         clarification = str(resolution.get("clarification", "")).strip()
         if clarification:
+            self.ledger.add_event(
+                state["run_id"],
+                "graph_topology_transition",
+                {
+                    "source": "planning_gate",
+                    "target": "research_planner",
+                    "condition": "replan",
+                },
+            )
             return {
                 "question": (
                     f"{state['question']}\nUser clarification: {clarification}"
@@ -408,6 +484,15 @@ class MultiAgentSupervisor:
                 "planning_iterations": iteration + 1,
                 "planning_replan": True,
             }
+        self.ledger.add_event(
+            state["run_id"],
+            "graph_topology_transition",
+            {
+                "source": "planning_gate",
+                "target": "resource_discovery",
+                "condition": "discover",
+            },
+        )
         return {"planning_replan": False}
 
     @staticmethod
@@ -422,6 +507,7 @@ class MultiAgentSupervisor:
             context,
             AgentName.EVIDENCE_CURATOR,
             self.evidence_escalation,
+            node_id="evidence_escalation_gate",
         )
         escalation_artifact = latest_artifact(
             context.artifacts, ArtifactKind.EVIDENCE_ESCALATION.value
@@ -433,23 +519,32 @@ class MultiAgentSupervisor:
             if escalation_artifact is not None
             else None
         )
-        return {
-            "evidence_route": (
-                "fulltext"
-                if report and report.fulltext_candidate_ids
-                else "scout"
-            )
-        }
+        route = (
+            "fulltext" if report and report.fulltext_candidate_ids else "scout"
+        )
+        self.ledger.add_event(
+            state["run_id"],
+            "graph_topology_transition",
+            {
+                "source": "evidence_escalation_gate",
+                "target": "evidence_fulltext"
+                if route == "fulltext"
+                else "asset_scout_enriched",
+                "condition": route,
+            },
+        )
+        return {"evidence_route": route}
 
     
+    @staticmethod
     def _route_after_evidence_escalation(
-        self, state: SupervisorState,
+        state: SupervisorState,
     ) -> str:
         return state.get("evidence_route", "scout")
 
     async def _discovery(self, state: SupervisorState) -> dict[str, Any]:
         context = self._context(state)
-        await self._dispatch(context, AgentName.RESOURCE_DISCOVERY)
+        await self._dispatch(context, AgentName.RESOURCE_DISCOVERY, node_id="resource_discovery")
         assert context.discovery is not None
         update: dict[str, Any] = {
             "discovery": context.discovery.model_dump(mode="json")
@@ -461,10 +556,10 @@ class MultiAgentSupervisor:
         return update
 
     def _specialist(
-        self, name: AgentName, agent: SpecialistAgent | None = None
+        self, name: AgentName, agent: SpecialistAgent | None = None, node_id: str | None = None
     ):
         async def node(state: SupervisorState) -> dict[str, Any]:
-            await self._dispatch(self._context(state), name, agent)
+            await self._dispatch(self._context(state), name, agent, node_id=node_id)
             return {}
 
         return node
@@ -488,9 +583,11 @@ class MultiAgentSupervisor:
     @staticmethod
     def _route_after_download(state: SupervisorState) -> str:
         option = state.get("resolution", {}).get("option")
-        return "transfer" if option in {
-            "recommended", "all_with_unknown_size"
-        } else "stop"
+        return (
+            "transfer"
+            if option in {"recommended", "all_with_unknown_size"}
+            else "stop"
+        )
 
     async def _corpus_approval(
         self, state: SupervisorState
@@ -532,6 +629,7 @@ class MultiAgentSupervisor:
         return {"corpus_resolution": resolution}
 
     async def _finalize(self, state: SupervisorState) -> dict[str, Any]:
+        self.ledger.add_event(state["run_id"], "graph_topology_node", {"node": "finalize"})
         self.ledger.set_run_status(state["run_id"], RunStatus.COMPLETED)
         self.ledger.add_event(
             state["run_id"],
@@ -576,6 +674,7 @@ class MultiAgentSupervisor:
         context: AgentContext,
         name: AgentName,
         agent: SpecialistAgent | None = None,
+        node_id: str | None = None,
     ) -> None:
         self._ensure_active(context.run_id)
         implementation = agent or self.agents[name]
@@ -587,7 +686,7 @@ class MultiAgentSupervisor:
         self.ledger.add_event(
             context.run_id,
             "graph_node_started",
-            {"node": name.value, "task_id": task.task_id},
+            {"node": node_id or name.value, "task_id": task.task_id},
         )
         try:
             outputs = await implementation.run(context)
@@ -618,7 +717,7 @@ class MultiAgentSupervisor:
             self.ledger.add_event(
                 context.run_id,
                 "graph_node_finished",
-                {"node": name.value, "task_id": task.task_id},
+                {"node": node_id or name.value, "task_id": task.task_id},
             )
         except Exception as error:
             self.ledger.finish_task(
@@ -627,7 +726,7 @@ class MultiAgentSupervisor:
             self.ledger.add_event(
                 context.run_id,
                 "graph_node_failed",
-                {"node": name.value, "error": str(error)},
+                {"node": node_id or name.value, "error": str(error)},
             )
             raise
 
