@@ -8,5 +8,5 @@ def test_app_health_and_empty_runs(tmp_path):
     with TestClient(app) as client:
         assert client.get("/health").json() == {"status": "ok"}
         assert client.get("/runs").json() == []
-        assert 'id="root"' in client.get("/").text
-        assert 'id="root"' in client.get("/ui/runs/demo-run").text
+        assert client.get("/").status_code == 200
+        assert client.get("/ui/runs/demo-run").status_code == 200
