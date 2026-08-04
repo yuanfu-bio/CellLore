@@ -4,6 +4,7 @@ channels:
 dependencies:
   - python=3.12
   - pip
+  - nodejs>=20,<23
   - pip:
       - fastapi>=0.115,<1
       - httpx>=0.28,<1
