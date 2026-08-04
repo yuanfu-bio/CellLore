@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+from collections import Counter
+from pathlib import PurePosixPath
+
 from scdata_agent.application.agents.shared import AgentContext
 from scdata_agent.application.collaboration import AgentArtifact, ArtifactKind
 from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.domain.lifecycle import PointerStatus, ResourcePointer
+from scdata_agent.domain.lifecycle import PointerStatus, ResourcePointer, SemanticBundle
+from scdata_agent.domain.models import (
+    AccessLevel,
+    AssetAvailability,
+    DataAsset,
+    DatasetCandidate,
+)
 from scdata_agent.domain.resource_pipeline import (
+    BundleAccessStatus,
     PointerBatchStage,
+    RemoteBundleInventorySummary,
     ResourcePointerBatch,
 )
 
@@ -67,6 +78,90 @@ def merge_pointers(pointers: list[ResourcePointer]) -> list[ResourcePointer]:
             item.namespace,
             item.locator,
         ),
+    )
+
+
+def asset_file_type(file_name: str) -> str:
+    suffixes = PurePosixPath(file_name).suffixes
+    if len(suffixes) >= 2 and suffixes[-1].lower() in {".gz", ".bgz", ".bz2"}:
+        return "".join(suffixes[-2:]).lower()
+    return suffixes[-1].lower() if suffixes else "unknown"
+
+
+def summarize_bundle(
+    bundle: SemanticBundle,
+    assets: list[DataAsset],
+    candidate: DatasetCandidate,
+    truncated_resolvers: list[str] | None = None,
+) -> RemoteBundleInventorySummary:
+    """Describe what is remotely known about one bundle, without overclaiming.
+
+    Shared by the discovery path and by curated-manifest ingestion so both
+    produce the same summary, and so a change to how access status or size is
+    judged cannot drift between them.
+    """
+    locations = [location for asset in assets for location in asset.locations[:1]]
+    verified = sum(
+        location.availability == AssetAvailability.OBSERVED
+        and location.access_level == AccessLevel.PUBLIC_VERIFIED
+        for location in locations
+    )
+    declared = sum(location.availability == AssetAvailability.DECLARED for location in locations)
+    unavailable = sum(
+        location.availability == AssetAvailability.UNAVAILABLE for location in locations
+    )
+    auth = sum(
+        location.access_level
+        in {
+            AccessLevel.AUTH_REQUIRED,
+            AccessLevel.CONTROLLED,
+            AccessLevel.EMBARGOED,
+        }
+        for location in locations
+    )
+    unknown = max(0, len(assets) - verified - declared - unavailable - auth)
+    if auth:
+        status = BundleAccessStatus.AUTH_REQUIRED
+    elif assets and unavailable == len(assets):
+        status = BundleAccessStatus.UNAVAILABLE
+    elif assets and verified == len(assets):
+        status = BundleAccessStatus.VERIFIED
+    elif verified or unavailable:
+        status = BundleAccessStatus.PARTIAL
+    elif assets and declared == len(assets):
+        status = BundleAccessStatus.DECLARED_ONLY
+    else:
+        status = BundleAccessStatus.UNKNOWN
+    sizes = [location.size_bytes for location in locations]
+    known_bytes = sum(size for size in sizes if size is not None)
+    unknown_sizes = len(assets) - sum(size is not None for size in sizes)
+    truncated = list(truncated_resolvers or [])
+    return RemoteBundleInventorySummary(
+        summary_id=stable_id("remote_bundle_summary", bundle.bundle_id),
+        bundle_id=bundle.bundle_id,
+        candidate_id=bundle.candidate_id,
+        access_status=status,
+        asset_count=len(assets),
+        verified_asset_count=verified,
+        declared_asset_count=declared,
+        unavailable_asset_count=unavailable,
+        unknown_asset_count=unknown,
+        auth_required_asset_count=auth,
+        known_bytes=known_bytes,
+        # Withheld when the listing was truncated: summing a subset would
+        # report a figure guaranteed to be too low as though it were the
+        # bundle's size. known_bytes still carries the lower bound.
+        total_bytes=(known_bytes if unknown_sizes == 0 and not truncated else None),
+        unknown_size_asset_count=unknown_sizes,
+        inventory_truncated=bool(truncated),
+        truncated_resolvers=truncated,
+        role_counts=dict(Counter(asset.role.value for asset in assets)),
+        file_type_counts=dict(Counter(asset_file_type(asset.file_name) for asset in assets)),
+        media_type_counts=dict(Counter(asset.media_type or "unknown" for asset in assets)),
+        compression_counts=dict(Counter(asset.compression or "none" for asset in assets)),
+        license_ids=sorted({asset.license_id for asset in assets if asset.license_id}),
+        reported_modalities=sorted({modality.value for modality in candidate.modalities}),
+        genome_builds=sorted({asset.genome_build for asset in assets if asset.genome_build}),
     )
 
 

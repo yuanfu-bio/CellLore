@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from pathlib import PurePosixPath
-
 from scdata_agent.application.agents.shared import (
     AgentContext,
     candidate_modalities,
@@ -12,8 +9,10 @@ from scdata_agent.application.agents.shared import (
 )
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.resource_pipeline import (
+    asset_file_type,
     merge_pointers,
     pointer_batches,
+    summarize_bundle,
 )
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import (
@@ -21,17 +20,11 @@ from scdata_agent.domain.lifecycle import (
     SemanticBundle,
 )
 from scdata_agent.domain.models import (
-    AccessLevel,
-    AssetAvailability,
     DataAsset,
     DataRole,
 )
 from scdata_agent.domain.requirements import applicable_bundle_schemas
-from scdata_agent.domain.resource_pipeline import (
-    AssetInventoryDelta,
-    BundleAccessStatus,
-    RemoteBundleInventorySummary,
-)
+from scdata_agent.domain.resource_pipeline import AssetInventoryDelta
 
 
 class InventoryReconcileAgent:
@@ -255,72 +248,10 @@ class InventoryReconcileAgent:
             )
         ]
 
-    @staticmethod
-    def _summarize(bundle, assets, candidate, truncated_resolvers=None):
-        locations = [location for asset in assets for location in asset.locations[:1]]
-        verified = sum(
-            location.availability == AssetAvailability.OBSERVED
-            and location.access_level == AccessLevel.PUBLIC_VERIFIED
-            for location in locations
-        )
-        declared = sum(location.availability == AssetAvailability.DECLARED for location in locations)
-        unavailable = sum(location.availability == AssetAvailability.UNAVAILABLE for location in locations)
-        auth = sum(location.access_level in {
-            AccessLevel.AUTH_REQUIRED, AccessLevel.CONTROLLED, AccessLevel.EMBARGOED,
-        } for location in locations)
-        unknown = max(0, len(assets) - verified - declared - unavailable - auth)
-        if auth:
-            status = BundleAccessStatus.AUTH_REQUIRED
-        elif assets and unavailable == len(assets):
-            status = BundleAccessStatus.UNAVAILABLE
-        elif assets and verified == len(assets):
-            status = BundleAccessStatus.VERIFIED
-        elif verified or unavailable:
-            status = BundleAccessStatus.PARTIAL
-        elif assets and declared == len(assets):
-            status = BundleAccessStatus.DECLARED_ONLY
-        else:
-            status = BundleAccessStatus.UNKNOWN
-        sizes = [location.size_bytes for location in locations]
-        known_bytes = sum(size for size in sizes if size is not None)
-        unknown_sizes = len(assets) - sum(size is not None for size in sizes)
-        truncated = list(truncated_resolvers or [])
-        return RemoteBundleInventorySummary(
-            summary_id=stable_id("remote_bundle_summary", bundle.bundle_id),
-            bundle_id=bundle.bundle_id,
-            candidate_id=bundle.candidate_id,
-            access_status=status,
-            asset_count=len(assets),
-            verified_asset_count=verified,
-            declared_asset_count=declared,
-            unavailable_asset_count=unavailable,
-            unknown_asset_count=unknown,
-            auth_required_asset_count=auth,
-            known_bytes=known_bytes,
-            # Withheld when the listing was truncated: summing a subset would
-            # report a figure guaranteed to be too low as though it were the
-            # bundle's size. known_bytes still carries the lower bound.
-            total_bytes=(
-                known_bytes if unknown_sizes == 0 and not truncated else None
-            ),
-            unknown_size_asset_count=unknown_sizes,
-            inventory_truncated=bool(truncated),
-            truncated_resolvers=truncated,
-            role_counts=dict(Counter(asset.role.value for asset in assets)),
-            file_type_counts=dict(Counter(InventoryReconcileAgent._file_type(asset.file_name) for asset in assets)),
-            media_type_counts=dict(Counter(asset.media_type or "unknown" for asset in assets)),
-            compression_counts=dict(Counter(asset.compression or "none" for asset in assets)),
-            license_ids=sorted({asset.license_id for asset in assets if asset.license_id}),
-            reported_modalities=sorted({modality.value for modality in candidate.modalities}),
-            genome_builds=sorted({asset.genome_build for asset in assets if asset.genome_build}),
-        )
-
-    @staticmethod
-    def _file_type(file_name: str) -> str:
-        suffixes = PurePosixPath(file_name).suffixes
-        if len(suffixes) >= 2 and suffixes[-1].lower() in {".gz", ".bgz", ".bz2"}:
-            return "".join(suffixes[-2:]).lower()
-        return suffixes[-1].lower() if suffixes else "unknown"
+    # Summarizing moved to application.resource_pipeline so curated-manifest
+    # ingestion produces the identical summary rather than a parallel one.
+    _summarize = staticmethod(summarize_bundle)
+    _file_type = staticmethod(asset_file_type)
 
     @staticmethod
     def _merge_assets(assets: list[DataAsset]) -> list[DataAsset]:
