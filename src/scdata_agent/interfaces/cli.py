@@ -17,10 +17,19 @@ from scdata_agent.application.collaboration import CollaborationLedger
 from scdata_agent.application.discovery import default_corpus_workflow, default_workflow
 from scdata_agent.application.research_planning import configured_research_planner
 from scdata_agent.domain.assets import build_asset_bundle
+from scdata_agent.domain.manifest import (
+    IssueSeverity,
+    ManifestDocument,
+    ManifestFormatError,
+    ManifestIssue,
+    ManifestRow,
+    summarize_issues,
+)
 from scdata_agent.domain.models import DataRole
 from scdata_agent.domain.requirements import QueryPlanner
 from scdata_agent.domain.transfer import TransferPlanner
 from scdata_agent.infrastructure.llm.stepfun import StepFunChatClient, StepFunSettings
+from scdata_agent.infrastructure.manifest_reader import read_manifest
 from scdata_agent.infrastructure.persistence.evidence_ledger import EvidenceLedger
 from scdata_agent.infrastructure.sources.ena import ENAAssetResolver
 
@@ -29,6 +38,162 @@ app = typer.Typer(
     help="Evidence-first public scATAC/multiome data discovery agent.",
 )
 console = Console()
+
+
+@app.command("manifest-check")
+def manifest_check(
+    manifest: Annotated[Path, typer.Argument(help="Curated manifest CSV/TSV/XLSX path.")],
+    dialect: Annotated[
+        str | None,
+        typer.Option("--dialect", help="Manifest dialect ID; auto-detected when omitted."),
+    ] = None,
+    dataset: Annotated[
+        list[str] | None, typer.Option("--dataset", help="Keep only these dataset IDs; repeatable.")
+    ] = None,
+    pair_unit: Annotated[
+        list[str] | None,
+        typer.Option("--pair-unit", help="Keep only these pair unit IDs; repeatable."),
+    ] = None,
+    stage: Annotated[
+        list[str] | None, typer.Option("--stage", help="Keep only these download stages; repeatable.")
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Print machine-readable JSON.")] = False,
+) -> None:
+    """Parse and audit a curated manifest. Read-only: no run, no network."""
+    try:
+        document = read_manifest(manifest, dialect)
+    except ManifestFormatError as error:
+        raise typer.BadParameter(str(error)) from error
+    rows = filter_manifest_rows(document.rows, dataset, pair_unit, stage)
+    issues = filter_manifest_issues(document.issues, document.rows, rows)
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "source_path": document.source_path,
+                    "source_sha256": document.source_sha256,
+                    "dialect_id": document.dialect_id,
+                    "row_count": len(rows),
+                    "pair_unit_count": len({row.pair_unit_key for row in rows}),
+                    "issue_counts": summarize_issues(issues),
+                    "rows": [row.model_dump(mode="json") for row in rows],
+                    "issues": [item.model_dump(mode="json") for item in issues],
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
+    _render_manifest_report(document, rows, issues)
+    if any(item.severity == IssueSeverity.ERROR for item in issues):
+        raise typer.Exit(code=2)
+
+
+def filter_manifest_rows(
+    rows: list[ManifestRow],
+    dataset: list[str] | None,
+    pair_unit: list[str] | None,
+    stage: list[str] | None,
+) -> list[ManifestRow]:
+    """Narrow a manifest to the slice a run should act on."""
+    selected = rows
+    if dataset:
+        wanted = set(dataset)
+        selected = [row for row in selected if row.dataset_id in wanted]
+    if pair_unit:
+        wanted = set(pair_unit)
+        selected = [row for row in selected if row.pair_unit_id in wanted]
+    if stage:
+        wanted = set(stage)
+        selected = [row for row in selected if row.stage in wanted]
+    return selected
+
+
+def filter_manifest_issues(
+    issues: list[ManifestIssue],
+    all_rows: list[ManifestRow],
+    selected: list[ManifestRow],
+) -> list[ManifestIssue]:
+    """Keep the issues that belong to the selected slice.
+
+    An issue whose row was rejected outright has no surviving row to match, so
+    it is kept whenever its dataset is in scope -- a dropped row is exactly the
+    kind of thing a reviewer must still see.
+    """
+    if len(selected) == len(all_rows):
+        return issues
+    selected_indices = {row.source_row_index for row in selected}
+    selected_datasets = {row.dataset_id for row in selected}
+    parsed_indices = {row.source_row_index for row in all_rows}
+    kept: list[ManifestIssue] = []
+    for item in issues:
+        if item.row_index in selected_indices:
+            kept.append(item)
+        elif item.row_index not in parsed_indices and item.dataset_id in selected_datasets:
+            kept.append(item)
+        elif item.row_index is None and item.dataset_id in selected_datasets:
+            kept.append(item)
+    return kept
+
+
+def _render_manifest_report(
+    document: ManifestDocument,
+    rows: list[ManifestRow],
+    issues: list[ManifestIssue],
+) -> None:
+    counts = summarize_issues(issues)
+    console.print(
+        f"[bold]{document.source_path}[/bold]\n"
+        f"dialect={document.dialect_id} sha256={document.source_sha256[:16]}… "
+        f"rows={len(rows)} pair_units={len({row.pair_unit_key for row in rows})}"
+    )
+    units = Table(title="Pair units")
+    units.add_column("Dataset")
+    units.add_column("Pair unit", overflow="fold")
+    units.add_column("Files", justify="right")
+    units.add_column("Declared size", justify="right")
+    units.add_column("Roles", overflow="fold")
+    units.add_column("Transfer")
+    for key in sorted({row.pair_unit_key for row in rows}):
+        members = [row for row in rows if row.pair_unit_key == key]
+        known = [row.size_bytes for row in members if row.size_bytes is not None]
+        size = f"{sum(known) / 1024**3:.2f} GiB" if known else "—"
+        if len(known) < len(members):
+            size = f"≥ {size}" if known else "unknown"
+        units.add_row(
+            key[0],
+            key[1],
+            str(len(members)),
+            size,
+            ", ".join(sorted({row.role.value for row in members})),
+            "direct" if all(row.is_direct for row in members) else "needs resolution",
+        )
+    console.print(units)
+    if not issues:
+        console.print("[green]No issues.[/green]")
+        return
+    console.print(
+        f"issues: {counts['error']} error, {counts['warning']} warning, {counts['info']} info"
+    )
+    table = Table(title="Issues")
+    table.add_column("Severity")
+    table.add_column("Code")
+    table.add_column("Row", justify="right")
+    table.add_column("File", overflow="fold")
+    table.add_column("Message", overflow="fold")
+    colours = {
+        IssueSeverity.ERROR: "red",
+        IssueSeverity.WARNING: "yellow",
+        IssueSeverity.INFO: "cyan",
+    }
+    for item in issues:
+        table.add_row(
+            f"[{colours[item.severity]}]{item.severity.value}[/{colours[item.severity]}]",
+            item.code,
+            str(item.row_index or "—"),
+            item.file_name or "—",
+            item.message,
+        )
+    console.print(table)
 
 
 @app.command("agent-run")

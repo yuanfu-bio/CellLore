@@ -36,6 +36,10 @@ class AgentName(StrEnum):
     SUPERVISOR = "supervisor"
     RESEARCH_PLANNER = "research_planner"
     RESOURCE_DISCOVERY = "resource_discovery"
+    # A curated manifest is the second way data enters the system: a human has
+    # already audited a study down to the file, and the rows are turned into
+    # the same contracts discovery produces.
+    MANIFEST_INGEST = "manifest_ingest"
     EVIDENCE_CURATOR = "evidence_curator"
     ASSET_SCOUT = "asset_scout"
     PREFLIGHT_ASSESSMENT = "preflight_assessment"
@@ -57,6 +61,7 @@ class ArtifactKind(StrEnum):
     EVIDENCE_ESCALATION = "evidence_escalation"
     ASSET_INVENTORY_DELTA = "asset_inventory_delta"
     ASSET_INVENTORY = "asset_inventory"
+    MANIFEST_INGESTION = "manifest_ingestion"
     PREFLIGHT_REPORT = "preflight_report"
     ACQUISITION_PLAN = "acquisition_plan"
     TRANSFER_RECEIPTS = "transfer_receipts"

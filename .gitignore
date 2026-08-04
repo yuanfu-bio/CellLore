@@ -21,8 +21,10 @@ src/*.egg-info/
 .mypy_cache/
 
 # Runtime state: ledgers, checkpoints, and downloaded data stay local.
+# Anchored to the repository root: an unanchored "data/" also swallowed
+# tests/data/, so committed test fixtures silently never reached CI.
 var/
-data/
+/data/
 .langgraph_api/
 *.sqlite
 *.sqlite-shm
