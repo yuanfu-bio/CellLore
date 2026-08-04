@@ -25,11 +25,11 @@ $P/ruff check src tests      # 应为 All checks passed
 
 参考资料（只读，不在本仓库内）：
 
-| 路径                                                                                                                                                   | 是什么                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `/data/collab/ai-multiomics/yfu/04_thinking/paired_data/human_paired_scRNA_scATAC_agent_workflow.md`（实际在 `02_agent/04_thinking/paired_data/`） | 设计文档，中文。§7 下载、§8 验证、§10 agent 架构、§19 实施顺序                        |
-| `02_agent/04_thinking/paired_data/required_files_manifest.csv`                                                                                       | **真实数据源**：130 文件 / 32 pair unit / 9 dataset / ~85.5 GB，中文列名，UTF-8 BOM |
-| `02_agent/04_thinking/paired_data/paired_multiome_downloader/multiome_downloader.py`                                                                 | 1106 行单文件原型，已验证可用的 aria2 下载器。**要移植的代码在这里**                |
+| 路径                                                                                   | 是什么                                                                                    |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+|  `02_agent/04_thinking/paired_data/human_paired_scRNA_scATAC_agent_workflow.md`      | 设计文档，中文。§7 下载、§8 验证、§10 agent 架构、§19 实施顺序                        |
+| `02_agent/04_thinking/paired_data/required_files_manifest.csv`                       | **真实数据源**：130 文件 / 32 pair unit / 9 dataset / ~85.5 GB，中文列名，UTF-8 BOM |
+| `02_agent/04_thinking/paired_data/paired_multiome_downloader/multiome_downloader.py` | 1106 行单文件原型，已验证可用的 aria2 下载器。**要移植的代码在这里**                |
 
 ---
 
