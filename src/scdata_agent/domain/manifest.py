@@ -33,12 +33,25 @@ from typing import Any
 from pydantic import Field
 
 from scdata_agent.domain.assets import infer_data_role
-from scdata_agent.domain.models import DataRole, StrictModel
+from scdata_agent.domain.lifecycle import (
+    RemoteAssetObservation,
+    ResourcePointer,
+    SemanticBundle,
+)
+from scdata_agent.domain.models import (
+    DataAsset,
+    DataRole,
+    DiscoveryRunResult,
+    Evidence,
+    ResearchRequirement,
+    StrictModel,
+)
 from scdata_agent.domain.repository_urls import (
     canonical_assembly,
     geo_static_url,
     is_geo_accession,
 )
+from scdata_agent.domain.resource_pipeline import RemoteBundleInventorySummary
 
 MANIFEST_SCHEMA_VERSION = "1.0"
 
@@ -192,6 +205,68 @@ class ManifestDocument(StrictModel):
     @property
     def pair_unit_count(self) -> int:
         return len({row.pair_unit_key for row in self.rows})
+
+
+class ManifestAssetSidecar(StrictModel):
+    """Per-row facts that a ``DataAsset`` has no field for.
+
+    ``DataAsset`` describes what a file *is*; these describe how the curator's
+    row said to handle it -- where it lands on disk, how it pairs with other
+    files, what to do with it after download. None of this is machine-parsed
+    downstream (``post_download_action`` is 25 distinct free-text values), so
+    it travels as a record keyed to the asset it came from rather than being
+    forced into a field it would only half fit.
+    """
+
+    asset_id: str
+    bundle_id: str
+    dataset_id: str
+    pair_unit_id: str
+    source_row_index: int
+    relative_path: str
+    native_file_role: str
+    pairing_key: str | None = None
+    post_download_action: str | None = None
+    checksum_policy: str | None = None
+    stage: str | None = None
+    schema_version: str = MANIFEST_SCHEMA_VERSION
+
+
+class ManifestIngestion(StrictModel):
+    """Everything ``ingest_manifest`` produces from one curated spreadsheet.
+
+    This is the single source of truth the ingest agent slices into artifacts:
+    ``discovery`` and ``pointers`` become the ``DISCOVERY_RESULT`` and
+    ``RESOURCE_POINTERS`` artifacts, ``assets``/``observations``/``bundles``/
+    ``bundle_summaries`` become ``ASSET_INVENTORY`` (in the same shape
+    ``inventory_reconcile`` produces, so the two paths cannot drift), and
+    ``sidecars``/``evidence``/``issues`` plus the identifying fields become the
+    ``MANIFEST_INGESTION`` audit artifact. Keeping one object with one set of
+    invariants is what stops the four artifacts from disagreeing with each
+    other about what the manifest said.
+    """
+
+    ingestion_id: str
+    run_id: str
+    source_path: str
+    source_sha256: str
+    dialect_id: str
+    filters: dict[str, list[str]] = Field(default_factory=dict)
+    requirement: ResearchRequirement
+    discovery: DiscoveryRunResult
+    pointers: list[ResourcePointer] = Field(default_factory=list)
+    assets: list[DataAsset] = Field(default_factory=list)
+    observations: list[RemoteAssetObservation] = Field(default_factory=list)
+    bundles: list[SemanticBundle] = Field(default_factory=list)
+    bundle_summaries: list[RemoteBundleInventorySummary] = Field(default_factory=list)
+    sidecars: list[ManifestAssetSidecar] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
+    issues: list[ManifestIssue] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    pair_unit_count: int = 0
+    bundle_count: int = 0
+    schema_version: str = MANIFEST_SCHEMA_VERSION
 
 
 class ManifestFormatError(ValueError):
@@ -583,6 +658,58 @@ def preflight_manifest(rows: list[ManifestRow]) -> list[ManifestIssue]:
 def summarize_issues(issues: list[ManifestIssue]) -> dict[str, int]:
     counts = Counter(item.severity.value for item in issues)
     return {severity.value: counts.get(severity.value, 0) for severity in IssueSeverity}
+
+
+def filter_manifest_rows(
+    rows: list[ManifestRow],
+    dataset: list[str] | None,
+    pair_unit: list[str] | None,
+    stage: list[str] | None,
+) -> list[ManifestRow]:
+    """Narrow a manifest to the slice a run should act on.
+
+    Shared by ``manifest-check`` (read-only audit) and manifest ingestion
+    (which acts on the slice), so the two can never disagree about what a
+    ``--dataset``/``--pair-unit``/``--stage`` filter selects.
+    """
+    selected = rows
+    if dataset:
+        wanted = set(dataset)
+        selected = [row for row in selected if row.dataset_id in wanted]
+    if pair_unit:
+        wanted = set(pair_unit)
+        selected = [row for row in selected if row.pair_unit_id in wanted]
+    if stage:
+        wanted = set(stage)
+        selected = [row for row in selected if row.stage in wanted]
+    return selected
+
+
+def filter_manifest_issues(
+    issues: list[ManifestIssue],
+    all_rows: list[ManifestRow],
+    selected: list[ManifestRow],
+) -> list[ManifestIssue]:
+    """Keep the issues that belong to the selected slice.
+
+    An issue whose row was rejected outright has no surviving row to match, so
+    it is kept whenever its dataset is in scope -- a dropped row is exactly the
+    kind of thing a reviewer must still see.
+    """
+    if len(selected) == len(all_rows):
+        return issues
+    selected_indices = {row.source_row_index for row in selected}
+    selected_datasets = {row.dataset_id for row in selected}
+    parsed_indices = {row.source_row_index for row in all_rows}
+    kept: list[ManifestIssue] = []
+    for item in issues:
+        if item.row_index in selected_indices:
+            kept.append(item)
+        elif item.row_index not in parsed_indices and item.dataset_id in selected_datasets:
+            kept.append(item)
+        elif item.row_index is None and item.dataset_id in selected_datasets:
+            kept.append(item)
+    return kept
 
 
 def _builds_by_pair_unit(rows: list[ManifestRow]) -> dict[tuple[str, str], set[str]]:

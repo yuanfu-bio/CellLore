@@ -17,6 +17,9 @@ class PointerBatchStage(StrEnum):
     EVIDENCE_METADATA = "evidence_metadata"
     EVIDENCE_FULLTEXT = "evidence_fulltext"
     LEGACY_EVIDENCE_GRAPH = "legacy_evidence_graph"
+    # A curated manifest is the other way a run's pointers originate: a human
+    # audit rather than a discovery adapter.
+    CURATED_MANIFEST = "curated_manifest"
 
 
 class ScoutPhase(StrEnum):

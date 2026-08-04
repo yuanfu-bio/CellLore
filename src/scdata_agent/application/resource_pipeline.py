@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from scdata_agent.application.agents.shared import AgentContext
+from scdata_agent.application.agents.shared import AgentContext, candidate_modalities
 from scdata_agent.application.collaboration import AgentArtifact, ArtifactKind
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import PointerStatus, ResourcePointer, SemanticBundle
@@ -13,8 +14,11 @@ from scdata_agent.domain.models import (
     AccessLevel,
     AssetAvailability,
     DataAsset,
+    DataRole,
     DatasetCandidate,
+    ResearchRequirement,
 )
+from scdata_agent.domain.requirements import applicable_bundle_schemas
 from scdata_agent.domain.resource_pipeline import (
     BundleAccessStatus,
     PointerBatchStage,
@@ -78,6 +82,72 @@ def merge_pointers(pointers: list[ResourcePointer]) -> list[ResourcePointer]:
             item.namespace,
             item.locator,
         ),
+    )
+
+
+@dataclass(frozen=True)
+class BundleShape:
+    """The role-schema judgment for one candidate's observed assets.
+
+    Shared by discovery-based inventory reconcile and curated-manifest
+    ingestion so a change to how schema satisfaction is judged applies to
+    both paths identically rather than risking two implementations drifting
+    apart.
+    """
+
+    bundle_type: str
+    required_roles: list[DataRole]
+    missing_roles: list[DataRole]
+    applicable_schema_ids: list[str]
+    satisfied_schema_ids: list[str]
+    observed_roles: list[DataRole]
+
+
+def bundle_shape_for(
+    candidate: DatasetCandidate,
+    candidate_assets: list[DataAsset],
+    requirement: ResearchRequirement | None,
+) -> BundleShape:
+    """Judge one candidate's assets against every bundle shape it could take.
+
+    Judging against the union of every modality mentioned in the question
+    would fail a standalone scATAC study for lacking an RNA matrix it was
+    never claimed to have; ``applicable_bundle_schemas`` restricts the
+    comparison to shapes the candidate could plausibly satisfy.
+    """
+    observed_roles = {item.role for item in candidate_assets}
+    schemas = applicable_bundle_schemas(candidate_modalities(candidate, requirement))
+    satisfied = [
+        schema.schema_id for schema in schemas if schema.is_satisfied_by(observed_roles)
+    ]
+    # `required_roles`/`missing_roles` stay populated for readers that predate
+    # schemas; they describe the closest schema, not the union of all of them.
+    closest = min(
+        schemas,
+        key=lambda item: len(item.unmet_groups(observed_roles)),
+        default=None,
+    )
+    required_roles = (
+        [group[0] for group in closest.required_role_groups]
+        if closest is not None
+        else [DataRole.RAW_READS]
+    )
+    missing_roles = (
+        [group[0] for group in closest.unmet_groups(observed_roles)]
+        if closest is not None
+        else [DataRole.RAW_READS]
+    )
+    return BundleShape(
+        bundle_type=(
+            "processed_training_input"
+            if observed_roles - {DataRole.RAW_READS}
+            else "raw_reads"
+        ),
+        required_roles=required_roles,
+        missing_roles=missing_roles,
+        applicable_schema_ids=[item.schema_id for item in schemas],
+        satisfied_schema_ids=satisfied,
+        observed_roles=sorted(observed_roles, key=str),
     )
 
 

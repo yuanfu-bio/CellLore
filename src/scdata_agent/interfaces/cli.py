@@ -23,6 +23,8 @@ from scdata_agent.domain.manifest import (
     ManifestFormatError,
     ManifestIssue,
     ManifestRow,
+    filter_manifest_issues,
+    filter_manifest_rows,
     summarize_issues,
 )
 from scdata_agent.domain.models import DataRole
@@ -86,53 +88,6 @@ def manifest_check(
     _render_manifest_report(document, rows, issues)
     if any(item.severity == IssueSeverity.ERROR for item in issues):
         raise typer.Exit(code=2)
-
-
-def filter_manifest_rows(
-    rows: list[ManifestRow],
-    dataset: list[str] | None,
-    pair_unit: list[str] | None,
-    stage: list[str] | None,
-) -> list[ManifestRow]:
-    """Narrow a manifest to the slice a run should act on."""
-    selected = rows
-    if dataset:
-        wanted = set(dataset)
-        selected = [row for row in selected if row.dataset_id in wanted]
-    if pair_unit:
-        wanted = set(pair_unit)
-        selected = [row for row in selected if row.pair_unit_id in wanted]
-    if stage:
-        wanted = set(stage)
-        selected = [row for row in selected if row.stage in wanted]
-    return selected
-
-
-def filter_manifest_issues(
-    issues: list[ManifestIssue],
-    all_rows: list[ManifestRow],
-    selected: list[ManifestRow],
-) -> list[ManifestIssue]:
-    """Keep the issues that belong to the selected slice.
-
-    An issue whose row was rejected outright has no surviving row to match, so
-    it is kept whenever its dataset is in scope -- a dropped row is exactly the
-    kind of thing a reviewer must still see.
-    """
-    if len(selected) == len(all_rows):
-        return issues
-    selected_indices = {row.source_row_index for row in selected}
-    selected_datasets = {row.dataset_id for row in selected}
-    parsed_indices = {row.source_row_index for row in all_rows}
-    kept: list[ManifestIssue] = []
-    for item in issues:
-        if item.row_index in selected_indices:
-            kept.append(item)
-        elif item.row_index not in parsed_indices and item.dataset_id in selected_datasets:
-            kept.append(item)
-        elif item.row_index is None and item.dataset_id in selected_datasets:
-            kept.append(item)
-    return kept
 
 
 def _render_manifest_report(

@@ -10,9 +10,9 @@ def test_public_entrypoints_and_all_specialists_import():
     for module in (
         "planning", "discovery", "supervisor", "shared", "evidence_advice",
         "progressive_evidence", "evidence_escalation", "progressive_asset_scout",
-        "inventory_reconcile", "progressive_preflight", "progressive_lineage_v2",
-        "acquisition_v2", "transfer_execution", "curator", "materialized_quality",
-        "snapshot_governance",
+        "manifest_ingest", "inventory_reconcile", "progressive_preflight",
+        "progressive_lineage_v2", "acquisition_v2", "transfer_execution", "curator",
+        "materialized_quality", "snapshot_governance",
     ):
         import_module(f"scdata_agent.application.agents.{module}")
 

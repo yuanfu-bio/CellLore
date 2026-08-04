@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from scdata_agent.application.agents.shared import (
     AgentContext,
-    candidate_modalities,
     need_discovery,
 )
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.resource_pipeline import (
     asset_file_type,
+    bundle_shape_for,
     merge_pointers,
     pointer_batches,
     summarize_bundle,
@@ -19,11 +19,7 @@ from scdata_agent.domain.lifecycle import (
     BundleStatus,
     SemanticBundle,
 )
-from scdata_agent.domain.models import (
-    DataAsset,
-    DataRole,
-)
-from scdata_agent.domain.requirements import applicable_bundle_schemas
+from scdata_agent.domain.models import DataAsset
 from scdata_agent.domain.resource_pipeline import AssetInventoryDelta
 
 
@@ -76,34 +72,7 @@ class InventoryReconcileAgent:
             )
             if not candidate_assets:
                 continue
-            observed_roles = {item.role for item in candidate_assets}
-            # Judge the bundle against every shape it could legitimately take,
-            # not against the union of every modality mentioned in the question.
-            schemas = applicable_bundle_schemas(
-                candidate_modalities(candidate, context.requirement)
-            )
-            satisfied = [
-                schema.schema_id
-                for schema in schemas
-                if schema.is_satisfied_by(observed_roles)
-            ]
-            # `required_roles`/`missing_roles` stay populated for readers that
-            # predate schemas; they describe the closest schema, not the union.
-            closest = min(
-                schemas,
-                key=lambda item: len(item.unmet_groups(observed_roles)),
-                default=None,
-            )
-            required_roles = (
-                [group[0] for group in closest.required_role_groups]
-                if closest is not None
-                else [DataRole.RAW_READS]
-            )
-            missing_roles = (
-                [group[0] for group in closest.unmet_groups(observed_roles)]
-                if closest is not None
-                else [DataRole.RAW_READS]
-            )
+            shape = bundle_shape_for(candidate, candidate_assets, context.requirement)
             bundles.append(
                 SemanticBundle(
                     bundle_id=stable_id(
@@ -112,19 +81,15 @@ class InventoryReconcileAgent:
                         f"{','.join(sorted(item.asset_id for item in candidate_assets))}",
                     ),
                     candidate_id=candidate.candidate_id,
-                    bundle_type=(
-                        "processed_training_input"
-                        if observed_roles - {DataRole.RAW_READS}
-                        else "raw_reads"
-                    ),
+                    bundle_type=shape.bundle_type,
                     asset_ids=[
                         item.asset_id for item in candidate_assets
                     ],
-                    required_roles=required_roles,
-                    missing_roles=missing_roles,
-                    applicable_schema_ids=[item.schema_id for item in schemas],
-                    satisfied_schema_ids=satisfied,
-                    observed_roles=sorted(observed_roles, key=str),
+                    required_roles=shape.required_roles,
+                    missing_roles=shape.missing_roles,
+                    applicable_schema_ids=shape.applicable_schema_ids,
+                    satisfied_schema_ids=shape.satisfied_schema_ids,
+                    observed_roles=shape.observed_roles,
                     status=BundleStatus.REMOTE_INVENTORIED,
                     evidence_ids=list(
                         dict.fromkeys(
