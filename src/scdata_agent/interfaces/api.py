@@ -15,8 +15,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
-from scdata_agent.application.orchestration_v2 import workflow_topology
 from scdata_agent.application.collaboration import CollaborationLedger
+from scdata_agent.application.orchestration_v2 import workflow_topology
 
 _STATUS_COLOR = {
     "queued": "gray", "running": "blue", "waiting_for_decision": "amber",
