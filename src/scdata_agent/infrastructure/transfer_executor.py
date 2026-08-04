@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import shutil
 from pathlib import Path
 
 import httpx
@@ -18,9 +17,12 @@ from scdata_agent.domain.lifecycle import (
 )
 from scdata_agent.domain.models import DataAsset, TransferProtocol
 from scdata_agent.infrastructure.sources.base import default_async_client
+from scdata_agent.infrastructure.transfer_backend import prepare_transfer, safe_destination_path
 
 
 class TransferExecutor:
+    name = "httpx"
+
     def __init__(
         self,
         client: httpx.AsyncClient | None = None,
@@ -39,35 +41,14 @@ class TransferExecutor:
         *,
         allow_unknown_size: bool = False,
         max_download_bytes: int | None = None,
+        layout: dict[str, str] | None = None,
     ) -> list[TransferReceipt]:
-        selected = [
-            bundle for bundle in bundles if bundle.bundle_id in selected_bundle_ids
-        ]
-        selected_asset_ids = {
-            asset_id for bundle in selected for asset_id in bundle.asset_ids
-        }
-        by_asset = {
-            asset.asset_id: asset
-            for asset in assets
-            if asset.asset_id in selected_asset_ids
-        }
-        expected_sizes = [
-            location.size_bytes
-            for asset in by_asset.values()
-            for location in asset.locations[:1]
-        ]
-        if any(size is None for size in expected_sizes) and not allow_unknown_size:
-            raise ValueError(
-                "Selected assets include unknown sizes; explicit override required."
-            )
-        known_total = sum(size or 0 for size in expected_sizes)
-        if max_download_bytes is not None and known_total > max_download_bytes:
-            raise ValueError("Selected assets exceed max_download_bytes.")
-        destination = Path(plan.destination_root).resolve()
-        destination.mkdir(parents=True, exist_ok=True)
-        free_bytes = shutil.disk_usage(destination).free
-        if known_total > free_bytes:
-            raise ValueError("Insufficient free disk space for selected assets.")
+        selected, by_asset, destination = prepare_transfer(
+            plan, bundles, assets, selected_bundle_ids,
+            allow_unknown_size=allow_unknown_size,
+            max_download_bytes=max_download_bytes,
+        )
+        layout = layout or {}
 
         owns_client = self._client is None
         client = self._client or default_async_client()
@@ -86,6 +67,7 @@ class TransferExecutor:
                     bundle_by_asset[asset.asset_id],
                     asset,
                     destination,
+                    layout.get(asset.asset_id),
                 )
 
         try:
@@ -103,6 +85,7 @@ class TransferExecutor:
         bundle_id: str,
         asset: DataAsset,
         destination: Path,
+        relative_path: str | None = None,
     ) -> TransferReceipt:
         receipt_id = stable_id(
             "receipt", f"{plan.plan_id}:{bundle_id}:{asset.asset_id}"
@@ -124,19 +107,16 @@ class TransferExecutor:
                 location.url,
                 f"Unsupported protocol: {location.protocol.value}",
             )
-        safe_name = Path(asset.file_name).name
-        if safe_name != asset.file_name or safe_name in {"", ".", ".."}:
-            return self._failed(
-                receipt_id,
-                plan,
-                bundle_id,
-                asset,
-                location.url,
-                "Unsafe asset file name.",
+        try:
+            final_path = safe_destination_path(
+                destination,
+                bundle_id=bundle_id,
+                file_name=asset.file_name,
+                relative_path=relative_path,
             )
-        bundle_dir = destination / bundle_id
-        bundle_dir.mkdir(parents=True, exist_ok=True)
-        final_path = bundle_dir / safe_name
+        except ValueError as error:
+            return self._failed(receipt_id, plan, bundle_id, asset, location.url, str(error))
+        final_path.parent.mkdir(parents=True, exist_ok=True)
         partial_path = final_path.with_suffix(final_path.suffix + ".part")
         resumed = partial_path.exists() and partial_path.stat().st_size > 0
         offset = partial_path.stat().st_size if resumed else 0

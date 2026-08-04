@@ -11,7 +11,7 @@ from scdata_agent.domain.lifecycle import (
     SemanticBundle,
 )
 from scdata_agent.domain.models import DataAsset
-from scdata_agent.infrastructure.transfer_executor import TransferExecutor
+from scdata_agent.infrastructure.transfer_backend import select_transfer_backend
 
 
 class TransferExecutionAgent:
@@ -70,9 +70,8 @@ class TransferExecutionAgent:
                 context.catalog.transition_bundle(
                     bundle_id, BundleStatus.APPROVED, run_id=context.run_id
                 )
-        receipts = await TransferExecutor(
-            concurrency=int(context.policy.get("transfer_concurrency", 3))
-        ).execute(
+        backend = select_transfer_backend(context.policy)
+        receipts = await backend.execute(
             plan,
             bundles,
             assets,
@@ -82,6 +81,7 @@ class TransferExecutionAgent:
                 or resolution.get("option") == "all_with_unknown_size"
             ),
             max_download_bytes=context.policy.get("max_download_bytes"),
+            layout=self._layout(context) if context.policy.get("honour_manifest_layout") else None,
         )
         if context.catalog is not None:
             for receipt in receipts:
@@ -112,6 +112,7 @@ class TransferExecutionAgent:
                 {
                     "plan_id": plan.plan_id,
                     "selected_bundle_ids": sorted(selected_ids),
+                    "downloader": backend.name,
                     "receipts": [
                         item.model_dump(mode="json") for item in receipts
                     ],
@@ -119,3 +120,19 @@ class TransferExecutionAgent:
                 parents=[plan_artifact.artifact_id, inventory.artifact_id],
             )
         ]
+
+    @staticmethod
+    def _layout(context: AgentContext) -> dict[str, str]:
+        """asset_id -> curator relative_path, for runs ingested from a manifest.
+
+        Only a manifest run has this sidecar at all; a discovered run's
+        transfer falls back to the flat bundle layout because there is no
+        curator tree to honour.
+        """
+        ingestion = latest_artifact(context.artifacts, ArtifactKind.MANIFEST_INGESTION.value)
+        if ingestion is None:
+            return {}
+        return {
+            item["asset_id"]: item["relative_path"]
+            for item in ingestion.payload.get("sidecars", [])
+        }

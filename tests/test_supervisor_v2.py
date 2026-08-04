@@ -73,6 +73,8 @@ class FakeResolver:
 
 
 class FakeTransferExecutor:
+    name = "fake"
+
     def __init__(self, paths):
         self.paths = paths
 
@@ -160,8 +162,8 @@ async def test_supervisor_requires_download_then_corpus_approval(
         lambda **kwargs: FakeResolver(assets),
     )
     monkeypatch.setattr(
-        "scdata_agent.application.agents.transfer_execution.TransferExecutor",
-        lambda **kwargs: FakeTransferExecutor(paths),
+        "scdata_agent.application.agents.transfer_execution.select_transfer_backend",
+        lambda policy: FakeTransferExecutor(paths),
     )
 
     database = tmp_path / "system.sqlite"

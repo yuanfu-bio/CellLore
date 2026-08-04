@@ -1,13 +1,14 @@
 # Handoff: 打通 scdata-agent 的下载 → 整理 → 归档闭环
 
-> **交接文档**。S1–S4 已完成并入库，**里程碑 0 已用真实字节达成**。本文件包含继续这项工作
-> （S5 起）所需的全部上下文：为什么做、已探明的代码实情、已完成什么、下一步怎么做。
+> **交接文档**。S1–S5 已完成并入库，**里程碑 0 已用真实字节达成**（httpx 与 aria2 两条路径
+> 都已用真实 NCBI GEO 字节验证过）。本文件包含继续这项工作（S6 起）所需的全部上下文：
+> 为什么做、已探明的代码实情、已完成什么、下一步怎么做。
 >
 > - 完整原始方案：`/data/home/yfu/.claude/plans/data-collab-ai-multiomics-yfu-02-agent-imperative-fountain.md`
-> - 状态：**S1–S4 完成**（254 tests passed, ruff clean, scorecard delta 0）→ **里程碑 0 已达成**：
+> - 状态：**S1–S5 完成**（289 tests passed, ruff clean, scorecard delta 0）→ **里程碑 0 已达成**：
 >   `scdata-agent manifest-run` 对 `GSE178707_NEATseq / CD4_memory_lane2_GSM5396336__GSM5396337`
 >   跑通真实端到端（真连 NCBI GEO，338 MB 真字节），`admitted_bundle_ids` 非空，
->   `DATA_CARD.md`/`provenance.json`/`manifest.json` 均已生成并人工核对通过。**S5（aria2）待做**。
+>   `DATA_CARD.md`/`provenance.json`/`manifest.json` 均已生成并人工核对通过。**S6（QC 层）待做**。
 
 ---
 
@@ -29,7 +30,7 @@ $P/ruff check src tests      # 应为 All checks passed
 
 | 路径                                                                                   | 是什么                                                                                    |
 | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-|  `02_agent/04_thinking/paired_data/human_paired_scRNA_scATAC_agent_workflow.md`      | 设计文档，中文。§7 下载、§8 验证、§10 agent 架构、§19 实施顺序                        |
+| `02_agent/04_thinking/paired_data/human_paired_scRNA_scATAC_agent_workflow.md`       | 设计文档，中文。§7 下载、§8 验证、§10 agent 架构、§19 实施顺序                        |
 | `02_agent/04_thinking/paired_data/required_files_manifest.csv`                       | **真实数据源**：130 文件 / 32 pair unit / 9 dataset / ~85.5 GB，中文列名，UTF-8 BOM |
 | `02_agent/04_thinking/paired_data/paired_multiome_downloader/multiome_downloader.py` | 1106 行单文件原型，已验证可用的 aria2 下载器。**要移植的代码在这里**                |
 
@@ -156,7 +157,7 @@ $P/python scripts/compare_scorecards.py eval/baseline_scorecard.json var/scoreca
 | `src/scdata_agent/domain/repository_urls.py`         | 96        | `geo_static_url()` / `geo_bucket()` / `geo_namespace()` / `is_geo_accession()` / `canonical_assembly()`。从原型 `:171-190`、`:161-169` 移植，纯字符串运算，零依赖                                                                                                                                           |
 | `src/scdata_agent/domain/manifest.py`                | 621       | `ManifestDialect` / `ManifestRow` / `ManifestDocument` / `ManifestIssue` / `IssueSeverity`、`CANONICAL_FIELDS` / `REQUIRED_FIELDS`、`PAIRED_MULTIOME_ZH_V1` 方言、`detect_dialect()` / `dialect_by_id()` / `normalize_row()` / `preflight_manifest()` / `parse_size()` / `summarize_issues()` |
 | `src/scdata_agent/infrastructure/manifest_reader.py` | 134       | `read_tabular()`（按后缀分派 csv/tsv/xlsx）/ `read_manifest()` / `file_sha256()`；XLSX 走 lazy import + `XLSX_EXTRA_HINT`                                                                                                                                                                                         |
-| `tests/data/manifest_paired_multiome_sample.csv`     | 20 行数据 | **从真实 manifest 逐字节抽取**，保留 BOM 与中文表头：3 行 BMMC、5 行 NEATseq CD4_memory_lane2、5 行 NEATseq CD4_memory_lane1（S3 加，跟 lane2 同 dataset 不同 pair unit，用来钉住 C3）、3 行 kidney SHARED_METADATA、2 行 Zenodo、1 行 10x portal、1 行 DOGMA `GSM5065531`                                                                                                                                 |
+| `tests/data/manifest_paired_multiome_sample.csv`     | 20 行数据 | **从真实 manifest 逐字节抽取**，保留 BOM 与中文表头：3 行 BMMC、5 行 NEATseq CD4_memory_lane2、5 行 NEATseq CD4_memory_lane1（S3 加，跟 lane2 同 dataset 不同 pair unit，用来钉住 C3）、3 行 kidney SHARED_METADATA、2 行 Zenodo、1 行 10x portal、1 行 DOGMA `GSM5065531`                                        |
 | `tests/test_manifest_dialect.py`                     | 113       | 方言识别、必需列缺失、XLSX extra 错误串、`parse_size` 参数化（含空值 → `None` 而非 `0`）                                                                                                                                                                                                                           |
 | `tests/test_geo_static_url.py`                       | 105       | 真实 accession 的精确 URL、bucket 算术、百分号编码、非 GEO accession 拒绝、`canonical_assembly` 参数化                                                                                                                                                                                                                  |
 | `tests/test_manifest_role_mapping.py`                | 106       | 20 个角色全映射、未知角色 → ERROR、真实 DOGMA 行上 manifest 角色胜出、`.tbi` 不被当 fragments                                                                                                                                                                                                                          |
@@ -385,7 +386,31 @@ GSM5396332_CD4cells.csv.gz               519 KB   cell_metadata         → CELL
 
 ---
 
-### S5 — aria2 后端 + 下载状态机
+### S5 — aria2 后端 + 下载状态机 ✅ 已完成
+
+按下方设计原样落地，外加两处必要偏离：(1) `TransferExecutor`/`Aria2TransferBackend` 的
+`execute()` 都加了 `layout: dict[str,str] | None` 参数（`honour_manifest_layout`
+用它传 asset_id→relative_path），因为磁盘布局要在两个后端间共享同一份 `safe_destination_path`
+守卫；(2) `NCBI_CONTACT_EMAIL` 未设时的提示**没有**塞进 `_open_download_checkpoint` 的
+recommendation 文本——那是冻结的 `orchestration_v2.py` 里的方法，追加文本必须整段重写它，
+代价大于收益。改为 `.env.example` 里写清楚该变量是可选的。
+
+新增文件：`infrastructure/transfer_backend.py`（Protocol + `prepare_transfer` + `select_transfer_backend`
++ `safe_destination_path`）、`infrastructure/aria2_executor.py`（分桶/PROFILES/队列生成/
+`Aria2Runner` Protocol/`SubprocessAria2Runner`/receipt 对账）、`domain/transfer_state.py`
+（纯状态机）、`infrastructure/persistence/download_store.py`（`DownloadStateStore`）、
+`infrastructure/download_triage.py`（httpx `probe_and_classify`）、
+`application/manifest_repair.py`（`manifest-repair` 的核心逻辑，含"未 resolve 拒绝执行"
+这条最重要的检查）。CLI 新增 `manifest-status`、`manifest-repair [--run]`，`manifest-run`
+新增 `--downloader`/`--profile`/`--contact-email`/`--manifest-layout`/`--bundle-layout`。
+
+**真实验证**（不只是离线测试）：`select_transfer_backend({"downloader":"auto"})` 在装了
+aria2c 的环境里正确选中 aria2；用真实 `SubprocessAria2Runner` 对 NCBI GEO 的一个真实小文件
+（`GSM5396332_CD4cells.csv.gz`，531454 字节）跑通整条链路——写队列、起 aria2c 子进程、真实
+下载、按 stat+checksum 对账——`TransferReceipt` 精确匹配声明字节数，状态 `COMPLETED`。
+
+35 个新测试（`test_aria2_queue.py` 16 个 + `test_download_state.py` 19 个），289 tests
+passing，ruff clean，scorecard delta 实测为零。
 
 新建 `infrastructure/transfer_backend.py`：`TransferBackend` Protocol（现有 `TransferExecutor` 已逐字符匹配该签名，零改动即满足）+ `select_transfer_backend(policy)`（`policy["downloader"] ∈ {auto,aria2,httpx}`，`shutil.which(os.environ.get("SCDATA_AGENT_ARIA2_BIN","aria2c"))`，显式要 aria2 而不存在时报错）。把共享前置拒绝（`transfer_executor.py:54-70`：未知大小/超预算/磁盘不足）提成 `prepare_transfer(...)`。`agents/transfer_execution.py:73` 改为 `select_transfer_backend(context.policy)`，receipts artifact 加 `"downloader": backend.name`。
 

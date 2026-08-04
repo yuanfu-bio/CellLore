@@ -15,6 +15,11 @@ from rich.table import Table
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
 from scdata_agent.application.collaboration import CollaborationLedger
 from scdata_agent.application.discovery import default_corpus_workflow, default_workflow
+from scdata_agent.application.manifest_repair import (
+    RepairNotAuthorized,
+    classify_repair_candidates,
+    execute_repair,
+)
 from scdata_agent.application.orchestration_manifest import (
     ManifestRunSupervisor,
     supervisor_for_run,
@@ -36,6 +41,7 @@ from scdata_agent.domain.requirements import QueryPlanner
 from scdata_agent.domain.transfer import TransferPlanner
 from scdata_agent.infrastructure.llm.stepfun import StepFunChatClient, StepFunSettings
 from scdata_agent.infrastructure.manifest_reader import read_manifest
+from scdata_agent.infrastructure.persistence.download_store import DownloadStateStore
 from scdata_agent.infrastructure.persistence.evidence_ledger import EvidenceLedger
 from scdata_agent.infrastructure.sources.ena import ENAAssetResolver
 
@@ -152,6 +158,35 @@ def manifest_run(
             help="Candidate ID to admit on repository-policy licence terms; repeatable.",
         ),
     ] = None,
+    downloader: Annotated[
+        str,
+        typer.Option(
+            "--downloader",
+            help="auto prefers aria2 when aria2c is on PATH, else httpx. aria2 requires the binary.",
+        ),
+    ] = "auto",
+    profile: Annotated[
+        str,
+        typer.Option(
+            "--profile",
+            help="aria2 concurrency/segmentation profile: stable, balanced, perfile, or aggressive.",
+        ),
+    ] = "balanced",
+    contact_email: Annotated[
+        str | None,
+        typer.Option(
+            "--contact-email",
+            help="Sent to NCBI in the aria2 User-Agent. Defaults to $NCBI_CONTACT_EMAIL; optional.",
+            envvar="NCBI_CONTACT_EMAIL",
+        ),
+    ] = None,
+    manifest_layout: Annotated[
+        bool,
+        typer.Option(
+            "--manifest-layout/--bundle-layout",
+            help="Lay files out at the curator's relative_path instead of <bundle_id>/<filename>.",
+        ),
+    ] = True,
     trace_mode: Annotated[str, typer.Option("--trace-mode", help="local or langsmith.")] = "local",
 ) -> None:
     """Run a curated manifest through the same downstream path as a discovered one."""
@@ -181,6 +216,10 @@ def manifest_run(
             "remote_probe_enabled": remote_probe,
             "require_standard_object": require_standard_object,
             "approved_license_candidate_ids": approved_license_candidate or [],
+            "downloader": downloader,
+            "profile": profile,
+            "contact_email": contact_email,
+            "honour_manifest_layout": manifest_layout,
         },
     )
     supervisor = ManifestRunSupervisor(ledger, str(database), trace_mode=trace_mode)
@@ -191,6 +230,86 @@ def manifest_run(
         "checkpoints": [item.model_dump(mode="json") for item in ledger.list_checkpoints(run.run_id)],
     }
     console.print_json(json.dumps(payload, ensure_ascii=False))
+
+
+@app.command("manifest-status")
+def manifest_status(
+    run_id: Annotated[str, typer.Argument(help="scdata-agent run ID.")],
+    database: Annotated[Path, typer.Option("--database", "-d")] = Path(
+        "var/scdata_agent.sqlite"
+    ),
+) -> None:
+    """Summarize per-file download state for a run."""
+    store = DownloadStateStore(database)
+    summary = store.summary(run_id)
+    if not summary:
+        console.print(f"No download_file_state records for {run_id}.")
+        return
+    table = Table(title=f"Download state: {run_id}")
+    table.add_column("Status")
+    table.add_column("Count", justify="right")
+    for status, count in sorted(summary.items()):
+        table.add_row(status, str(count))
+    console.print(table)
+
+
+@app.command("manifest-repair")
+def manifest_repair(
+    run_id: Annotated[str, typer.Argument(help="scdata-agent run ID.")],
+    run: Annotated[
+        bool,
+        typer.Option(
+            "--run",
+            help="Actually retry the RETRYABLE_CLASSES subset. Default is a dry-run report.",
+        ),
+    ] = False,
+    database: Annotated[Path, typer.Option("--database", "-d")] = Path(
+        "var/scdata_agent.sqlite"
+    ),
+) -> None:
+    """Classify a run's incomplete transfers; retry only what a repair should retry.
+
+    Refuses to run at all unless the run's download_selection checkpoint was
+    already resolved to a download option -- repair retries what was
+    approved, it never decides what to transfer.
+    """
+    ledger = CollaborationLedger(database)
+    try:
+        report = asyncio.run(classify_repair_candidates(ledger, run_id))
+    except RepairNotAuthorized as error:
+        raise typer.BadParameter(str(error)) from error
+
+    if not report.candidates:
+        console.print("[green]Nothing incomplete.[/green]")
+        return
+
+    table = Table(title="Classification")
+    table.add_column("Class")
+    table.add_column("Count", justify="right")
+    for classification, count in sorted(report.histogram.items()):
+        table.add_row(classification, str(count))
+    console.print(table)
+
+    if report.manifest_audit_required:
+        audit = Table(title="manifest_audit_required (never retried)")
+        audit.add_column("Asset")
+        audit.add_column("Bundle")
+        audit.add_column("URL", overflow="fold")
+        for item in report.manifest_audit_required:
+            audit.add_row(item.asset_id, item.bundle_id, item.url)
+        console.print(audit)
+        console.print(
+            "[yellow]The manifest names a file, accession, or URL that is wrong, "
+            "or the record was withdrawn -- fix the manifest, not the downloader.[/yellow]"
+        )
+
+    if not run:
+        console.print(f"{len(report.retryable)} retryable; re-run with --run to retry them.")
+        return
+
+    policy = ledger.get_run(run_id).policy
+    receipts = asyncio.run(execute_repair(ledger, run_id, report, policy=policy))
+    console.print(f"Retried {len(receipts)} file(s).")
 
 
 def _render_manifest_report(

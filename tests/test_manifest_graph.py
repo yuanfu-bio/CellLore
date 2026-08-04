@@ -66,6 +66,8 @@ class _FakeProbe:
 class _FakeTransferExecutor:
     """Writes real local bytes instead of fetching the (real) GEO URLs."""
 
+    name = "fake"
+
     def __init__(self, paths: dict[str, Path], **kwargs) -> None:
         self.paths = paths
 
@@ -124,8 +126,8 @@ async def test_manifest_run_admits_both_pair_units_through_both_gates(
         paths[asset.asset_id] = path
 
     monkeypatch.setattr(
-        "scdata_agent.application.agents.transfer_execution.TransferExecutor",
-        lambda **kwargs: _FakeTransferExecutor(paths),
+        "scdata_agent.application.agents.transfer_execution.select_transfer_backend",
+        lambda policy: _FakeTransferExecutor(paths),
     )
 
     database = tmp_path / "system.sqlite"
