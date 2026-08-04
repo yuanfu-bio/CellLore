@@ -184,6 +184,11 @@ mamba run -n scdata-agent scdata-agent serve \
   --database var/scdata_agent.sqlite --port 8000
 ```
 
+When `frontend/dist` is present, the same server serves the React control room.
+Its run pages use `/ui/runs/<run-id>`, so browser refreshes do not conflict with
+the JSON API at `/runs/<run-id>`. For frontend development, run the API command
+above alongside `cd frontend && npm run dev`; Vite proxies the API paths to port 8000.
+
 Inspect append-only Catalog records and approved Corpus Snapshots through the API:
 
 ```bash

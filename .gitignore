@@ -1,3 +1,7 @@
+# Frontend local dependencies and TypeScript incremental build state.
+frontend/node_modules/
+frontend/tsconfig.tsbuildinfo
+
 # Secrets: never commit real credentials. Only the template is tracked.
 .env
 .env.*

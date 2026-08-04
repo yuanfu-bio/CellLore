@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,7 @@ _STATUS_COLOR = {
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["status_color"] = lambda status: _STATUS_COLOR.get(status, "gray")
 
+_FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 class CreateRunRequest(BaseModel):
     question: str = Field(min_length=3)
@@ -65,6 +67,11 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
     app.state.ledger = ledger
     app.state.supervisor = supervisor
     app.state.background_tasks = {}
+
+    # Serve Vite's hashed production assets when a frontend build is present.
+    if (_FRONTEND_DIST / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="frontend-assets")
+
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -123,6 +130,8 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
 
     @app.get("/ui/runs/{run_id}")
     async def run_page(request: Request, run_id: str):
+        if (_FRONTEND_DIST / "index.html").is_file():
+            return FileResponse(_FRONTEND_DIST / "index.html")
         try:
             payload = _run_payload(ledger, run_id)
         except KeyError as error:
@@ -130,6 +139,13 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
         return templates.TemplateResponse(
             request, "run.html", {"run_id": run_id, "initial_data": payload}
         )
+
+    @app.get("/ui/{path:path}", include_in_schema=False)
+    async def frontend_page(path: str):
+        """Return the SPA entry point for browser-routed UI pages."""
+        if (_FRONTEND_DIST / "index.html").is_file():
+            return FileResponse(_FRONTEND_DIST / "index.html")
+        raise HTTPException(status_code=404, detail=f"UI page not found: {path}")
 
     @app.get("/runs/{run_id}/graph-state")
     async def graph_state(run_id: str) -> dict[str, Any]:
@@ -191,6 +207,8 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
 
     @app.get("/")
     async def dashboard(request: Request):
+        if (_FRONTEND_DIST / "index.html").is_file():
+            return FileResponse(_FRONTEND_DIST / "index.html")
         return templates.TemplateResponse(
             request, "dashboard.html", {"runs": ledger.list_runs()[:20]}
         )
