@@ -214,6 +214,25 @@ A local control room (FastAPI + HTMX, SSE event stream) is available via
 `scdata-agent serve`. See [`docs/commands.md`](docs/commands.md) for the full command
 reference.
 
+### Accessing the web UI remotely
+
+`scdata-agent serve` binds to `127.0.0.1` on the machine it runs on, so on a
+remote or shared host you need to forward the port to reach it from your own
+browser:
+
+- **VS Code / Cursor Remote-SSH**: open the *Ports* panel and forward the
+  port `scdata-agent serve` is listening on (default `8000`). If you're also
+  running the frontend in dev mode (`cd frontend && npm run dev`), forward
+  Vite's port too (default `5173`). These editors usually auto-detect a
+  listening port and offer to forward it.
+- **Plain SSH**: `ssh -L 8000:127.0.0.1:8000 user@remote-host` (add
+  `-L 5173:127.0.0.1:5173` if the Vite dev server is also running), then open
+  `http://127.0.0.1:8000` in your local browser.
+- **Shared machines**: check the port is free before relying on it —
+  `ss -ltn | grep :8000` — another user's `scdata-agent serve` process may
+  already be bound to it. Pass a different `--port` if so, and forward that
+  port instead.
+
 ## Data source coverage
 
 | Source | Role | Status |
