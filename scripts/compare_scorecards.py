@@ -18,7 +18,6 @@ from typing import Any
 # rate that should fall (overclaims, misses).
 HIGHER_IS_BETTER = {
     "profile_inferred_rate",
-    "modality_recall",
     "layer_recall",
     "pairing_recall",
     "deposition_precision",
@@ -77,7 +76,7 @@ def compare(before: dict[str, Any], after: dict[str, Any]) -> int:
             f"{_fmt(old_q['deposition_precision'])} -> "
             f"{_fmt(new_q['deposition_precision'])}  {text}"
         )
-        for field in ("decisions", "modality_gate"):
+        for field in ("decisions", "layer_gate"):
             changes = [
                 f"{key}: {old_q[field].get(key, 0)} -> {new_q[field].get(key, 0)}"
                 for key in sorted(set(old_q[field]) | set(new_q[field]))
@@ -94,7 +93,7 @@ def compare(before: dict[str, Any], after: dict[str, Any]) -> int:
         # An absolute check, not a delta: a record the question forbids is a
         # regression even if the baseline also admitted it. This is the one
         # place where matching the baseline is not good enough.
-        forbidden = sorted(new_q.get("forbidden_passing_modality_gate", []))
+        forbidden = sorted(new_q.get("forbidden_passing_layer_gate", []))
         if forbidden:
             print(f"    FORBIDDEN, YET ADMITTED: {forbidden}")
             regressions += len(forbidden)

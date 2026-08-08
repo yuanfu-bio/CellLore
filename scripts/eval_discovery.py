@@ -12,8 +12,8 @@ up here immediately.
 
 Two properties are deliberate:
 
-* The replay corpus stores only raw archive fields. Assay profiles and
-  modalities are re-derived on every run rather than replayed from the capture,
+* The replay corpus stores only raw archive fields. Assay profiles and omics
+  layers are re-derived on every run rather than replayed from the capture,
   which is what makes inference changes measurable.
 * No LLM and no network. The scorecard must be reproducible by both people and
   by CI, and a number that depends on a model's mood is not a baseline.
@@ -39,7 +39,6 @@ from scdata_agent.application.discovery import DiscoveryWorkflow
 from scdata_agent.domain.models import (
     CurationDecision,
     GateStatus,
-    Modality,
     OmicsLayer,
     PairingLevel,
     QuerySpec,
@@ -61,7 +60,8 @@ class ReplayAdapter:
 
     The adapter mirrors what the live adapters do at the only point that
     matters here: it calls ``infer_assay_profiles`` on the archive's own title
-    and description rather than trusting the modalities frozen into the capture.
+    and description rather than trusting an assay classification frozen into
+    the capture.
     """
 
     def __init__(self, name: str, records: list[dict[str, Any]]) -> None:
@@ -74,15 +74,9 @@ class ReplayAdapter:
     @staticmethod
     def _build(raw: dict[str, Any]) -> SourceRecord:
         profiles = infer_assay_profiles((raw.get("title"), raw.get("description")))
-        modalities = list(
-            dict.fromkeys(
-                modality for profile in profiles for modality in profile.modalities
-            )
-        )
         return SourceRecord(
             **{key: value for key, value in raw.items() if key != "retrieved_at"},
             assay_profiles=profiles,
-            modalities=modalities,
         )
 
 
@@ -92,7 +86,6 @@ class RecordScore:
     kind: str
     profile_inferred: bool
     profile_expected: bool
-    modalities_ok: bool | None
     layers_ok: bool | None
     pairing_ok: bool | None
     pairing_overclaimed: bool | None
@@ -115,15 +108,11 @@ def score_inference(
         if label is None:
             continue
         profiles = infer_assay_profiles((raw.get("title"), raw.get("description")))
-        observed_modalities = {
-            modality for profile in profiles for modality in profile.modalities
-        }
         observed_layers = {
             layer for profile in profiles for layer in profile.omics_layers
         }
         pairing = best_pairing_level(profiles)
 
-        expected_modalities = {Modality(item) for item in label.get("expect_modalities", [])}
         expected_layers = {OmicsLayer(item) for item in label.get("expect_layers", [])}
         floor = label.get("expect_pairing_at_least")
         ceiling = label.get("forbid_pairing_above")
@@ -134,11 +123,6 @@ def score_inference(
                 kind=label["kind"],
                 profile_inferred=bool(profiles),
                 profile_expected=bool(label.get("expect_profile", False)),
-                modalities_ok=(
-                    expected_modalities <= observed_modalities
-                    if expected_modalities
-                    else None
-                ),
                 layers_ok=(
                     expected_layers <= observed_layers if expected_layers else None
                 ),
@@ -167,7 +151,6 @@ def score_inference(
         return round(hits / total, 4) if total else None
 
     expected = [item for item in scores if item.profile_expected]
-    modality_checked = [item for item in scores if item.modalities_ok is not None]
     layer_checked = [item for item in scores if item.layers_ok is not None]
     pairing_checked = [item for item in scores if item.pairing_ok is not None]
     ceiling_checked = [item for item in scores if item.pairing_overclaimed is not None]
@@ -182,10 +165,6 @@ def score_inference(
         ),
         "profile_missing": sorted(
             item.record_id for item in expected if not item.profile_inferred
-        ),
-        "modality_recall": rate(
-            sum(1 for item in modality_checked if item.modalities_ok),
-            len(modality_checked),
         ),
         "layer_recall": rate(
             sum(1 for item in layer_checked if item.layers_ok), len(layer_checked)
@@ -234,16 +213,16 @@ async def score_question(
     reports = {report.candidate_id: report for report in result.feasibility_reports}
 
     decisions: Counter[str] = Counter()
-    modality_gate: Counter[str] = Counter()
+    layer_gate: Counter[str] = Counter()
     # Of the candidates a topic filter would admit, how many own data?
-    modality_pass_primary = 0
-    modality_pass_total = 0
+    layer_pass_primary = 0
+    layer_pass_total = 0
     methods_papers_passing: list[str] = []
     # Records this question must *not* admit. `deposition_precision` cannot
     # express this: excluding a record that should never have passed lowers the
     # number, so a fix and a regression look alike. A named list does not move
     # when the corpus does, which is what makes it worth arguing about.
-    forbidden = set(spec.get("forbid_modality_pass", []))
+    forbidden = set(spec.get("forbid_layer_pass", []))
     forbidden_passing: list[str] = []
 
     for candidate in result.candidates:
@@ -258,11 +237,11 @@ async def score_question(
         # A merged candidate counts as owning data if any of its records does.
         is_primary = "primary_deposition" in kinds
         decisions[report.decision.value] += 1
-        gate = report.dimensions["modality_relevance"].status
-        modality_gate[gate.value] += 1
+        gate = report.dimensions["layer_relevance"].status
+        layer_gate[gate.value] += 1
         if gate == GateStatus.PASS:
-            modality_pass_total += 1
-            modality_pass_primary += int(is_primary)
+            layer_pass_total += 1
+            layer_pass_primary += int(is_primary)
             if not is_primary:
                 methods_papers_passing.append(candidate.title[:70])
             forbidden_passing.extend(
@@ -278,7 +257,9 @@ async def score_question(
         "id": spec["id"],
         "question": spec["question"].strip(),
         "requirement": {
-            "modalities": [item.value for item in result.requirement.modalities],
+            "required_omics_layers": [
+                item.value for item in result.requirement.required_omics_layers
+            ],
             "minimum_pairing_level": (
                 result.requirement.minimum_pairing_level.value
                 if result.requirement.minimum_pairing_level
@@ -291,20 +272,20 @@ async def score_question(
             decision.value: decisions.get(decision.value, 0)
             for decision in CurationDecision
         },
-        "modality_gate": {
-            status.value: modality_gate.get(status.value, 0) for status in GateStatus
+        "layer_gate": {
+            status.value: layer_gate.get(status.value, 0) for status in GateStatus
         },
         # The precision number P0-2 has to move: among candidates a topic filter
         # admits, the share that actually announce data of their own.
         "deposition_precision": (
-            round(modality_pass_primary / modality_pass_total, 4)
-            if modality_pass_total
+            round(layer_pass_primary / layer_pass_total, 4)
+            if layer_pass_total
             else None
         ),
-        "non_primary_passing_modality_gate": sorted(methods_papers_passing),
+        "non_primary_passing_layer_gate": sorted(methods_papers_passing),
         # Must stay empty. Anything here is a record being admitted to a
         # question its data cannot answer.
-        "forbidden_passing_modality_gate": sorted(set(forbidden_passing)),
+        "forbidden_passing_layer_gate": sorted(set(forbidden_passing)),
         "expected_recall_missing": sorted(
             set(expected_recall) - recalled
         ),

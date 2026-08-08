@@ -8,10 +8,20 @@ from scdata_agent.application.agents.shared import (
     need_discovery,
 )
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
+from scdata_agent.application.resource_pipeline import resolved_assembly_claim
+from scdata_agent.domain.curation.decision import (
+    EvidenceGate,
+    evaluate_evidence_completeness,
+)
+from scdata_agent.domain.curation.profiles import profile_by_id
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.licensing import policies_for_urls
 from scdata_agent.domain.lifecycle import (
+    AuditQueueAction,
+    AuditTask,
+    AuditTaskCategoryFamily,
     BundleStatus,
+    EvidenceClaim,
     LicenseStatus,
     PreflightBundleReport,
     SemanticBundle,
@@ -20,6 +30,7 @@ from scdata_agent.domain.models import (
     DataAsset,
     DataRole,
     GateStatus,
+    PairingLevel,
     best_pairing_level,
     pairing_satisfies,
 )
@@ -28,6 +39,24 @@ from scdata_agent.domain.resource_pipeline import (
     EvidenceEscalationReport,
     RemoteBundleInventorySummary,
 )
+
+_CATEGORY_FAMILY_BY_PREFIX: dict[str, AuditTaskCategoryFamily] = {
+    "has_pair_relationship": AuditTaskCategoryFamily.PAIRING,
+    "has_omics_layer": AuditTaskCategoryFamily.METADATA,
+    "resolved_assembly": AuditTaskCategoryFamily.ASSEMBLY,
+    "bundle:missing_roles": AuditTaskCategoryFamily.MISSING_FILE,
+    "archive:uninspected": AuditTaskCategoryFamily.MISSING_FILE,
+    "access:": AuditTaskCategoryFamily.DOWNLOAD,
+    "modality:": AuditTaskCategoryFamily.METADATA,
+    "license:": AuditTaskCategoryFamily.METADATA,
+}
+
+
+def _category_family(blocking_category: str) -> AuditTaskCategoryFamily:
+    for prefix, family in _CATEGORY_FAMILY_BY_PREFIX.items():
+        if blocking_category.startswith(prefix):
+            return family
+    return AuditTaskCategoryFamily.OTHER
 
 
 class ProgressivePreflightAssessmentAgent:
@@ -64,6 +93,37 @@ class ProgressivePreflightAssessmentAgent:
                 )
             )
         }
+        # Pair-unit-level `has_pair_relationship` claims (Phase 4): the
+        # authoritative source for whether *this specific* unit's physical
+        # relationship was proven, as opposed to reading the candidate's
+        # assay profile, which only states what the assay generally supports.
+        claims_by_pair_unit = {
+            item.subject_id: item
+            for item in (
+                EvidenceClaim.model_validate(raw)
+                for raw in (
+                    inventory.payload.get("pairing_claims", [])
+                    if inventory else []
+                )
+            )
+            if item.predicate == "has_pair_relationship"
+        }
+        # Candidate-scoped `has_omics_layer:*` claims (Phase 5A).
+        layer_claims_by_candidate: dict[str, list[EvidenceClaim]] = {}
+        for raw in (inventory.payload.get("layer_claims", []) if inventory else []):
+            claim = EvidenceClaim.model_validate(raw)
+            layer_claims_by_candidate.setdefault(claim.subject_id, []).append(claim)
+        # The registered CurationProfile this run's requirement declares, if
+        # any. None means the evidence-completeness formula below stays
+        # inactive and this agent falls back to its pre-Phase-5A logic
+        # entirely -- additive/opt-in, never a crash for a caller that hasn't
+        # threaded a profile through yet.
+        profile = None
+        if context.requirement is not None and context.requirement.profile_id is not None:
+            try:
+                profile = profile_by_id(context.requirement.profile_id)
+            except KeyError:
+                profile = None
         escalation_artifact = latest_artifact(
             context.artifacts, ArtifactKind.EVIDENCE_ESCALATION.value
         )
@@ -94,6 +154,8 @@ class ProgressivePreflightAssessmentAgent:
             for item in context.policy.get("restricted_license_ids", [])
         }
         reports: list[PreflightBundleReport] = []
+        audit_tasks: list[AuditTask] = []
+        assembly_claims: list[EvidenceClaim] = []
 
         for bundle in bundles:
             candidate = by_candidate[bundle.candidate_id]
@@ -129,25 +191,30 @@ class ProgressivePreflightAssessmentAgent:
                 summary.access_status
                 if summary else BundleAccessStatus.UNKNOWN
             )
-            required_modalities = {
+            required_layers = {
                 item.value
                 for item in (
-                    [*context.requirement.modalities,
-                     *context.requirement.acceptable_modalities]
-                    if context.requirement else []
+                    context.requirement.required_omics_layers if context.requirement else []
                 )
             }
-            observed_modalities = set(
-                summary.reported_modalities if summary else []
+            observed_layers = set(
+                summary.reported_layers if summary else []
             )
-            modality_gate = (
+            # A pairing requirement asks for the required layers *together*,
+            # not as alternatives -- a standalone-ATAC bundle must not pass
+            # this gate for a same-cell-multiome search just by sharing one
+            # of the two requested layers. See domain.feasibility's identical
+            # fix for the legacy DiscoveryWorkflow path.
+            layer_relevant = (
+                required_layers <= observed_layers
+                if context.requirement and context.requirement.pairing_requirement is not None
+                else bool(observed_layers & required_layers)
+            )
+            layer_gate = (
                 GateStatus.PASS
-                if observed_modalities and (
-                    not required_modalities
-                    or bool(observed_modalities & required_modalities)
-                )
+                if observed_layers and (not required_layers or layer_relevant)
                 else GateStatus.FAIL
-                if required_modalities and observed_modalities
+                if required_layers and observed_layers
                 else GateStatus.UNKNOWN
             )
             access_gate = {
@@ -165,14 +232,57 @@ class ProgressivePreflightAssessmentAgent:
             # assay profile merely exists. The previous check passed every
             # candidate that had any profile, which included studies that only
             # report RNA and ATAC side by side with no stated relationship.
+            #
+            # Set membership, not rank: a hard pairing requirement is only
+            # satisfied by an explicit allow-list of relationship kinds
+            # (PairingRequirement.is_satisfied_by), never by "ranks at least as
+            # high as" -- pairing_satisfies/pairing_rank are for soft ranking
+            # only (see domain.models.PairingRequirement's docstring).
+            # `minimum_pairing_level`/`pairing_satisfies` remain the fallback
+            # for a requirement built without the newer field (e.g. a
+            # hand-constructed ResearchRequirement that never went through
+            # RuleBasedRequirementCompiler, which always sets both together).
             required_pairing = (
                 context.requirement.minimum_pairing_level
                 if context.requirement
                 else None
             )
-            observed_pairing = best_pairing_level(candidate.assay_profiles)
+            pairing_requirement = (
+                context.requirement.pairing_requirement
+                if context.requirement
+                else None
+            )
+            pairing_was_required = (
+                pairing_requirement is not None or required_pairing is not None
+            )
+            if bundle.pair_unit_id is not None:
+                # Pair-unit-resolved path (Phase 4): this bundle is one
+                # PairUnitResolver-proposed unit, not the whole candidate. Its
+                # relationship must be proven for THIS unit specifically --
+                # reading the candidate's assay profile here would let a
+                # study-level technology prior (e.g. "this is a DOGMA-seq
+                # study") stand in for a grouping that was never verified, or
+                # that PairingVerifier refused to verify because it was still
+                # provisional. No claim means unknown, full stop -- it is
+                # never backfilled from the candidate.
+                claim = claims_by_pair_unit.get(bundle.pair_unit_id)
+                observed_pairing = (
+                    PairingLevel(claim.value) if claim is not None else None
+                )
+            else:
+                # No pair-unit resolution ran for this bundle (e.g. curated-
+                # manifest ingestion, which has its own file-level pairing
+                # key) -- fall back to the candidate-level assay-profile
+                # reading, same as before Phase 4.
+                observed_pairing = best_pairing_level(candidate.assay_profiles)
             if observed_pairing is None:
                 pairing_gate = GateStatus.UNKNOWN
+            elif pairing_requirement is not None:
+                pairing_gate = (
+                    GateStatus.PASS
+                    if pairing_requirement.is_satisfied_by(observed_pairing)
+                    else GateStatus.WARN
+                )
             elif pairing_satisfies(observed_pairing, required_pairing):
                 pairing_gate = GateStatus.PASS
             else:
@@ -204,8 +314,8 @@ class ProgressivePreflightAssessmentAgent:
                 # on the allowlist: unrecognised is not the same as permitted.
                 license_status = LicenseStatus.UNKNOWN
             dimensions = {
-                "scientific_relevance": modality_gate,
-                "modality_authenticity": modality_gate,
+                "scientific_relevance": layer_gate,
+                "layer_authenticity": layer_gate,
                 "remote_asset_inventory": (
                     GateStatus.PASS if bundle_assets else GateStatus.FAIL
                 ),
@@ -230,7 +340,7 @@ class ProgressivePreflightAssessmentAgent:
                 BundleAccessStatus.UNAVAILABLE,
             }:
                 hard_blockers.append(f"access:{access_status.value}")
-            if modality_gate == GateStatus.FAIL:
+            if layer_gate == GateStatus.FAIL:
                 hard_blockers.append("modality:mismatch")
             if license_status == LicenseStatus.RESTRICTED:
                 hard_blockers.append("license:restricted")
@@ -267,7 +377,7 @@ class ProgressivePreflightAssessmentAgent:
                 warnings.append("archive:uninspected")
             if pairing_gate == GateStatus.WARN:
                 warnings.append("pairing:unverified")
-            elif pairing_gate == GateStatus.UNKNOWN and required_pairing is not None:
+            elif pairing_gate == GateStatus.UNKNOWN and pairing_was_required:
                 # Pairing was asked for and could not be established either way.
                 # Unknown is not absent, but it is also not a pass: silently
                 # recommending it would assert a relationship nobody checked.
@@ -276,12 +386,151 @@ class ProgressivePreflightAssessmentAgent:
                 warnings.append("inventory:truncated")
             if unresolved_evidence:
                 warnings.append("evidence:unresolved")
+            # Data availability (bundle.complete -- do we have the files?) and
+            # scientific relationship eligibility (pairing_gate -- do the files
+            # prove the required relationship?) are orthogonal questions. A
+            # bundle whose only applicable schema is `raw_reads` (files exist,
+            # unprocessed) is acquisition-worthy, but raw reads alone prove
+            # nothing about pairing -- so `bundle.complete` must never be the
+            # sole gate when a pairing requirement exists and is unresolved.
+            pairing_insufficient = (
+                pairing_was_required and pairing_gate != GateStatus.PASS
+            )
+
+            # Evidence-completeness Decision (Phase 5A): "Decision = required
+            # evidence completeness + blocking deterministic validators --
+            # never LLM confidence." Only active when:
+            #  1. a profile is resolvable -- context.requirement.profile_id
+            #     is now set by domain.curation.profiles.select_profile,
+            #     evaluated once against the research question itself before
+            #     compilation even happens (application.research_planning /
+            #     infrastructure.llm.research_planner). A question this
+            #     system has no specialized profile for (e.g. a plain scATAC
+            #     question) never gets profile_id set in the first place, so
+            #     this whole formula is inactive for it -- selection is not
+            #     this agent's job and must not be re-derived here.
+            #  2. this bundle went through pair-unit resolution
+            #     (bundle.pair_unit_id is not None) -- a curated-manifest
+            #     bundle never has one (manifest candidates declare
+            #     assay_profiles=[] by design, so it could never satisfy
+            #     has_omics_layer/*).
+            # Given #1 and #2, whether this specific bundle actually claims
+            # one of the profile's own bundle_schemas is a *scope* question,
+            # not an "is the profile active" question (Round 5 correction):
+            # even within a correctly paired-multiome-profiled search, one
+            # discovered candidate can still turn out to be a standalone
+            # scATAC study (applicable_schema_ids like scatac_standalone/
+            # raw_reads, never multiome_same_cell/multiome_trimodal). That
+            # bundle is out of scope for *this profile's* corpus and must be
+            # excluded outright -- it must NOT fall back to the pre-profile
+            # legacy pairing_gate below, because that legacy path reads
+            # candidate.assay_profiles unscoped by any profile and could
+            # therefore admit the bundle as PREFLIGHT_READY on the strength
+            # of an assay-level pairing prior this profile never asked
+            # about. The legacy fallback is reserved for bundles that never
+            # had a profile or pair-unit resolution to begin with (#1/#2
+            # false), not for ones that had both but missed on scope.
+            assembly_claim = resolved_assembly_claim(bundle, summary)
+            if assembly_claim is not None:
+                assembly_claims.append(assembly_claim)
+            evidence_result = None
+            profile_out_of_scope = False
+            profile_schema_ids = (
+                {item.schema_id for item in profile.bundle_schemas} if profile else set()
+            )
+            profile_applies_to_bundle = bool(
+                profile_schema_ids & set(bundle.applicable_schema_ids)
+            )
+            if profile is not None and bundle.pair_unit_id is not None:
+                if profile_applies_to_bundle:
+                    bundle_claims = [
+                        *layer_claims_by_candidate.get(bundle.candidate_id, []),
+                        *([assembly_claim] if assembly_claim is not None else []),
+                        *(
+                            [claims_by_pair_unit[bundle.pair_unit_id]]
+                            if bundle.pair_unit_id in claims_by_pair_unit
+                            else []
+                        ),
+                    ]
+                    evidence_result = evaluate_evidence_completeness(
+                        profile, EvidenceGate.ACQUISITION, bundle_claims
+                    )
+                    dimensions["evidence_completeness"] = (
+                        GateStatus.PASS if evidence_result.satisfied else GateStatus.FAIL
+                    )
+                    evidence_insufficient = not evidence_result.satisfied
+                else:
+                    profile_out_of_scope = True
+                    evidence_insufficient = True
+                    dimensions["profile_scope"] = GateStatus.FAIL
+            else:
+                # Legacy path: no profile resolvable, or no pair-unit
+                # resolution ran for this bundle (curated-manifest path).
+                evidence_insufficient = pairing_insufficient
+
             if hard_blockers:
                 decision = BundleStatus.REJECTED
-            elif not bundle.complete or unresolved_evidence:
+            elif profile_out_of_scope:
+                decision = BundleStatus.REJECTED
+            elif not bundle.complete or unresolved_evidence or evidence_insufficient:
                 decision = BundleStatus.NEEDS_EVIDENCE
             else:
                 decision = BundleStatus.PREFLIGHT_READY
+
+            audit_task: AuditTask | None = None
+            if decision == BundleStatus.REJECTED:
+                if hard_blockers:
+                    blocking_category = hard_blockers[0]
+                    rationale = "; ".join(hard_blockers)
+                else:
+                    # profile_out_of_scope: hard_blockers is empty here by
+                    # construction (that branch takes priority above), so
+                    # this can only be the scope exclusion.
+                    blocking_category = f"profile:out_of_scope:{profile.profile_id}"
+                    rationale = (
+                        f"Bundle claims {', '.join(bundle.applicable_schema_ids) or 'no'} "
+                        f"schema(s), none of which belong to "
+                        f"{profile.profile_id}'s bundle_schemas "
+                        f"({', '.join(sorted(profile_schema_ids)) or 'none'}); excluded "
+                        "from this profile's corpus rather than evaluated against its "
+                        "required_evidence."
+                    )
+                audit_task = AuditTask(
+                    task_id=stable_id("audit_task", f"{bundle.bundle_id}:{context.run_id}"),
+                    run_id=context.run_id,
+                    subject_id=bundle.pair_unit_id or bundle.candidate_id,
+                    bundle_id=bundle.bundle_id,
+                    queue_action=AuditQueueAction.EXCLUDED,
+                    blocking_category=blocking_category,
+                    category_family=_category_family(blocking_category),
+                    rationale=rationale,
+                )
+            elif decision == BundleStatus.NEEDS_EVIDENCE:
+                if evidence_result is not None and evidence_result.missing:
+                    blocking_category = evidence_result.missing[0].predicate
+                    queue_action = AuditQueueAction.VERIFY_THEN_ARCHIVE
+                elif not bundle.complete:
+                    blocking_category = "bundle:missing_roles"
+                    queue_action = AuditQueueAction.DEFERRED
+                else:
+                    blocking_category = "evidence:unresolved"
+                    queue_action = AuditQueueAction.VERIFY_THEN_ARCHIVE
+                audit_task = AuditTask(
+                    task_id=stable_id("audit_task", f"{bundle.bundle_id}:{context.run_id}"),
+                    run_id=context.run_id,
+                    subject_id=bundle.pair_unit_id or bundle.candidate_id,
+                    bundle_id=bundle.bundle_id,
+                    queue_action=queue_action,
+                    blocking_category=blocking_category,
+                    category_family=_category_family(blocking_category),
+                    rationale=(
+                        "; ".join(item.predicate for item in evidence_result.missing)
+                        if evidence_result is not None and evidence_result.missing
+                        else "; ".join(warnings) or "incomplete bundle"
+                    ),
+                )
+            if audit_task is not None:
+                audit_tasks.append(audit_task)
             dimensions["license"] = (
                 GateStatus.PASS
                 if license_status == LicenseStatus.APPROVED
@@ -405,6 +654,22 @@ class ProgressivePreflightAssessmentAgent:
                     run_id=context.run_id,
                 )
 
+        if context.catalog is not None:
+            for item in assembly_claims:
+                context.catalog.append(
+                    record_id=item.claim_id,
+                    record_type="evidence_claim",
+                    run_id=context.run_id,
+                    value=item,
+                )
+            for item in audit_tasks:
+                context.catalog.append(
+                    record_id=item.task_id,
+                    record_type="audit_task",
+                    run_id=context.run_id,
+                    value=item,
+                )
+
         return [
             artifact(
                 context.run_id,
@@ -414,6 +679,12 @@ class ProgressivePreflightAssessmentAgent:
                     "reports": [
                         item.model_dump(mode="json")
                         for item in reports
+                    ],
+                    "audit_tasks": [
+                        item.model_dump(mode="json") for item in audit_tasks
+                    ],
+                    "assembly_claims": [
+                        item.model_dump(mode="json") for item in assembly_claims
                     ],
                     "evidence_boundary": "remote_only",
                 },

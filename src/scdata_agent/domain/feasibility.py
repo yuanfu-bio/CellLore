@@ -10,8 +10,6 @@ from scdata_agent.domain.models import (
     FeasibilityDimension,
     FeasibilityReport,
     GateStatus,
-    Modality,
-    PairingLevel,
     ResearchRequirement,
 )
 
@@ -24,46 +22,62 @@ class FeasibilityAssessor:
     ) -> FeasibilityReport:
         dimensions: dict[str, FeasibilityDimension] = {}
 
-        requested_modalities = set(requirement.acceptable_modalities or requirement.modalities)
-        observed_modalities = set(candidate.modalities)
-        if observed_modalities & requested_modalities:
-            dimensions["modality_relevance"] = FeasibilityDimension(
+        requested_layers = set(requirement.required_omics_layers)
+        observed_layers = {
+            layer for profile in candidate.assay_profiles for layer in profile.omics_layers
+        }
+        # A pairing requirement means the requested layers are asked for
+        # *together*, not as alternatives -- "chromatin accessibility and
+        # transcriptome in the same cell" is not satisfied by a candidate
+        # that supplies only one of the two. Requiring the full subset here
+        # (rather than any overlap) is what keeps a standalone-ATAC record
+        # out of a same-cell-multiome question's topic-relevance gate; this
+        # is the same category of overclaim P0.0 had to walk back for assay
+        # inference, just at the requirement-matching layer instead.
+        is_joint_requirement = requirement.pairing_requirement is not None
+        relevant = (
+            requested_layers <= observed_layers
+            if is_joint_requirement
+            else bool(observed_layers & requested_layers)
+        )
+        if relevant:
+            dimensions["layer_relevance"] = FeasibilityDimension(
                 status=GateStatus.PASS,
-                rationale="At least one observed modality matches the requirement.",
+                rationale=(
+                    "All requested omics layers are observed together."
+                    if is_joint_requirement
+                    else "At least one observed omics layer matches the requirement."
+                ),
             )
-        elif observed_modalities:
-            dimensions["modality_relevance"] = FeasibilityDimension(
+        elif observed_layers:
+            dimensions["layer_relevance"] = FeasibilityDimension(
                 status=GateStatus.FAIL,
-                rationale="Observed modalities do not match the requirement.",
+                rationale=(
+                    "The requirement asks for these layers together; only a "
+                    "subset was observed."
+                    if is_joint_requirement
+                    else "Observed omics layers do not match the requirement."
+                ),
             )
         else:
-            dimensions["modality_relevance"] = FeasibilityDimension(
+            dimensions["layer_relevance"] = FeasibilityDimension(
                 status=GateStatus.UNKNOWN,
-                rationale="Modality has not yet been verified from repository or files.",
+                rationale="Omics layers have not yet been verified from repository or files.",
             )
 
-        paired_modalities = {
-            Modality.MULTIOME_RNA_ATAC,
-            Modality.MATCHED_SCRNA_SCATAC,
-            Modality.MULTIOME_ATAC_PROTEIN,
-            Modality.MULTIOME_RNA_ATAC_PROTEIN,
-            Modality.ATAC_OTHER_MULTIOMICS,
-        }
-        pairing_required = bool(requested_modalities) and requested_modalities <= paired_modalities
-        if pairing_required:
+        if requirement.pairing_requirement is not None:
             matching_profiles = [
                 profile
                 for profile in candidate.assay_profiles
-                if set(profile.modalities) & requested_modalities
+                if set(profile.omics_layers) & requested_layers
             ]
-            verified_levels = {
-                PairingLevel.SAME_CELL, PairingLevel.SAME_NUCLEUS,
-                PairingLevel.SAME_SAMPLE, PairingLevel.SAME_DONOR,
-            }
-            if any(profile.pairing_level in verified_levels for profile in matching_profiles):
+            if any(
+                requirement.pairing_requirement.is_satisfied_by(profile.pairing_level)
+                for profile in matching_profiles
+            ):
                 dimensions["pairing_evidence"] = FeasibilityDimension(
                     status=GateStatus.PASS,
-                    rationale="A same-cell, same-nucleus, same-sample, or same-donor pairing relationship is stated.",
+                    rationale="A pairing relationship satisfying the requirement is stated.",
                 )
             elif matching_profiles:
                 dimensions["pairing_evidence"] = FeasibilityDimension(

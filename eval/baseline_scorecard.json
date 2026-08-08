@@ -6,7 +6,6 @@
   },
   "inference": {
     "layer_recall": 1.0,
-    "modality_recall": 1.0,
     "pairing_missed": [
       "src_a3da53793f8d55a9"
     ],
@@ -22,21 +21,23 @@
       "candidates": 35,
       "decisions": {
         "eligible": 0,
-        "exclude": 5,
-        "manual_review": 30
+        "exclude": 0,
+        "manual_review": 35
       },
-      "deposition_precision": 0.7667,
+      "deposition_precision": 0.7429,
       "expected_recall_missing": [],
-      "forbidden_passing_modality_gate": [],
+      "forbidden_passing_layer_gate": [],
       "id": "scatac_pretraining",
-      "modality_gate": {
-        "fail": 5,
-        "pass": 30,
+      "layer_gate": {
+        "fail": 0,
+        "pass": 35,
         "unknown": 0,
         "warn": 0
       },
-      "non_primary_passing_modality_gate": [
+      "non_primary_passing_layer_gate": [
+        "ATAClone: Cancer Clone Identification and Copy Number Estimation from ",
         "Alignment-free integration of single-nucleus ATAC-seq across species w",
+        "Assessment and applications of joint profiling of single-cell chromati",
         "Cell type annotation for scATAC-seq via DNA large language model and g",
         "Developing a comprehensive database and search tool for single-cell AT",
         "Highly accurate reference and method selection for universal cross-dat",
@@ -48,9 +49,8 @@
       "requirement": {
         "compiler": "rule_based_v1",
         "minimum_pairing_level": null,
-        "modalities": [
-          "snatac_seq",
-          "scatac_seq"
+        "required_omics_layers": [
+          "chromatin_accessibility"
         ]
       }
     },
@@ -58,29 +58,36 @@
       "candidates": 35,
       "decisions": {
         "eligible": 0,
-        "exclude": 30,
-        "manual_review": 5
+        "exclude": 18,
+        "manual_review": 17
       },
-      "deposition_precision": 0.6,
+      "deposition_precision": 0.5294,
       "expected_recall_missing": [],
-      "forbidden_passing_modality_gate": [],
+      "forbidden_passing_layer_gate": [],
       "id": "same_cell_multiome",
-      "modality_gate": {
-        "fail": 30,
-        "pass": 5,
+      "layer_gate": {
+        "fail": 18,
+        "pass": 17,
         "unknown": 0,
         "warn": 0
       },
-      "non_primary_passing_modality_gate": [
+      "non_primary_passing_layer_gate": [
         "ATAClone: Cancer Clone Identification and Copy Number Estimation from ",
-        "Assessment and applications of joint profiling of single-cell chromati"
+        "Alignment-free integration of single-nucleus ATAC-seq across species w",
+        "Assessment and applications of joint profiling of single-cell chromati",
+        "Cell type annotation for scATAC-seq via DNA large language model and g",
+        "Highly accurate reference and method selection for universal cross-dat",
+        "Semi-parametric empirical bayes method for multiplet detection in snAT",
+        "Single-cell multiomics data integration and generation with scPairing.",
+        "Somatic variant detection in normal tissues from single-cell sequencin"
       ],
       "question": "paired single-cell multiome data measuring chromatin accessibility and the transcriptome in the same cell, 10x Multiome or SNARE-seq, for self-supervised pretraining",
       "requirement": {
         "compiler": "rule_based_v1",
         "minimum_pairing_level": "same_cell",
-        "modalities": [
-          "multiome_rna_atac"
+        "required_omics_layers": [
+          "chromatin_accessibility",
+          "transcriptome"
         ]
       }
     },
@@ -88,21 +95,23 @@
       "candidates": 35,
       "decisions": {
         "eligible": 0,
-        "exclude": 23,
-        "manual_review": 12
+        "exclude": 18,
+        "manual_review": 17
       },
-      "deposition_precision": 0.5,
+      "deposition_precision": 0.5294,
       "expected_recall_missing": [],
-      "forbidden_passing_modality_gate": [],
+      "forbidden_passing_layer_gate": [],
       "id": "non_atac_generality",
-      "modality_gate": {
-        "fail": 23,
-        "pass": 12,
+      "layer_gate": {
+        "fail": 18,
+        "pass": 17,
         "unknown": 0,
         "warn": 0
       },
-      "non_primary_passing_modality_gate": [
+      "non_primary_passing_layer_gate": [
+        "ATAClone: Cancer Clone Identification and Copy Number Estimation from ",
         "Alignment-free integration of single-nucleus ATAC-seq across species w",
+        "Assessment and applications of joint profiling of single-cell chromati",
         "Cell type annotation for scATAC-seq via DNA large language model and g",
         "Highly accurate reference and method selection for universal cross-dat",
         "Semi-parametric empirical bayes method for multiplet detection in snAT",
@@ -113,8 +122,8 @@
       "requirement": {
         "compiler": "rule_based_v1",
         "minimum_pairing_level": null,
-        "modalities": [
-          "scrna_seq"
+        "required_omics_layers": [
+          "transcriptome"
         ]
       }
     }

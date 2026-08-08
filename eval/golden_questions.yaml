@@ -7,8 +7,8 @@
 # catches cases that hand-written fixtures do not.
 #
 # The replay corpus deliberately stores only the *raw* fields. Assay profiles
-# and modalities are re-derived on every run, so a change to inference shows up
-# in the scorecard instead of being frozen into the fixture.
+# and omics layers are re-derived on every run, so a change to inference shows
+# up in the scorecard instead of being frozen into the fixture.
 #
 # Run:  python scripts/eval_discovery.py
 # Diff: python scripts/compare_scorecards.py eval/baseline_scorecard.json <new>
@@ -30,14 +30,13 @@ meta:
 #
 #   kind             primary_deposition | methods_paper | resource_paper
 #   expect_profile   an assay profile must be inferable from the text alone
-#   expect_modalities  modalities that must all appear (only where unambiguous)
 #   expect_layers    omics layers that must all appear
 #   expect_pairing_at_least  weakest acceptable pairing claim
 #   forbid_pairing_above     strongest pairing the record may claim
 #
-# Question specs additionally take `forbid_modality_pass`: record IDs that must
-# never pass that question's modality gate. Unlike every rate here, it is
-# checked absolutely -- matching the baseline does not excuse it.
+# Question specs additionally take `forbid_layer_pass`: record IDs that must
+# never pass that question's layer-relevance gate. Unlike every rate here, it
+# is checked absolutely -- matching the baseline does not excuse it.
 #
 # `forbid_pairing_above` exists because the expensive error here is the false
 # positive, not the miss. A standalone ATAC run that reports itself as
@@ -52,7 +51,6 @@ records:
   src_02f424ebf34515a5: &encode_snatac
     kind: primary_deposition
     expect_profile: true
-    expect_modalities: [snatac_seq]
     expect_layers: [chromatin_accessibility]
     forbid_pairing_above: study_level
   src_18a010ab5e2fbbfe: *encode_snatac
@@ -77,7 +75,6 @@ records:
   src_b5b175ca0b94e758:
     kind: primary_deposition
     expect_profile: true
-    expect_modalities: [multiome_rna_atac]
     expect_layers: [chromatin_accessibility, transcriptome]
     expect_pairing_at_least: same_nucleus
     note: GSE340993 -- ATAC half of a declared 10x Multiome experiment.
@@ -97,7 +94,6 @@ records:
   src_22124b1fe971220e: &encode_sra
     kind: primary_deposition
     expect_profile: true
-    expect_modalities: [snatac_seq]
     expect_layers: [chromatin_accessibility]
     forbid_pairing_above: study_level
   src_2df1d11ae03fd153: *encode_sra
@@ -174,7 +170,7 @@ records:
       generates its own single-cell data, but the emphasis is analytical.
 
   # --- Methods, tools and resources: topically relevant, not curatable ----
-  # Every one of these passed `modality_relevance` in a live run, because their
+  # Every one of these passed `layer_relevance` in a live run, because their
   # abstracts are full of scATAC terminology. That is correct for a topic
   # filter and wrong for a training corpus. None may reach the eligible tier.
   src_961d390986102a1b:
@@ -247,7 +243,7 @@ questions:
     # assertion rather than left to `deposition_precision`, because excluding a
     # record that should never have passed *lowers* that number -- so the fix
     # and the defect read identically as a delta.
-    forbid_modality_pass:
+    forbid_layer_pass:
       - src_22124b1fe971220e
       - src_2df1d11ae03fd153
       - src_54a59c6c4bd45e64
@@ -271,7 +267,7 @@ questions:
       fixed, and that fall is the fix working: the passing set lost primary
       depositions that were only passing because ENCODE's umbrella BioProject
       had merged them into a candidate that contained one real multiome record.
-      Read `forbid_modality_pass` before reading the precision number -- the
+      Read `forbid_layer_pass` before reading the precision number -- the
       list is the guarantee, the rate is a summary.
 
   - id: non_atac_generality
