@@ -1,0 +1,339 @@
+# Ground-truth regression benchmark for the paired_atac_rna_human profile.
+#
+# Sourced from a human curator's real manual review, recorded in
+# 04_thinking/agent.xlsx (not part of this repo -- see `source` below for the
+# absolute path used when this file was built). Nothing here is invented: the
+# accessions, methods and stated reasons are copy-checked against that
+# spreadsheet's 01_Studies / 02_Pair_units / 04_Audit_Hold sheets.
+#
+# Design (see the plan's "benchmark / regression suite" section, and
+# eval/golden_questions.yaml for the established sibling pattern in this
+# repo): a small, representative sample rather than all ~1485 rows --
+# `catalog_status`/`manifest_status`/`阻断类别`(blocking_category) diversity
+# matters more than volume, because the point is to pin one example of each
+# *kind* of judgement the profile has to get right, not to reproduce the
+# whole spreadsheet.
+#
+# What "regression" means here: the agent's final decision direction and its
+# stated reason category must match the human curator's, not an exact field
+# match -- both records carry large amounts of free text a fresh agent run
+# will never reproduce verbatim. See `expected.*` field docs below for what
+# is actually checked.
+#
+# THIS FILE IS GROUND TRUTH ONLY. It does not yet have captured records to
+# replay offline (see README.md in this directory for why, and what running
+# this benchmark for real requires) -- the runner in test_regression.py
+# currently only exercises the direction-matching logic itself against
+# synthetic fixtures. Wiring each case below to a real `agent-run` capture is
+# tracked as a separate, explicit follow-up task.
+
+meta:
+  source: /data/collab/ai-multiomics/yfu/02_agent/04_thinking/agent.xlsx
+  source_sheets: [01_Studies, 02_Pair_units, 04_Audit_Hold]
+  extracted_date: "2026-08-08"
+  note: >-
+    catalog_status (01_Studies) real distribution at extraction time: READY=61,
+    HOLD=52. manifest_status (02_Pair_units) has 40+ distinct values; the
+    READY cases below were chosen to cover visibly different manifest_status
+    families rather than duplicate the same one. 队列动作 (04_Audit_Hold) real
+    distribution: 验证后归档=44, 暂缓=35, 排除=22, 重处理=10, 部分归档=1.
+
+# ---------------------------------------------------------------------------
+# Field reference
+#
+#   accession               GEO series accession (the real-world identifier
+#                           an `agent-run <accession-shaped question>` case
+#                           would need to recall)
+#   method                  the named technology/assay, as the curator read it
+#                           off the GEO record (not necessarily a term this
+#                           repo's TECHNOLOGY_PROFILES table already knows --
+#                           some of these are exactly the kind of case that
+#                           tests whether an unfamiliar assay still degrades
+#                           gracefully through the open-vocabulary layer path)
+#   expected.decision       READY | HOLD | EXCLUDE -- the direction only.
+#                           READY here means "the study should reach
+#                           PREFLIGHT_READY / an equivalent non-blocked
+#                           state for at least its resolvable pair units",
+#                           not that every single pair unit must.
+#   expected.relationship   physical_co_measurement | provenance_match |
+#                           not_applicable -- which RelationshipKind (see
+#                           domain.models) the curator's own reasoning
+#                           actually rests on. This is the single most
+#                           important field for the EXCLUDE cases: several of
+#                           them were excluded specifically because the study
+#                           only supports a provenance_match (matched
+#                           donor/sample, separate chemistries) and the
+#                           curator explicitly said that does not satisfy a
+#                           same-cell requirement -- exactly the hard
+#                           constraint `paired_atac_rna_human`'s
+#                           `required_relationship` exists to enforce.
+#   expected.pair_unit_count  from 02_Pair_units, only meaningful for
+#                           READY/HOLD rows that were actually pair-unit-
+#                           resolved by the curator. Compared loosely
+#                           (matched_units / split_errors / merge_errors, see
+#                           the plan's Phase 4 regression design), never
+#                           exact-equality -- an agent that finds 6 of 7 real
+#                           pair units is a much smaller miss than one that
+#                           finds 1 or 20.
+#   blocking_category       04_Audit_Hold's 阻断类别, kept verbatim (Chinese)
+#                           and as free text on purpose -- this field is
+#                           deliberately NOT a closed enum anywhere in this
+#                           codebase (see AuditTask.blocking_category), so
+#                           the benchmark must not force it into one either.
+#   curator_reason          04_Audit_Hold's 未归档原因 or 01_Studies' evidence
+#                           fields, translated/condensed into English for
+#                           readability here; the Chinese original is the
+#                           authoritative source, this is a summary.
+# ---------------------------------------------------------------------------
+
+cases:
+  # --- READY: cover visibly different manifest_status families ------------
+  - id: ready_exact_gsm
+    accession: GSE228428
+    method: 10x Multiome
+    research_question: >-
+      paired same-cell multiome RNA and ATAC data, human endothelial cells,
+      10x Multiome
+    expected:
+      decision: READY
+      relationship: physical_co_measurement
+      pair_unit_count: 7
+    manifest_status_example: READY_EXACT_GSM
+    curator_reason: >-
+      RNA and ATAC libraries paired by treatment/lane from the same Multiome
+      nuclei; ATAC GSMs publish barcoded fragments + TBI, RNA GSMs publish
+      filtered integer H5/MEX matrices, four of seven pairs file-resolved
+      directly from GSM pages.
+    notes: Baseline positive case -- clean 10x Multiome, direct GSM files.
+
+  - id: ready_raw_mtx_metrics_cell_recall
+    accession: GSE299348
+    method: DOGMA-seq (10x Multiome + feature barcoding)
+    research_question: >-
+      paired single-cell multiome DOGMA-seq data measuring chromatin
+      accessibility, transcriptome and protein in the same cell, human
+    expected:
+      decision: READY
+      relationship: physical_co_measurement
+      pair_unit_count: 39
+    manifest_status_example: READY_RAW_MTX_METRICS_CELL_RECALL
+    curator_reason: >-
+      RNA, ATAC and ADT/HTO all from the same DOGMA cells; per-library ATAC
+      fragments+index and RNA MEX; cell recall done from processing metrics
+      rather than a pre-filtered matrix.
+    notes: >-
+      Trimodal (RNA+ATAC+protein) case -- exercises multiome_trimodal, not
+      just multiome_same_cell, and a "recall cells from metrics" manifest
+      shape distinct from the exact-GSM case above.
+
+  - id: ready_samplewise_cellranger_bundle
+    accession: GSE289515
+    method: 10x Multiome
+    research_question: >-
+      paired same-cell multiome RNA and ATAC data, human iPSC-derived
+      neurons, 10x Multiome
+    expected:
+      decision: READY
+      relationship: physical_co_measurement
+      pair_unit_count: 15
+    manifest_status_example: READY_SAMPLEWISE_CELLRANGER_BUNDLE
+    curator_reason: >-
+      Libraries comply with Cell Ranger ARC Multiome and were produced with
+      the 10x Multiome kit; sample-wise Cell Ranger output folders packaged
+      as archives (fragments expected inside, not listed as bare files).
+    notes: >-
+      Archive-packaged bundle case -- files are not individually listed on
+      the GSM page, they are inside a per-sample tarball. Tests whether
+      "contents are archived, not yet opened" is handled as
+      completeness-unknown rather than completeness-disproven (see
+      progressive_preflight.py's archive_may_explain_gap handling).
+
+  - id: ready_filtered_h5mu_count_audit
+    accession: GSE305370
+    method: 10x Multiome with parallel CITE-seq
+    research_question: >-
+      paired same-cell multiome RNA and ATAC data across multiple donors and
+      time points, human hematopoietic stem and progenitor cells
+    expected:
+      decision: READY
+      relationship: physical_co_measurement
+      pair_unit_count: 20
+    manifest_status_example: READY_FILTERED_H5MU_COUNT_AUDIT
+    curator_reason: >-
+      Multiome RNA and ATAC GSMs pair by donor and day; a large Series-level
+      barcoded fragment file is public; 20 processed H5MU objects carry
+      QC-filtered cells with donor/time-point/cell-type metadata, but the
+      raw-count layer location (vs. the filtered H5MU) still needed auditing.
+    notes: >-
+      Standard object (H5MU) case -- tests the h5mu-aware path in
+      standard_object_qc.py rather than raw MEX/mtx, and the "processed
+      object exists, raw-count provenance still needs confirming" R03
+      distinction from Phase 5B.
+
+  - id: ready_series_aggregate_metadata_split
+    accession: GSE183273
+    method: SNARE-seq2
+    research_question: >-
+      paired same-nucleus multiome RNA and ATAC data, human kidney, SNARE-seq2
+    expected:
+      decision: READY
+      relationship: physical_co_measurement
+      pair_unit_count: 17
+    manifest_status_example: READY_SERIES_AGGREGATE_METADATA_SPLIT
+    curator_reason: >-
+      Same-nucleus RNA/accessibility by SNARE-seq2 definition; aggregate
+      Series-level files need splitting into per-pair-unit metadata rather
+      than arriving pre-split per GSM.
+    notes: >-
+      Non-10x named technology (SNARE-seq2) -- exercises TECHNOLOGY_PROFILES
+      recall for a technology that is not "10x Multiome", and a
+      study/aggregate-level rather than per-sample file layout.
+
+  # --- HOLD: cover distinct blocking_category families ---------------------
+  - id: hold_missing_atac_fragment
+    accession: GSE288939
+    method: unresolved (core files not yet parsed)
+    research_question: paired same-cell multiome RNA and ATAC data, human
+    expected:
+      decision: HOLD
+      relationship: physical_co_measurement
+      pair_unit_count: null
+    blocking_category: 缺少ATAC fragment
+    curator_reason: >-
+      Partial RNA/matrix files available, but the required barcode-level ATAC
+      fragments.tsv.gz is missing; pass criteria is obtaining a public or
+      reproducible barcode-level fragments file with an index.
+    notes: >-
+      A missing-file HOLD, not a relationship problem -- the pairing claim
+      itself is not in question, the file manifest is incomplete. Distinct
+      failure mode from the relationship-driven EXCLUDE cases below.
+
+  - id: hold_gsm_manifest_incomplete
+    accession: GSE324206
+    method: unspecified (paired RNA/ATAC relationship established)
+    research_question: paired same-cell multiome RNA and ATAC data, human
+    expected:
+      decision: HOLD
+      relationship: physical_co_measurement
+      pair_unit_count: 16
+    blocking_category: GSM附件manifest未完成
+    curator_reason: >-
+      16 RNA/ATAC pair units are established, but per-GSM exact H5/fragment/
+      TBI file names and URLs are not yet catalogued for all 32 GSMs; one
+      example file-naming pattern must not be extrapolated to the rest.
+    notes: >-
+      Tests that "pair units resolved, per-file manifest still incomplete"
+      stays HOLD rather than being upgraded on the strength of a partial
+      sample -- directly relevant to Phase 5A's per-predicate evidence-
+      completeness gate (has_pair_relationship can be satisfied while a
+      file-manifest-shaped predicate is not).
+
+  - id: hold_fragment_sample_provenance_unresolved
+    accession: GSE196235
+    method: unspecified
+    research_question: paired same-cell multiome RNA and ATAC data, human
+    expected:
+      decision: HOLD
+      relationship: physical_co_measurement
+      pair_unit_count: 1
+    blocking_category: Fragment样本来源
+    curator_reason: >-
+      An aggregated fragments file exists, but barcodes cannot be uniquely
+      traced to a specific sample/replicate/GEM well, so it cannot be safely
+      split and archived per pair unit; pass criteria is a unique barcode-to-
+      sample mapping that also intersects with the paired RNA barcodes.
+    notes: >-
+      The single most direct precursor to Phase 5B's barcode-overlap
+      validator -- this is exactly the kind of ambiguity FILE_OBSERVED-level
+      barcode intersection evidence is meant to resolve or refuse to resolve.
+
+  # --- EXCLUDE: matched-but-not-same-cell is the load-bearing case --------
+  - id: exclude_matched_separate_chemistry_5p_v2
+    accession: GSE295489
+    method: separate 5' RNA and v2 ATAC chemistries
+    research_question: paired same-cell multiome RNA and ATAC data, human
+    expected:
+      decision: EXCLUDE
+      relationship: provenance_match
+      pair_unit_count: null
+    blocking_category: 非配对Multiome
+    curator_reason: >-
+      GEO explicitly states separate 5' RNA and v2 ATAC chemistries were
+      used; RNA and ATAC cannot be shown to come from the same cell, so this
+      does not meet the same-cell paired RNA+ATAC definition.
+    notes: >-
+      The canonical "administrative/provenance match, not physical
+      co-measurement" case -- required_relationship's hard exclusion of
+      RelationshipKind.PROVENANCE_MATCH for this profile must reject this
+      regardless of how confidently sample/donor matching could be claimed.
+
+  - id: exclude_matched_donor_not_same_cell
+    accession: GSE252106
+    method: separate 3' RNA and snATAC v1 reagents
+    research_question: paired same-cell multiome RNA and ATAC data, human
+    expected:
+      decision: EXCLUDE
+      relationship: provenance_match
+      pair_unit_count: null
+    blocking_category: 非配对Multiome
+    curator_reason: >-
+      3' RNA and snATAC v1 reagents were used on independent nuclei
+      preparations from 4 donors; donor-matching is not the same as
+      same-cell pairing, so no same-cell RNA-ATAC pair unit can be
+      established.
+    notes: Same failure category as GSE295489, different donor-matching phrasing.
+
+  - id: exclude_matched_tumor_source_not_same_cell
+    accession: GSE173682
+    method: matched scRNA-seq and scATAC-seq
+    research_question: paired same-cell multiome RNA and ATAC data, human
+    expected:
+      decision: EXCLUDE
+      relationship: provenance_match
+      pair_unit_count: null
+    blocking_category: 非配对Multiome
+    curator_reason: >-
+      11 breast tumors profiled with matched scRNA-seq and scATAC-seq drawn
+      from independent cell populations; the shared tumor source does not
+      prove RNA and ATAC came from the same cell.
+    notes: >-
+      This is the exact shape of BUNDLE_SCHEMAS' matched_scrna_scatac schema
+      (PROVENANCE_MATCH-gated) -- a real study this schema is *for*, and
+      simultaneously a study `paired_atac_rna_human`'s stricter
+      required_relationship must still refuse.
+
+  - id: exclude_species_and_scope
+    accession: GSE178735
+    method: mixed / unclear
+    research_question: paired same-cell multiome RNA and ATAC data, human
+    expected:
+      decision: EXCLUDE
+      relationship: not_applicable
+      pair_unit_count: null
+    blocking_category: 物种或范围排除
+    curator_reason: >-
+      Series mixes human and rat samples, and the public processed files are
+      insufficient to form a pure-human same-cell RNA+ATAC core file set;
+      some records are single-modality or mixed-species.
+    notes: >-
+      Tests the organism hard requirement (human_only) independent of the
+      pairing-relationship logic the other EXCLUDE cases center on.
+
+  - id: exclude_no_atac_present
+    accession: GSE157606
+    method: ATAC-seq only (no RNA)
+    research_question: paired same-cell multiome RNA and ATAC data, human
+    expected:
+      decision: EXCLUDE
+      relationship: not_applicable
+      pair_unit_count: null
+    blocking_category: 非配对Multiome
+    curator_reason: >-
+      This accession is itself an ATAC-seq sub-series; all public samples are
+      ATAC-seq, with no pairable RNA core data at all.
+    notes: >-
+      The simplest EXCLUDE case -- only one omics layer is present at all, so
+      this should fail well before the relationship question is even
+      reached (has_omics_layer:transcriptome never gets a claim). Cheap
+      sanity check that the benchmark's own scoring logic does not
+      accidentally require every case to hinge on RelationshipKind.
