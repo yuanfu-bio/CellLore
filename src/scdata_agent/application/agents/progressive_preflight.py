@@ -300,6 +300,26 @@ class ProgressivePreflightAssessmentAgent:
                         "remote_asset_manifest",
                     }
                 ]
+            if (
+                "multiome_pairing" in unresolved_evidence
+                and bundle.pair_unit_id in claims_by_pair_unit
+            ):
+                # "multiome_pairing" was flagged unresolved back at evidence
+                # escalation, from nothing stronger than the candidate's own
+                # shallow, discovery-time AssayProfile.pairing_level (often
+                # study_level/unverified, since a series' own title/abstract
+                # rarely states its pairing method even when a per-sample GSM
+                # does). PairUnitResolver/PairingVerifier have since run and
+                # reached a real, per-unit answer for this specific bundle --
+                # claims_by_pair_unit holding an entry means that question was
+                # actually asked and answered, positively or negatively, not
+                # skipped. Continuing to call it "unresolved" here would keep
+                # a bundle at NEEDS_EVIDENCE on stale information the
+                # evidence-completeness formula above already re-evaluates
+                # correctly against the real claim's evidence_class.
+                unresolved_evidence = [
+                    item for item in unresolved_evidence if item != "multiome_pairing"
+                ]
             observed_license_ids = {
                 item.license_id for item in bundle_assets if item.license_id
             }

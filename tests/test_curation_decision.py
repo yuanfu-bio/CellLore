@@ -128,3 +128,40 @@ def test_acquisition_and_corpus_ready_gates_can_disagree_on_the_same_claims():
     pairing_corpus_ready = next(r for r in corpus_ready.results if r.predicate == "has_pair_relationship")
     assert pairing_acquisition.satisfied
     assert not pairing_corpus_ready.satisfied
+
+
+def test_an_empty_acceptable_list_means_ungated_not_unsatisfiable():
+    """resolved_assembly's real shape: no claim exists yet (nothing infers a
+    genome build before download), and the profile declares it ungated at
+    acquisition on purpose. An empty acceptable-class list must not act like
+    the strictest possible requirement -- that would block every candidate
+    forever, the opposite of what an empty list is meant to express."""
+    profile = _profile(_requirement("resolved_assembly", []))
+    result = evaluate_evidence_completeness(profile, EvidenceGate.ACQUISITION, [])
+
+    assert result.satisfied
+    assert result.results[0].best_claim is None
+
+
+def test_an_empty_acceptable_list_still_surfaces_a_claim_if_one_exists():
+    """Ungated does not mean the claim is thrown away -- if the text did
+    state a build, it should still be visible on the result for display."""
+    profile = _profile(_requirement("resolved_assembly", []))
+    claims = [_claim("resolved_assembly", EvidenceClass.REPOSITORY_REPORTED)]
+    result = evaluate_evidence_completeness(profile, EvidenceGate.ACQUISITION, claims)
+
+    assert result.satisfied
+    assert result.results[0].best_claim is not None
+
+
+def test_resolved_assembly_never_blocks_paired_atac_rna_human_acquisition():
+    """The real profile change this pins: acquisition must proceed on
+    pairing/role evidence alone, with genome build left for post-download
+    corpus-ready determination."""
+    acquisition = evaluate_evidence_completeness(PAIRED_ATAC_RNA_HUMAN, EvidenceGate.ACQUISITION, [])
+    corpus_ready = evaluate_evidence_completeness(PAIRED_ATAC_RNA_HUMAN, EvidenceGate.CORPUS_READY, [])
+
+    assembly_acquisition = next(r for r in acquisition.results if r.predicate == "resolved_assembly")
+    assembly_corpus_ready = next(r for r in corpus_ready.results if r.predicate == "resolved_assembly")
+    assert assembly_acquisition.satisfied
+    assert not assembly_corpus_ready.satisfied

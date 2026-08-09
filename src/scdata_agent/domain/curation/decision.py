@@ -72,7 +72,13 @@ def evaluate_evidence_completeness(
     """For each ``profile.required_evidence`` predicate, check whether any
     matching claim's ``evidence_class`` is in the gate's acceptable set (or
     is ``USER_CORRECTED``). A predicate with no matching claim at all is
-    unsatisfied, not silently skipped.
+    unsatisfied, not silently skipped -- *unless* this gate's acceptable-class
+    list is itself empty, which means the profile declared this predicate
+    ungated at this tier (e.g. an assembly that can only be read from a
+    downloaded file's own header has no acceptable pre-download evidence
+    class at all; gating acquisition on it would block every candidate
+    forever rather than deferring the real check to corpus-ready, where the
+    stronger tier's own list still applies).
     """
     by_predicate: dict[str, list[EvidenceClaim]] = defaultdict(list)
     for claim in claims:
@@ -86,6 +92,17 @@ def evaluate_evidence_completeness(
             else requirement.acceptable_for_corpus_ready
         )
         candidates = by_predicate.get(requirement.predicate, [])
+        if not acceptable:
+            results.append(
+                PredicateEvidenceResult(
+                    predicate=requirement.predicate,
+                    acceptable_classes=(),
+                    best_claim=candidates[0] if candidates else None,
+                    satisfied=True,
+                    notes=requirement.notes,
+                )
+            )
+            continue
         satisfying = [
             item for item in candidates
             if item.evidence_class in acceptable or item.evidence_class == EvidenceClass.USER_CORRECTED

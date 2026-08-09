@@ -51,12 +51,14 @@ from scdata_agent.domain.models import (
     AssetLocation,
     DataAsset,
     DataRole,
+    DatasetCandidate,
     GeoSampleRecord,
     PairingLevel,
     TransferProtocol,
 )
 from scdata_agent.domain.pair_units import ProposedPairUnit
 from scdata_agent.domain.resource_pipeline import AssetInventoryDelta
+from scdata_agent.infrastructure.sources.common import infer_genome_build
 
 
 class InventoryReconcileAgent:
@@ -121,10 +123,15 @@ class InventoryReconcileAgent:
         already_resolved = {
             (asset.candidate_id, asset.file_name) for asset in delta_assets
         }
+        candidate_by_id = {
+            item.candidate_id: item for item in discovery.candidates
+        }
         geo_sample_assets = [
             asset
             for candidate_id, samples in samples_by_candidate.items()
-            for asset in _geo_sample_assets(candidate_id, samples)
+            for asset in _geo_sample_assets(
+                candidate_id, samples, candidate_by_id.get(candidate_id)
+            )
             if (candidate_id, asset.file_name) not in already_resolved
         ]
 
@@ -156,9 +163,6 @@ class InventoryReconcileAgent:
             ).append(asset)
         assets_by_id = {item.asset_id: item for item in assets}
 
-        candidate_by_id = {
-            item.candidate_id: item for item in discovery.candidates
-        }
         bundles: list[SemanticBundle] = []
         proposed_units: list[ProposedPairUnit] = []
         pairing_claims: list[EvidenceClaim] = []
@@ -411,7 +415,9 @@ class InventoryReconcileAgent:
 
 
 def _geo_sample_assets(
-    candidate_id: str, samples: list[GeoSampleRecord]
+    candidate_id: str,
+    samples: list[GeoSampleRecord],
+    candidate: DatasetCandidate | None,
 ) -> list[DataAsset]:
     """Turn each GSM's own supplementary-file locators into ``DataAsset``s.
 
@@ -420,9 +426,23 @@ def _geo_sample_assets(
     ``PairUnitResolver._assets_for_samples`` matches a proposed unit's member
     samples back to asset ids, by ``file_name``, not by any explicit GSM
     field on ``DataAsset``.
+
+    ``genome_build`` is read from this GSM's own text first (most specific),
+    falling back to the series' title/description -- neither is required
+    (``paired_atac_rna_human``'s ``resolved_assembly`` evidence is ungated at
+    the acquisition tier precisely because GEO per-sample listings almost
+    never state a build), but recording it when the text does say so feeds
+    the existing bundle-scoped ``resolved_assembly_claim``/catalog assembly
+    column for free, without waiting on a real file download.
     """
+    candidate_genome_build = (
+        infer_genome_build([candidate.title, candidate.description])
+        if candidate is not None
+        else None
+    )
     assets: list[DataAsset] = []
     for sample in samples:
+        genome_build = infer_genome_build([sample.raw_text]) or candidate_genome_build
         for url in sample.supplementary_files:
             file_name = _geo_sample_file_name(url)
             assets.append(
@@ -435,6 +455,7 @@ def _geo_sample_assets(
                     role=infer_data_role(file_name) or DataRole.OTHER,
                     file_name=file_name,
                     compression="gzip" if file_name.endswith(".gz") else None,
+                    genome_build=genome_build,
                     locations=[
                         AssetLocation(
                             url=_geo_sample_https_url(url),

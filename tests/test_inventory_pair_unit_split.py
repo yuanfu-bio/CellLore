@@ -370,3 +370,36 @@ async def test_verified_per_unit_pairing_upgrades_a_weak_candidate_level_profile
     assert len(payload["pairing_claims"]) == 1
     assert payload["pairing_claims"][0]["evidence_class"] == "repository_reported"
     assert payload["pairing_claims"][0]["value"] == "same_nucleus"
+
+
+@pytest.mark.asyncio
+async def test_genome_build_stated_in_series_text_reaches_gsm_derived_assets(tmp_path):
+    """A genome build named in the series' own description -- not on any
+    file, since GEO per-sample listings almost never state one -- should
+    still land on the GSM-derived DataAssets, so the existing bundle-scoped
+    resolved_assembly_claim/catalog assembly column pick it up without
+    waiting on a real download."""
+    candidate = DatasetCandidate(
+        candidate_id="cand_1", title="10x Multiome, one donor",
+        description="Reads were aligned to the GRCh38 reference genome.",
+        assay_profiles=[AssayProfile(
+            label="10x_multiome_rna_atac",
+            omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
+            pairing_level=PairingLevel.SAME_NUCLEUS,
+            inferred_from=ProfileBasis.NAMED_TECHNOLOGY,
+            rationale="Named co-assay technology was observed.",
+        )],
+    )
+    samples = [
+        _sample("GSM1", "Donor 1 snRNA-seq", ["GSM1_filtered_feature_bc_matrix.h5"]),
+    ]
+    payload = await _run(
+        tmp_path, candidate, assets=[], samples=samples,
+        resolver=PairUnitResolver(client=None), verifier=PairingVerifier(client=None),
+    )
+
+    asset = next(
+        item for item in payload["assets"]
+        if item["file_name"] == "GSM1_filtered_feature_bc_matrix.h5"
+    )
+    assert asset["genome_build"] == "GRCh38"

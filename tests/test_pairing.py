@@ -54,6 +54,8 @@ from scdata_agent.domain.requirements import (
 )
 from scdata_agent.domain.resource_pipeline import (
     BundleAccessStatus,
+    CandidateEvidenceEscalation,
+    EvidenceEscalationReport,
     RemoteBundleInventorySummary,
 )
 
@@ -567,6 +569,66 @@ class TestEvidenceCompletenessGatesAcquisition:
 
         assert report["dimensions"]["evidence_completeness"] == GateStatus.PASS
         assert report["decision"] == BundleStatus.PREFLIGHT_READY.value
+
+    @pytest.mark.asyncio
+    async def test_stale_multiome_pairing_flag_does_not_override_a_real_verified_claim(
+        self, tmp_path
+    ):
+        """Regression for a real GSE228428 run: evidence escalation flags
+        multiome_pairing unresolved from nothing stronger than the
+        candidate's shallow, discovery-time AssayProfile (often study_level,
+        since a series title/abstract rarely states pairing even when a
+        per-sample GSM does). PairUnitResolver/PairingVerifier later settle
+        it for real, per pair unit -- that answer must not be shadowed by
+        the earlier, coarser flag."""
+        context = _evidence_completeness_context(tmp_path, EvidenceClass.REPOSITORY_REPORTED)
+        context.artifacts.append(
+            artifact("run_1", ArtifactKind.EVIDENCE_ESCALATION, AgentName.EVIDENCE_CURATOR,
+                EvidenceEscalationReport(
+                    report_id="esc_1", run_id="run_1",
+                    candidates=[CandidateEvidenceEscalation(
+                        candidate_id="cand_1", unresolved_fields=["multiome_pairing"],
+                        reasons=["The required multi-omics pairing level is unresolved."],
+                    )],
+                ).model_dump(mode="json"),
+            )
+        )
+
+        payload = (await ProgressivePreflightAssessmentAgent().run(context))[0].payload
+        report = payload["reports"][0]
+
+        assert report["decision"] == BundleStatus.PREFLIGHT_READY.value
+        assert report["rationale"]["unresolved_evidence"] == "none"
+        assert payload["audit_tasks"] == []
+
+    @pytest.mark.asyncio
+    async def test_multiome_pairing_flag_still_blocks_when_no_claim_was_ever_reached(
+        self, tmp_path
+    ):
+        """The reconciliation only drops the flag when a real per-unit
+        answer exists -- a pair unit PairingVerifier genuinely never reached
+        a conclusion for must still surface as unresolved, not silently
+        cleared just because escalation ran."""
+        context = _evidence_completeness_context(tmp_path, EvidenceClass.REPOSITORY_REPORTED)
+        inventory_artifact = context.artifacts[0]
+        inventory_artifact.payload["pairing_claims"] = []  # no claim was ever reached
+        context.artifacts.append(
+            artifact("run_1", ArtifactKind.EVIDENCE_ESCALATION, AgentName.EVIDENCE_CURATOR,
+                EvidenceEscalationReport(
+                    report_id="esc_1", run_id="run_1",
+                    candidates=[CandidateEvidenceEscalation(
+                        candidate_id="cand_1", unresolved_fields=["multiome_pairing"],
+                        reasons=["The required multi-omics pairing level is unresolved."],
+                    )],
+                ).model_dump(mode="json"),
+            )
+        )
+
+        payload = (await ProgressivePreflightAssessmentAgent().run(context))[0].payload
+        report = payload["reports"][0]
+
+        assert report["decision"] == BundleStatus.NEEDS_EVIDENCE.value
+        assert "multiome_pairing" in report["rationale"]["unresolved_evidence"]
 
     @pytest.mark.asyncio
     async def test_audit_task_names_the_missing_predicate(self, tmp_path):

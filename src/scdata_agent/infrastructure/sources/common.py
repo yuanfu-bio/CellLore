@@ -156,6 +156,40 @@ def _infer_pairing_level(content: str) -> PairingLevel:
     return PairingLevel.STUDY_LEVEL
 
 
+GENOME_BUILD_ALIASES: dict[str, tuple[str, ...]] = {
+    "GRCh38": ("grch38", "hg38"),
+    "GRCh37": ("grch37", "hg19"),
+    "GRCm39": ("grcm39", "mm39"),
+    "GRCm38": ("grcm38", "mm10"),
+    "T2T-CHM13": ("chm13", "t2t-chm13"),
+}
+
+
+def infer_genome_build(texts: Iterable[str | None]) -> str | None:
+    """The genome build this text states, or None if no known build name
+    appears -- read the same way pairing/layer claims are, from prose with
+    markup/URLs/filenames stripped, never from a bare substring.
+
+    Deliberately returns at most one build: a study's own text naming two
+    different ones (e.g. citing a prior study's build alongside its own) is a
+    real ambiguity worth leaving unresolved, not something to silently
+    resolve by picking one. Whether an assembly claim from this is *required*
+    before acquisition is a profile policy question (see
+    ``domain.curation.decision``), not this function's -- a study that
+    states no build anywhere in its own text is common, and the real
+    determination can wait for the downloaded file's own header.
+    """
+    content = prose_text(texts)
+    matches = {
+        canonical
+        for canonical, aliases in GENOME_BUILD_ALIASES.items()
+        if _has_any(content, aliases)
+    }
+    if len(matches) == 1:
+        return next(iter(matches))
+    return None
+
+
 @lru_cache(maxsize=512)
 def _alias_pattern(alias: str) -> re.Pattern[str]:
     # Bounded so a short alias cannot match inside a longer word: `adt` must not

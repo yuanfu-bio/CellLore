@@ -167,13 +167,28 @@ PAIRED_ATAC_RNA_HUMAN = CurationProfile(
         ),
         RequiredEvidence(
             predicate="resolved_assembly",
-            acceptable_for_acquisition=[
-                EvidenceClass.REPOSITORY_REPORTED, EvidenceClass.ARTICLE_REPORTED,
-            ],
+            # No pre-download evidence class is acceptable here on purpose,
+            # not an oversight: GEO per-sample supplementary listings almost
+            # never state a build, and gating acquisition on repository/
+            # article text alone would leave nearly every real candidate
+            # stuck before download regardless of how complete its files
+            # are. A REPOSITORY_REPORTED/ARTICLE_REPORTED claim is still
+            # recorded and shown when the text does state one (see
+            # infrastructure.sources.common.infer_genome_build); it just
+            # cannot be the sole thing acquisition waits on. An empty list
+            # here means "ungated at this tier", not "unsatisfiable" --
+            # see evaluate_evidence_completeness.
+            acceptable_for_acquisition=[],
             acceptable_for_corpus_ready=[
                 EvidenceClass.REPOSITORY_REPORTED, EvidenceClass.ARTICLE_REPORTED,
+                EvidenceClass.FILE_OBSERVED,
             ],
-            notes="Genome assembly must be traceable to a repository- or article-reported value.",
+            notes=(
+                "Genome assembly need not be known before acquisition; the "
+                "real determination is the downloaded file's own header, "
+                "read by the blocking genome_build_consistency validator "
+                "before corpus-ready."
+            ),
         ),
     ],
     validators=[
