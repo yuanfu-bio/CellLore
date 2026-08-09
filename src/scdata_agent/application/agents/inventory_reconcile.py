@@ -13,6 +13,9 @@ verifier's output may become a ``has_pair_relationship`` claim.
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+from urllib.parse import unquote, urlparse
+
 from scdata_agent.application.agents.pair_unit_resolver import (
     PairUnitResolver,
     configured_pair_unit_resolver,
@@ -35,13 +38,23 @@ from scdata_agent.application.resource_pipeline import (
     pointer_batches,
     summarize_bundle,
 )
+from scdata_agent.domain.assets import infer_data_role
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import (
     BundleStatus,
     EvidenceClaim,
     SemanticBundle,
 )
-from scdata_agent.domain.models import DataAsset, GeoSampleRecord
+from scdata_agent.domain.models import (
+    AccessLevel,
+    AssetAvailability,
+    AssetLocation,
+    DataAsset,
+    DataRole,
+    GeoSampleRecord,
+    PairingLevel,
+    TransferProtocol,
+)
 from scdata_agent.domain.pair_units import ProposedPairUnit
 from scdata_agent.domain.resource_pipeline import AssetInventoryDelta
 
@@ -83,9 +96,39 @@ class InventoryReconcileAgent:
             AssetInventoryDelta.model_validate(item.payload)
             for item in delta_artifacts
         ]
-        assets = self._merge_assets(
-            [asset for delta in deltas for asset in delta.assets]
+        geo_samples_artifact = latest_artifact(
+            context.artifacts, ArtifactKind.GEO_SAMPLE_METADATA.value
         )
+        samples_by_candidate: dict[str, list[GeoSampleRecord]] = {
+            candidate_id: [GeoSampleRecord.model_validate(item) for item in raw_records]
+            for candidate_id, raw_records in (
+                geo_samples_artifact.payload.get("samples_by_candidate", {})
+                if geo_samples_artifact
+                else {}
+            ).items()
+        }
+        # GeoSampleMetadataAgent fetches each GSM's own supplementary-file
+        # locators for PairUnitResolver to read as grouping-hypothesis text,
+        # but a resolver can only group asset ids it is given. Without
+        # turning them into real DataAssets here, only series-level
+        # supplementary files (typically unrelated sidecars or an unopened
+        # RAW.tar archive) ever reached the inventory, and a study's actual
+        # per-sample RNA/ATAC files never became part of any bundle. Skip any
+        # (candidate, file_name) another resolver already produced -- e.g. a
+        # direct file_url pointer -- so the same physical file never becomes
+        # two DataAssets.
+        delta_assets = [asset for delta in deltas for asset in delta.assets]
+        already_resolved = {
+            (asset.candidate_id, asset.file_name) for asset in delta_assets
+        }
+        geo_sample_assets = [
+            asset
+            for candidate_id, samples in samples_by_candidate.items()
+            for asset in _geo_sample_assets(candidate_id, samples)
+            if (candidate_id, asset.file_name) not in already_resolved
+        ]
+
+        assets = self._merge_assets([*delta_assets, *geo_sample_assets])
         observations = list(
             {
                 item.observation_id: item
@@ -112,18 +155,6 @@ class InventoryReconcileAgent:
                 asset.candidate_id, []
             ).append(asset)
         assets_by_id = {item.asset_id: item for item in assets}
-
-        geo_samples_artifact = latest_artifact(
-            context.artifacts, ArtifactKind.GEO_SAMPLE_METADATA.value
-        )
-        samples_by_candidate: dict[str, list[GeoSampleRecord]] = {
-            candidate_id: [GeoSampleRecord.model_validate(item) for item in raw_records]
-            for candidate_id, raw_records in (
-                geo_samples_artifact.payload.get("samples_by_candidate", {})
-                if geo_samples_artifact
-                else {}
-            ).items()
-        }
 
         candidate_by_id = {
             item.candidate_id: item for item in discovery.candidates
@@ -156,7 +187,17 @@ class InventoryReconcileAgent:
                 claim = await verifier.verify(unit, candidate, samples)
                 if claim is not None:
                     pairing_claims.append(claim)
-                shape = bundle_shape_for(candidate, unit_assets, context.requirement)
+                verified_relationship = (
+                    PairingLevel(claim.value)
+                    if claim is not None and isinstance(claim.value, str)
+                    else None
+                )
+                shape = bundle_shape_for(
+                    candidate,
+                    unit_assets,
+                    context.requirement,
+                    verified_relationship=verified_relationship,
+                )
                 bundles.append(
                     SemanticBundle(
                         bundle_id=stable_id(
@@ -367,3 +408,57 @@ class InventoryReconcileAgent:
             merged.values(),
             key=lambda item: (item.candidate_id, item.asset_id),
         )
+
+
+def _geo_sample_assets(
+    candidate_id: str, samples: list[GeoSampleRecord]
+) -> list[DataAsset]:
+    """Turn each GSM's own supplementary-file locators into ``DataAsset``s.
+
+    The basename computed here must agree with
+    ``pair_unit_resolver._file_basename``: that is how
+    ``PairUnitResolver._assets_for_samples`` matches a proposed unit's member
+    samples back to asset ids, by ``file_name``, not by any explicit GSM
+    field on ``DataAsset``.
+    """
+    assets: list[DataAsset] = []
+    for sample in samples:
+        for url in sample.supplementary_files:
+            file_name = _geo_sample_file_name(url)
+            assets.append(
+                DataAsset(
+                    asset_id=stable_id(
+                        "asset",
+                        f"{candidate_id}:geo_sample:{sample.gsm_accession}:{url}",
+                    ),
+                    candidate_id=candidate_id,
+                    role=infer_data_role(file_name) or DataRole.OTHER,
+                    file_name=file_name,
+                    compression="gzip" if file_name.endswith(".gz") else None,
+                    locations=[
+                        AssetLocation(
+                            url=_geo_sample_https_url(url),
+                            protocol=(
+                                TransferProtocol.FTP
+                                if url.startswith("ftp://")
+                                else TransferProtocol.HTTPS
+                            ),
+                            access_level=AccessLevel.PUBLIC_DECLARED,
+                            availability=AssetAvailability.DECLARED,
+                            evidence_ids=sample.evidence_ids,
+                        )
+                    ],
+                    evidence_ids=sample.evidence_ids,
+                )
+            )
+    return assets
+
+
+def _geo_sample_file_name(url: str) -> str:
+    return PurePosixPath(unquote(urlparse(url).path)).name or url
+
+
+def _geo_sample_https_url(url: str) -> str:
+    if url.startswith("ftp://"):
+        return f"https://{url.removeprefix('ftp://')}"
+    return url

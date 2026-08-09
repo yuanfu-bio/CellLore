@@ -219,3 +219,154 @@ async def test_no_geo_sample_metadata_falls_back_to_one_bundle_for_the_candidate
 
     assert len(payload["bundles"]) == 1
     assert set(payload["bundles"][0]["asset_ids"]) == {"a1", "a2"}
+
+
+@pytest.mark.asyncio
+async def test_gsm_supplementary_files_become_real_assets_reaching_a_bundle(tmp_path):
+    """Regression for the real-run gap found against GSE228428: a series'
+    only asset-inventory-delta assets were unrelated series-level files (a
+    genotype VCF and an unopened RAW.tar archive), while the real per-sample
+    RNA/ATAC files were only ever known through GeoSampleMetadataAgent's
+    ``supplementary_files`` -- and never became DataAssets, so the bundle
+    that formed had no RNA/ATAC roles at all despite the data being real and
+    file-resolved. Each GSM's own supplementary-file locators must become
+    DataAssets with correctly inferred roles so the bundle they belong to can
+    actually satisfy a schema."""
+    candidate = DatasetCandidate(
+        candidate_id="cand_1", title="10x Multiome, one donor",
+        assay_profiles=[AssayProfile(
+            label="10x_multiome_rna_atac",
+            omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
+            pairing_level=PairingLevel.SAME_NUCLEUS,
+            inferred_from=ProfileBasis.NAMED_TECHNOLOGY,
+            rationale="Named co-assay technology was observed.",
+        )],
+    )
+    # Series-level supplementary files unrelated to any GSM's own data --
+    # this is what GEOSupplementaryAssetResolver alone produced for the real
+    # study: a demultiplexing VCF and an unopened archive.
+    assets = [
+        _asset("a_vcf", "cand_1", DataRole.OTHER, "GSE1_array_vcf_imputed.recode.vcf.gz"),
+        _asset("a_raw", "cand_1", DataRole.ARCHIVE, "GSE1_RAW.tar"),
+    ]
+    samples = [
+        _sample(
+            "GSM1", "Donor 1 snRNA-seq",
+            ["ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM1nnn/GSM1/suppl/GSM1_filtered_feature_bc_matrix.h5"],
+        ),
+        _sample(
+            "GSM2", "Donor 1 snATAC-seq",
+            [
+                "ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM2nnn/GSM2/suppl/GSM2_atac_fragments.tsv.gz",
+                "ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM2nnn/GSM2/suppl/GSM2_atac_fragments.tsv.gz.tbi",
+                "ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM2nnn/GSM2/suppl/GSM2_barcodes.tsv.gz",
+            ],
+        ),
+    ]
+    draft = PairUnitResolutionDraft(units=[
+        {"proposed_unit_id": "donor1", "member_samples": ["GSM1", "GSM2"], "grouping_rationale": "Both name Donor 1."},
+    ])
+    resolver = PairUnitResolver(client=_FakeClient(draft.model_dump_json()))
+    verifier = PairingVerifier(client=None)  # tier 1 (named technology) fires deterministically
+
+    payload = await _run(tmp_path, candidate, assets, samples, resolver, verifier)
+
+    gsm_assets = {
+        item["file_name"]: item
+        for item in payload["assets"]
+        if item["file_name"] not in {"GSE1_array_vcf_imputed.recode.vcf.gz", "GSE1_RAW.tar"}
+    }
+    assert set(gsm_assets) == {
+        "GSM1_filtered_feature_bc_matrix.h5",
+        "GSM2_atac_fragments.tsv.gz",
+        "GSM2_atac_fragments.tsv.gz.tbi",
+        "GSM2_barcodes.tsv.gz",
+    }
+    assert gsm_assets["GSM1_filtered_feature_bc_matrix.h5"]["role"] == DataRole.RNA_MATRIX
+    assert gsm_assets["GSM2_atac_fragments.tsv.gz"]["role"] == DataRole.FRAGMENTS
+    assert gsm_assets["GSM1_filtered_feature_bc_matrix.h5"]["locations"][0]["url"].startswith("https://")
+    assert gsm_assets["GSM1_filtered_feature_bc_matrix.h5"]["evidence_ids"] == ["ev_GSM1"]
+
+    assert len(payload["bundles"]) == 1
+    bundle = payload["bundles"][0]
+    assert set(bundle["asset_ids"]) >= {
+        gsm_assets["GSM1_filtered_feature_bc_matrix.h5"]["asset_id"],
+        gsm_assets["GSM2_atac_fragments.tsv.gz"]["asset_id"],
+    }
+    assert "multiome_same_cell" in bundle["satisfied_schema_ids"]
+
+
+@pytest.mark.asyncio
+async def test_gsm_supplementary_file_already_resolved_by_another_route_is_not_duplicated(tmp_path):
+    """A file a direct pointer or series-level resolver already turned into a
+    DataAsset must not also get a second, separately-id'd GSM-derived
+    DataAsset for the same file_name -- that would double-count it in role
+    completeness and evidence without adding real information."""
+    candidate = DatasetCandidate(candidate_id="cand_1", title="Already-resolved file")
+    assets = [
+        _asset("a1", "cand_1", DataRole.RNA_MATRIX, "GSM1_filtered_feature_bc_matrix.h5"),
+    ]
+    samples = [
+        _sample(
+            "GSM1", "Donor 1 snRNA-seq",
+            ["ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM1nnn/GSM1/suppl/GSM1_filtered_feature_bc_matrix.h5"],
+        ),
+    ]
+    payload = await _run(
+        tmp_path, candidate, assets, samples,
+        resolver=PairUnitResolver(client=None), verifier=PairingVerifier(client=None),
+    )
+    matching = [
+        item for item in payload["assets"]
+        if item["file_name"] == "GSM1_filtered_feature_bc_matrix.h5"
+    ]
+    assert len(matching) == 1
+    assert matching[0]["asset_id"] == "a1"
+
+
+@pytest.mark.asyncio
+async def test_verified_per_unit_pairing_upgrades_a_weak_candidate_level_profile(tmp_path):
+    """Regression for the real GSE228428 shape: the series' own title/abstract
+    only says RNA and ATAC were co-reported (``study_level``,
+    ``layer_inference``) -- ``PairingVerifier`` proves same-nucleus from an
+    explicit statement in the *unit's own* GSM sample text, a claim
+    ``bundle_shape_for`` never used to see because it only read the
+    candidate-level AssayProfile. Without threading the verified claim
+    through, ``multiome_same_cell`` stays inapplicable no matter how complete
+    the files are -- exactly what left GSE228428 recommending 0 bundles."""
+    candidate = DatasetCandidate(
+        candidate_id="cand_1", title="Multiomic profiling, no pairing phrase in the title",
+        assay_profiles=[AssayProfile(
+            label="scrna_and_scatac_co_reported",
+            omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
+            pairing_level=PairingLevel.STUDY_LEVEL,
+            inferred_from=ProfileBasis.LAYER_INFERENCE,
+            rationale="RNA and ATAC are co-reported, but no pairing relationship is stated.",
+        )],
+    )
+    assets = [
+        _asset("a1", "cand_1", DataRole.FRAGMENTS, "GSM1_HF1_atac_fragments.tsv.gz"),
+        _asset("a2", "cand_1", DataRole.RNA_MATRIX, "GSM2_HF1_filtered_feature_bc_matrix.h5"),
+        _asset("a3", "cand_1", DataRole.CELL_METADATA, "GSM1_HF1_barcodes.tsv.gz"),
+    ]
+    samples = [
+        _sample("GSM1", "Sample HF1 ATAC", ["GSM1_HF1_atac_fragments.tsv.gz", "GSM1_HF1_barcodes.tsv.gz"])
+        .model_copy(update={"raw_text": "!Sample_title = HF1 [Lane 1 - ATAC]\nsame nucleus multiome"}),
+        _sample("GSM2", "Sample HF1 RNA", ["GSM2_HF1_filtered_feature_bc_matrix.h5"])
+        .model_copy(update={"raw_text": "!Sample_title = HF1 [Lane 1 - RNA]\nsame nucleus multiome"}),
+    ]
+    draft = PairUnitResolutionDraft(units=[
+        {"proposed_unit_id": "hf1", "member_samples": ["GSM1", "GSM2"], "grouping_rationale": "Both name HF1."},
+    ])
+    resolver = PairUnitResolver(client=_FakeClient(draft.model_dump_json()))
+    verifier = PairingVerifier(client=None)  # tier 2 (explicit statement) is deterministic
+
+    payload = await _run(tmp_path, candidate, assets, samples, resolver, verifier)
+
+    assert len(payload["bundles"]) == 1
+    bundle = payload["bundles"][0]
+    assert bundle["missing_roles"] == []
+    assert "multiome_same_cell" in bundle["satisfied_schema_ids"]
+    assert len(payload["pairing_claims"]) == 1
+    assert payload["pairing_claims"][0]["evidence_class"] == "repository_reported"
+    assert payload["pairing_claims"][0]["value"] == "same_nucleus"

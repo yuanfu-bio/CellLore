@@ -23,8 +23,10 @@ from scdata_agent.domain.models import (
     DatasetCandidate,
     EvidenceClass,
     GateStatus,
+    PairingLevel,
     ResearchRequirement,
     best_pairing_level,
+    pairing_rank,
 )
 from scdata_agent.domain.requirements import applicable_bundle_schemas_by_layers
 from scdata_agent.domain.resource_pipeline import (
@@ -115,6 +117,8 @@ def bundle_shape_for(
     candidate: DatasetCandidate,
     candidate_assets: list[DataAsset],
     requirement: ResearchRequirement | None,
+    *,
+    verified_relationship: PairingLevel | None = None,
 ) -> BundleShape:
     """Judge one candidate's assets against every bundle shape it could take.
 
@@ -123,9 +127,27 @@ def bundle_shape_for(
     claimed to have; ``applicable_bundle_schemas_by_layers`` restricts the
     comparison to shapes the candidate could plausibly satisfy, using the
     layers it actually declares plus its observed pairing relationship.
+
+    ``candidate.assay_profiles`` is a shallow, discovery-time reading of the
+    *series'* own title/abstract -- for a real study the actual pairing
+    statement ("10x Multiome") routinely lives only in per-GSM sample text,
+    which ``PairingVerifier`` reads and this candidate-level profile never
+    sees. ``verified_relationship`` is that pair unit's own verified claim
+    (``EvidenceClaim.value`` from ``PairingVerifier.verify``, any evidence
+    class -- schema *applicability* is a different question from whether that
+    evidence is strong enough to admit the bundle, which the evidence-
+    completeness gate at preflight checks separately against
+    ``claims_by_pair_unit``). Without folding it in here, a same-cell study
+    whose series-level text never says so could never even be judged against
+    ``multiome_same_cell``, no matter how complete its files are.
     """
     observed_roles = {item.role for item in candidate_assets}
     observed_relationship = best_pairing_level(candidate.assay_profiles)
+    if verified_relationship is not None and (
+        observed_relationship is None
+        or pairing_rank(verified_relationship) > pairing_rank(observed_relationship)
+    ):
+        observed_relationship = verified_relationship
     schemas = applicable_bundle_schemas_by_layers(
         candidate_layers(candidate, requirement), observed_relationship
     )
