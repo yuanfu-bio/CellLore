@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from scdata_agent.application.agents.shared import (
-    AgentContext,
-    candidate_modalities,
-    need_discovery,
-)
+from scdata_agent.application.agents.shared import AgentContext, need_discovery
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.resource_pipeline import pointer_batches
 from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.domain.models import Modality, PairingLevel
+from scdata_agent.domain.models import PairingLevel
 from scdata_agent.domain.resource_pipeline import (
     AssetInventoryDelta,
     CandidateEvidenceEscalation,
@@ -18,14 +14,6 @@ from scdata_agent.domain.resource_pipeline import (
     PointerBatchStage,
     ScoutPhase,
 )
-
-_PAIRED_MODALITIES = {
-    Modality.MULTIOME_RNA_ATAC,
-    Modality.MATCHED_SCRNA_SCATAC,
-    Modality.MULTIOME_ATAC_PROTEIN,
-    Modality.MULTIOME_RNA_ATAC_PROTEIN,
-    Modality.ATAC_OTHER_MULTIOMICS,
-}
 
 
 class EvidenceEscalationAgent:
@@ -72,12 +60,14 @@ class EvidenceEscalationAgent:
             unresolved: list[str] = []
             reasons: list[str] = []
             # Pairing evidence is only owed by candidates that actually claim a
-            # paired assay. Deriving this from the question's union of
-            # modalities asked standalone scATAC studies to prove a multiome
-            # relationship they never asserted, and sent them for full text.
-            paired_required = bool(
-                candidate_modalities(candidate, context.requirement)
-                & _PAIRED_MODALITIES
+            # paired assay -- i.e. a single AssayProfile spanning two or more
+            # omics layers at once, not two separate single-layer profiles
+            # merely co-reported in the same study. Deriving this from the
+            # question's union of modalities asked standalone scATAC studies
+            # to prove a multiome relationship they never asserted, and sent
+            # them for full text.
+            paired_required = any(
+                len(profile.omics_layers) >= 2 for profile in candidate.assay_profiles
             )
             if not direct_by_candidate[candidate.candidate_id]:
                 unresolved.append("repository_pointer")

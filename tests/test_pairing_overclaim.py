@@ -14,7 +14,7 @@ here or not at all.
 from scdata_agent.domain.models import (
     AccessLevel,
     Identifier,
-    Modality,
+    OmicsLayer,
     PairingLevel,
     SourceRecord,
 )
@@ -48,8 +48,8 @@ def test_submitter_boilerplate_does_not_create_a_transcriptome_layer():
     profiles = infer_assay_profiles(("NCBI record 45847608", ENCODE_SRA_EXPXML))
 
     assert [profile.label for profile in profiles] == ["standalone_single_cell_atac"]
-    assert profiles[0].modalities == [Modality.SNATAC]
-    assert Modality.MULTIOME_RNA_ATAC not in profiles[0].modalities
+    assert profiles[0].omics_layers == [OmicsLayer.CHROMATIN_ACCESSIBILITY]
+    assert OmicsLayer.TRANSCRIPTOME not in profiles[0].omics_layers
 
 
 def test_protocol_filename_does_not_promote_pairing_to_same_nucleus():
@@ -85,7 +85,9 @@ def test_multiome_stated_in_prose_is_still_believed():
         "Chromatin sequencing (snATAC-seq) as a multiome assay.",
     ))
 
-    assert profiles[0].modalities == [Modality.MULTIOME_RNA_ATAC]
+    assert set(profiles[0].omics_layers) == {
+        OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME,
+    }
     assert profiles[0].pairing_level == PairingLevel.SAME_NUCLEUS
 
 
@@ -104,7 +106,9 @@ def test_multiomics_as_a_study_design_is_not_a_same_nucleus_claim():
     ))
 
     assert profiles[0].pairing_level == PairingLevel.STUDY_LEVEL
-    assert set(profiles[0].modalities) == {Modality.SCATAC, Modality.SCRNA}
+    assert set(profiles[0].omics_layers) == {
+        OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME,
+    }
 
 
 def _encode_record(record_id: str, series: str, title: str) -> SourceRecord:

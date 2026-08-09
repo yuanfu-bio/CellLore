@@ -60,7 +60,7 @@ class RemoteBundleInventorySummary(StrictModel):
     media_type_counts: dict[str, int] = Field(default_factory=dict)
     compression_counts: dict[str, int] = Field(default_factory=dict)
     license_ids: list[str] = Field(default_factory=list)
-    reported_modalities: list[str] = Field(default_factory=list)
+    reported_layers: list[str] = Field(default_factory=list)
     genome_builds: list[str] = Field(default_factory=list)
     schema_version: str = RESOURCE_PIPELINE_SCHEMA_VERSION
 

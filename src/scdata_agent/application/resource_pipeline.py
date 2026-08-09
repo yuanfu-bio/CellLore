@@ -6,19 +6,27 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from scdata_agent.application.agents.shared import AgentContext, candidate_modalities
+from scdata_agent.application.agents.shared import AgentContext, candidate_layers
 from scdata_agent.application.collaboration import AgentArtifact, ArtifactKind
 from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.domain.lifecycle import PointerStatus, ResourcePointer, SemanticBundle
+from scdata_agent.domain.lifecycle import (
+    EvidenceClaim,
+    PointerStatus,
+    ResourcePointer,
+    SemanticBundle,
+)
 from scdata_agent.domain.models import (
     AccessLevel,
     AssetAvailability,
     DataAsset,
     DataRole,
     DatasetCandidate,
+    EvidenceClass,
+    GateStatus,
     ResearchRequirement,
+    best_pairing_level,
 )
-from scdata_agent.domain.requirements import applicable_bundle_schemas
+from scdata_agent.domain.requirements import applicable_bundle_schemas_by_layers
 from scdata_agent.domain.resource_pipeline import (
     BundleAccessStatus,
     PointerBatchStage,
@@ -110,13 +118,17 @@ def bundle_shape_for(
 ) -> BundleShape:
     """Judge one candidate's assets against every bundle shape it could take.
 
-    Judging against the union of every modality mentioned in the question
-    would fail a standalone scATAC study for lacking an RNA matrix it was
-    never claimed to have; ``applicable_bundle_schemas`` restricts the
-    comparison to shapes the candidate could plausibly satisfy.
+    Judging against the union of every layer mentioned in the question would
+    fail a standalone scATAC study for lacking an RNA matrix it was never
+    claimed to have; ``applicable_bundle_schemas_by_layers`` restricts the
+    comparison to shapes the candidate could plausibly satisfy, using the
+    layers it actually declares plus its observed pairing relationship.
     """
     observed_roles = {item.role for item in candidate_assets}
-    schemas = applicable_bundle_schemas(candidate_modalities(candidate, requirement))
+    observed_relationship = best_pairing_level(candidate.assay_profiles)
+    schemas = applicable_bundle_schemas_by_layers(
+        candidate_layers(candidate, requirement), observed_relationship
+    )
     satisfied = [
         schema.schema_id for schema in schemas if schema.is_satisfied_by(observed_roles)
     ]
@@ -148,6 +160,132 @@ def bundle_shape_for(
         applicable_schema_ids=[item.schema_id for item in schemas],
         satisfied_schema_ids=satisfied,
         observed_roles=sorted(observed_roles, key=str),
+    )
+
+
+def omics_layer_claims(
+    candidate: DatasetCandidate, requirement: ResearchRequirement | None = None
+) -> list[EvidenceClaim]:
+    """One ``has_omics_layer:<layer>`` claim per distinct layer this
+    candidate's AssayProfiles declare.
+
+    REPOSITORY_REPORTED regardless of whether the underlying text came from
+    the repository record or the article: ``infer_assay_profiles`` mixes both
+    without tracking which, and REPOSITORY_REPORTED/ARTICLE_REPORTED share
+    the same evidence-class rank, so collapsing to one is not a
+    floor-weakening simplification.
+
+    Narrowed by ``requirement.required_omics_layers`` the same way
+    ``candidate_layers`` narrows (only narrows, never adds a layer the
+    candidate never claimed) -- callers on the discovery path pass the same
+    requirement `bundle_shape_for` already uses.
+
+    Discovery-path only. Manifest-ingested candidates declare
+    ``assay_profiles=[]`` by design (see manifest_ingestion.py), so this
+    always returns an empty list for them -- callers on that path must not
+    gate admission on this predicate at all, not treat the empty list as a
+    failure to fix.
+    """
+    layers = candidate_layers(candidate, requirement)
+    claims: list[EvidenceClaim] = []
+    for layer in sorted(layers, key=str):
+        profiles = [item for item in candidate.assay_profiles if layer in item.omics_layers]
+        if not profiles:
+            continue
+        claims.append(
+            EvidenceClaim(
+                claim_id=stable_id(
+                    "claim", f"{candidate.candidate_id}:has_omics_layer:{layer.value}"
+                ),
+                subject_id=candidate.candidate_id,
+                predicate=f"has_omics_layer:{layer.value}",
+                object_id=layer.value,
+                value=True,
+                evidence_ids=list(
+                    dict.fromkeys(eid for item in profiles for eid in item.evidence_ids)
+                ),
+                evidence_class=EvidenceClass.REPOSITORY_REPORTED,
+                confidence=max(item.confidence for item in profiles),
+                rationale=(
+                    f"The {layer.value} layer was observed in repository/article "
+                    "assay-profile inference."
+                ),
+            )
+        )
+    return claims
+
+
+def resolved_assembly_claim(
+    bundle: SemanticBundle, summary: RemoteBundleInventorySummary | None
+) -> EvidenceClaim | None:
+    """One ``resolved_assembly`` claim from a bundle's own assets' declared
+    genome build, or None when nothing was declared.
+
+    Bundle-scoped, not candidate-scoped: genome_build lives on DataAsset, and
+    different pair-units of the same candidate can legitimately carry
+    different builds (or a real inconsistency the genome_build_consistency
+    validator exists to catch) -- collapsing to one candidate-level claim
+    would hide that.
+    """
+    if summary is None or not summary.genome_builds:
+        return None
+    return EvidenceClaim(
+        claim_id=stable_id("claim", f"{bundle.bundle_id}:resolved_assembly"),
+        subject_id=bundle.bundle_id,
+        predicate="resolved_assembly",
+        # The full list, not just the first entry -- a bundle whose assets
+        # disagree on assembly is a real ambiguity worth surfacing, not
+        # something to silently resolve by picking one.
+        value=sorted(summary.genome_builds),
+        evidence_ids=list(bundle.evidence_ids),
+        evidence_class=EvidenceClass.REPOSITORY_REPORTED,
+        rationale=(
+            "Genome build declared on the bundle's assets; not yet "
+            "cross-checked against file headers."
+        ),
+    )
+
+
+def barcode_overlap_pairing_claim(
+    pair_unit_id: str,
+    declared_claim: EvidenceClaim | None,
+    qc_metrics: dict[str, object],
+    qc_checks: dict[str, GateStatus],
+) -> EvidenceClaim | None:
+    """A ``has_pair_relationship`` claim recomputed from the materialized
+    RNA/ATAC barcode overlap (``infrastructure.qc_metrics.compute_role_metrics``),
+    for the CORPUS_READY gate's stronger acceptable-evidence-class bar (Phase
+    5B: see ``paired_atac_rna_human``'s ``acceptable_for_corpus_ready`` set,
+    which requires FILE_OBSERVED/RECOMPUTED rather than declared evidence).
+
+    Barcode overlap alone cannot distinguish same_cell from same_nucleus --
+    it only confirms the RNA and ATAC files observed for this pair unit share
+    a barcode space. It is therefore confirmatory evidence for whichever
+    PairingLevel was already declared for this pair unit, not an independent
+    judgment of level: with no prior ``declared_claim`` to carry the value
+    forward from, there is nothing to confirm and no claim is produced.
+    """
+    if declared_claim is None:
+        return None
+    if qc_checks.get("barcode_linkage") != GateStatus.PASS:
+        return None
+    return EvidenceClaim(
+        claim_id=stable_id(
+            "claim", f"{pair_unit_id}:has_pair_relationship:barcode_overlap"
+        ),
+        subject_id=pair_unit_id,
+        predicate="has_pair_relationship",
+        value=declared_claim.value,
+        evidence_ids=list(declared_claim.evidence_ids),
+        evidence_class=EvidenceClass.RECOMPUTED,
+        confidence=float(qc_metrics.get("frac_rna_barcodes_matched", 1.0)),
+        rationale=(
+            "RNA/ATAC barcode sets materially overlap "
+            f"({qc_metrics.get('n_barcode_intersection')} of "
+            f"{qc_metrics.get('n_rna_barcodes')} RNA barcodes matched); "
+            "confirms the declared pairing relationship rather than "
+            "establishing its level independently."
+        ),
     )
 
 
@@ -230,7 +368,9 @@ def summarize_bundle(
         media_type_counts=dict(Counter(asset.media_type or "unknown" for asset in assets)),
         compression_counts=dict(Counter(asset.compression or "none" for asset in assets)),
         license_ids=sorted({asset.license_id for asset in assets if asset.license_id}),
-        reported_modalities=sorted({modality.value for modality in candidate.modalities}),
+        reported_layers=sorted(
+            {layer.value for profile in candidate.assay_profiles for layer in profile.omics_layers}
+        ),
         genome_builds=sorted({asset.genome_build for asset in assets if asset.genome_build}),
     )
 

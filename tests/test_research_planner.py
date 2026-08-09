@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scdata_agent.domain.models import Modality, PairingLevel
+from scdata_agent.domain.models import OmicsLayer, PairingLevel
 from scdata_agent.domain.planning import ExecutionStatus, PlanOrigin, PlanReadiness
 from scdata_agent.infrastructure.llm.research_planner import MultiStageResearchPlanner
 
@@ -154,8 +154,8 @@ async def test_planner_derives_cross_modal_strategy_without_user_data_specificat
     assert plan.data_needs[1].execution_status == ExecutionStatus.UNSUPPORTED
     assert any(gap.startswith("data_need:转录或空间验证队列") for gap in plan.capability_gaps)
     assert plan.constraints[0].origin == PlanOrigin.INFERRED
-    assert Modality.SCATAC in plan.executable_contracts[0].modalities
-    assert Modality.MULTIOME_RNA_ATAC in plan.executable_contracts[0].modalities
+    assert OmicsLayer.CHROMATIN_ACCESSIBILITY in plan.executable_contracts[0].required_omics_layers
+    assert OmicsLayer.TRANSCRIPTOME in plan.executable_contracts[0].required_omics_layers
 
 
 def _trimodal_need():
@@ -177,7 +177,7 @@ def _trimodal_need():
 async def test_deep_mode_carries_trimodal_and_human_through_to_the_contract():
     """End-to-end regression for the live-run defect: a question asking for
     TEA-seq/DOGMA-seq trimodal human data must produce an executable contract
-    whose acceptable_modalities actually contains the trimodal modality, via
+    whose required_omics_layers actually contains the protein layer, via
     the real deep-mode graph rather than a hand-called compiler function."""
     question = "配对的单细胞多组学数据（human）：TEA-seq/DOGMA-seq三模态数据，用于自监督基础模型预训练"
     strategy = _strategy()
@@ -193,7 +193,9 @@ async def test_deep_mode_carries_trimodal_and_human_through_to_the_contract():
     ).plan(question)
 
     contract = plan.executable_contracts[0]
-    assert Modality.MULTIOME_RNA_ATAC_PROTEIN in contract.acceptable_modalities
+    assert OmicsLayer.PROTEIN in contract.required_omics_layers
+    assert OmicsLayer.CHROMATIN_ACCESSIBILITY in contract.required_omics_layers
+    assert OmicsLayer.TRANSCRIPTOME in contract.required_omics_layers
     assert contract.organisms == ["Homo sapiens"]
     assert contract.minimum_pairing_level == PairingLevel.SAME_CELL
 

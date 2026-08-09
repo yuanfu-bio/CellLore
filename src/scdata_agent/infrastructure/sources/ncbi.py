@@ -122,9 +122,6 @@ class NCBIEntrezAdapter:
         snapshot_hash = f"sha256:{hashlib.sha256(raw_json.encode()).hexdigest()}"
         organisms = _as_list(item.get("taxon") or item.get("organism"))
         assay_profiles = infer_assay_profiles((title, str(description)))
-        modalities = list(dict.fromkeys(
-            modality for profile in assay_profiles for modality in profile.modalities
-        ))
         evidence = [
             Evidence(
                 evidence_id=stable_id("ev", f"{self.name}:{uid}:summary"),
@@ -146,7 +143,6 @@ class NCBIEntrezAdapter:
             source_url=source_url,
             identifiers=identifiers,
             organisms=organisms,
-            modalities=modalities,
             assay_profiles=assay_profiles,
             access_level=AccessLevel.PUBLIC_DECLARED,
             raw_metadata=item,

@@ -19,6 +19,9 @@ from scdata_agent.application.agents.discovery import ResourceDiscoveryAgent
 from scdata_agent.application.agents.evidence_escalation import (
     EvidenceEscalationAgent,
 )
+from scdata_agent.application.agents.geo_sample_metadata import (
+    GeoSampleMetadataAgent,
+)
 from scdata_agent.application.agents.inventory_reconcile import (
     InventoryReconcileAgent,
 )
@@ -204,6 +207,7 @@ class MultiAgentSupervisor:
             ScoutPhase.ENRICHED
         )
         self.evidence_escalation = EvidenceEscalationAgent()
+        self.geo_sample_metadata = GeoSampleMetadataAgent()
         self.inventory_reconcile = InventoryReconcileAgent()
         self.early_lineage = ProgressiveLineageLeakageAgent("early")
         self.late_lineage = ProgressiveLineageLeakageAgent("late")
@@ -318,6 +322,10 @@ class MultiAgentSupervisor:
             self._specialist(AgentName.ASSET_SCOUT, self.asset_scout_enriched, "asset_scout_enriched"),
         )
         graph.add_node(
+            "geo_sample_metadata",
+            self._specialist(AgentName.GEO_SAMPLE_METADATA, self.geo_sample_metadata, "geo_sample_metadata"),
+        )
+        graph.add_node(
             "inventory_reconcile",
             self._specialist(AgentName.ASSET_SCOUT, self.inventory_reconcile, "inventory_reconcile"),
         )
@@ -380,7 +388,8 @@ class MultiAgentSupervisor:
             },
         )
         graph.add_edge("evidence_fulltext", "asset_scout_enriched")
-        graph.add_edge("asset_scout_enriched", "inventory_reconcile")
+        graph.add_edge("asset_scout_enriched", "geo_sample_metadata")
+        graph.add_edge("geo_sample_metadata", "inventory_reconcile")
         graph.add_edge("inventory_reconcile", "preflight_assessment")
         graph.add_edge("inventory_reconcile", "early_lineage")
         graph.add_edge(

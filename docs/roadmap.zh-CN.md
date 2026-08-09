@@ -147,7 +147,7 @@ bundle 判入 quarantine，理由为 `anndata_or_mudata_missing`。而
 | P1.3 | ENCODE 适配器 + 许可政策 | ⬜ | | | resolver 能返回资产；政策已在 `domain/licensing.py` 注册；`encode` 已从 `QueryPlan.uncovered_sources` 移除 |
 | P1.4 | CELLxGENE 适配器 + 许可政策 | ⬜ | | | 同上，针对 `cellxgene`。ENCODE 之后价值最高的源：策展过的图谱且许可明确声明，同时它也是唯一能真正触发 `approved` 许可状态的源 —— GEO/SRA 永远只能到 `repository_policy` |
 | P1.5 | 在真实研究上跑通三模态路径 | ⬜ | | | 一个 TEA-seq 或 DOGMA-seq 的 deposition 端到端满足 `multiome_trimodal` |
-| P1.6 | 超越文本推断的配对证据 | ⬜ | | | 实测的逐细胞条码交集，能把 bundle 从 `pairing:unverified` 升级为有 `FILE_OBSERVED` 证据支撑的同细胞判定。这是 P0.0 的根治方案：高估来自文本推断，而实测条码不会说谎 |
+| P1.6 | 超越文本推断的配对证据 | 🚧 | | 2026-08-09 | 实测的逐细胞条码交集，能把 bundle 从 `pairing:unverified` 升级为有 `FILE_OBSERVED` 证据支撑的同细胞判定。这是 P0.0 的根治方案：高估来自文本推断，而实测条码不会说谎 |
 
 ### Data Card 规范化（P1.1）
 
@@ -168,13 +168,45 @@ Croissant。必须补充的字段：
 按 `CONTRIBUTING.md` §2，这一条不可让步：每个字段要么可追溯到 evidence 记录，要么
 写成 unknown。一个看起来合理、但没人观察过的值，比留空更糟。
 
+### P1.6 —— 超越文本推断的配对证据（2026-08-09 已构建，尚未经实网验证）
+
+`PairUnitResolver`（提议哪些文件构成一个可独立策展的物理单元；未能真正解析的分组
+会显式标为 `provisional`，而不是硬猜一个）和 `PairingVerifier`（唯一被允许发出
+`has_pair_relationship` 声明的组件）取代了原来一次性的文本推断，改为分级证据：命
+名的联合检测技术、或该单元自身样本文本里的显式同细胞声明（`REPOSITORY_REPORTED`）
+优先；两者都拿不到时才走 LLM 推断（`MODEL_INFERRED`，且单独存在时永远不足以满足
+硬性的物理配对要求）。任何一级都会拒绝对 `provisional` 单元下判断 —— 一个 assay
+级别的先验说的是"这个检测方法支持共测量"，而不是"这一坨还没被真正分组的文件就是
+一个正确的物理单元"。
+
+物化之后，`MaterializedQualityAssessmentAgent` 会用真实的 RNA/ATAC 条码交集
+（`resource_pipeline.barcode_overlap_pairing_claim`）以 `FILE_OBSERVED` 强度重新
+计算该声明 —— 对应上面的验收标准 —— 且 `CurationProfile.required_evidence`（见
+`paired_atac_rna_human`）把 `FILE_OBSERVED` 定为 CORPUS_READY 门唯一能满足
+`has_pair_relationship` 的证据类别，而进入 acquisition 阶段只需要更弱的
+`REPOSITORY_REPORTED`/`MODEL_INFERRED` 下限。`tests/test_qc_metrics_v2.py::
+TestRnaAtacBarcodeOverlap` 用离线合成数据验证了条码交集的计算本身。
+
+尚未打 ✅：还没有在一次真实下载的数据集上跑过。`tests/regression/
+paired_atac_rna_human/`（Phase 7，2026-08-08 落地）已经有 13 个源自策展人真实人工
+审核的 golden case，但 `test_real_pipeline_matches_the_curator` 仍然是
+`@pytest.mark.skip` —— 要接上它，需要对真实来源跑一次带真实 LLM 的 `agent-run`，
+并把结果录成离线 replay corpus（见该目录的 README）。这次实网抓取，就是 P1.6 剩下
+的验收工作。
+
+同一批改动顺带把原来的 `Modality` 枚举泛化成了 `OmicsLayer` + 一个注册制的
+`CurationProfile`（`domain/curation/`，目前只注册了一个实例：
+`paired_atac_rna_human`）—— 内核只读取这份声明数据（每个谓词所需的证据、bundle
+schema、分组信号、检索提示），不再对它分支判断。这已经是朝 P2.1 迈出的实质一步，
+但还没有靠注册第二个 profile 来证明。
+
 ---
 
 ## P2 —— 泛化与 Demo
 
 | # | 任务 | 状态 | 负责人 | 更新日期 | 验收标准 |
 |---|---|---|---|---|---|
-| P2.1 | 把 `BUNDLE_SCHEMAS` 从固定枚举改造成注册表 | ⬜ | | | 新增一个模态方向只需添加数据与 role 规则，无需改动完备性判定引擎 |
+| P2.1 | 把 `BUNDLE_SCHEMAS` 从固定枚举改造成注册表 | 🚧 | | 2026-08-09 | 新增一个模态方向只需添加数据与 role 规则，无需改动完备性判定引擎 |
 | P2.2 | role 推断突破以 ATAC 为中心的文件名约定 | ⬜ | | | 取自第二个方向（纯 scRNA、空间或甲基化）真实文件清单的测试用例能正确分类 |
 | P2.3 | 控制室中的演示路径 | ⬜ | | | 单页串联 问题 → 计划 → 候选 → 审批 → data card；旁观者无需讲解即可跟上 |
 | P2.4 | 可复现的演示脚本 + 预置数据库 | ⬜ | | | 从干净 checkout 离线运行；无需 API key、无需网络，每次输出一致 |
@@ -185,6 +217,12 @@ Croissant。必须补充的字段：
 `supplementary_search_terms` 保留下来。真正不泛化的是**完备性判定**：一个新方向
 需要它自己的 schema 与 role 规则。P2.1 的意义就在于让这件事变成"添加"，而不是
 "手术"。
+
+`domain/curation/CurationProfile`（见上面 P1.6 的说明）正是这个注册表——
+`bundle_schemas`、`required_evidence`、`curation_unit_grouping`、`search_hints`
+按 profile 声明，内核读取实例上的字段，而不是对拿到了哪个 profile 分支判断。仍标
+🚧 而非 ✅：目前只注册了一个 profile（`paired_atac_rna_human`），"新增方向无需碰
+引擎"这句话还没有靠真的注册第二个 profile 来验证过。
 
 ---
 

@@ -1,4 +1,4 @@
-"""InventoryReconcileAgent judges each candidate by its own modality.
+"""InventoryReconcileAgent judges each candidate by its own omics layers.
 
 End-to-end cover for the live-run defect: a research question naming both
 scATAC and multiome produced a unioned required-role list that was applied to
@@ -19,13 +19,15 @@ from scdata_agent.application.collaboration import (
 )
 from scdata_agent.domain.models import (
     AccessLevel,
+    AssayProfile,
     AssetAvailability,
     AssetLocation,
     DataAsset,
     DataRole,
     DatasetCandidate,
     DiscoveryRunResult,
-    Modality,
+    OmicsLayer,
+    PairingLevel,
     QueryPlan,
     ResearchRequirement,
     TransferProtocol,
@@ -51,11 +53,19 @@ def _asset(candidate_id: str, role: DataRole, file_name: str) -> DataAsset:
     )
 
 
-def _candidate(candidate_id: str, modalities: list[Modality]) -> DatasetCandidate:
+def _candidate(candidate_id: str, omics_layers: list[OmicsLayer]) -> DatasetCandidate:
+    pairing_level = (
+        PairingLevel.SAME_CELL
+        if OmicsLayer.CHROMATIN_ACCESSIBILITY in omics_layers
+        and OmicsLayer.TRANSCRIPTOME in omics_layers
+        else PairingLevel.NOT_APPLICABLE
+    )
     return DatasetCandidate(
         candidate_id=candidate_id,
         title=f"Study {candidate_id}",
-        modalities=modalities,
+        assay_profiles=[AssayProfile(
+            label="x", omics_layers=omics_layers, pairing_level=pairing_level, rationale="x",
+        )],
     )
 
 
@@ -64,8 +74,6 @@ async def _reconcile(tmp_path, candidates, assets):
     # The question names both modalities, which is what unioned the role list.
     requirement = ResearchRequirement(
         question="scATAC-seq and multiome for representation learning",
-        modalities=[Modality.SCATAC, Modality.MULTIOME_RNA_ATAC],
-        acceptable_modalities=[Modality.SCATAC, Modality.MULTIOME_RNA_ATAC],
         required_data_roles=[
             DataRole.BARCODE_LINKAGE,
             DataRole.CELL_METADATA,
@@ -112,7 +120,7 @@ async def _reconcile(tmp_path, candidates, assets):
 
 @pytest.mark.asyncio
 async def test_standalone_scatac_is_not_judged_against_multiome(tmp_path):
-    candidate = _candidate("ds_scatac", [Modality.SCATAC])
+    candidate = _candidate("ds_scatac", [OmicsLayer.CHROMATIN_ACCESSIBILITY])
     bundles = await _reconcile(
         tmp_path,
         [candidate],
@@ -132,7 +140,7 @@ async def test_standalone_scatac_is_not_judged_against_multiome(tmp_path):
 
 @pytest.mark.asyncio
 async def test_multiome_candidate_still_needs_rna(tmp_path):
-    candidate = _candidate("ds_multiome", [Modality.MULTIOME_RNA_ATAC])
+    candidate = _candidate("ds_multiome", [OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME])
     bundles = await _reconcile(
         tmp_path,
         [candidate],
@@ -149,7 +157,7 @@ async def test_multiome_candidate_still_needs_rna(tmp_path):
 
 @pytest.mark.asyncio
 async def test_complete_multiome_bundle_is_satisfied(tmp_path):
-    candidate = _candidate("ds_multiome", [Modality.MULTIOME_RNA_ATAC])
+    candidate = _candidate("ds_multiome", [OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME])
     bundles = await _reconcile(
         tmp_path,
         [candidate],
@@ -164,7 +172,7 @@ async def test_complete_multiome_bundle_is_satisfied(tmp_path):
 
 @pytest.mark.asyncio
 async def test_fastq_only_bundle_satisfies_the_raw_reads_schema(tmp_path):
-    candidate = _candidate("ds_raw", [Modality.SCATAC])
+    candidate = _candidate("ds_raw", [OmicsLayer.CHROMATIN_ACCESSIBILITY])
     bundles = await _reconcile(
         tmp_path,
         [candidate],

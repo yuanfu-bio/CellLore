@@ -100,6 +100,17 @@ def _write_fake_bytes(path: Path, role: DataRole) -> None:
     if role == DataRole.FRAGMENTS:
         with gzip.open(path, "wt") as handle:
             handle.write("chr1\t10\t20\tcell-1\t1\nchr1\t30\t40\tcell-2\t1\n")
+    elif role == DataRole.RNA_MATRIX and path.name.casefold().endswith(".mtx.gz"):
+        with gzip.open(path, "wt") as handle:
+            handle.write(
+                "%%MatrixMarket matrix coordinate integer general\n"
+                "2 2 2\n"
+                "1 1 3\n"
+                "2 2 5\n"
+            )
+    elif role == DataRole.CELL_METADATA and "barcode" in path.name.casefold():
+        with gzip.open(path, "wt") as handle:
+            handle.write("cell-1\ncell-2\n")
     else:
         with gzip.open(path, "wt") as handle:
             handle.write("id\tvalue\n1\ttest\n")

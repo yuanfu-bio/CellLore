@@ -162,7 +162,7 @@ protein via ASAP-seq/TEA-seq, other epigenome layers) ride on the same schemas.
 | P1.3 | ENCODE adapter + licence policy | ⬜ | | | Resolver returns assets; policy registered in `domain/licensing.py`; `encode` removed from `QueryPlan.uncovered_sources` |
 | P1.4 | CELLxGENE adapter + licence policy | ⬜ | | | Same, for `cellxgene`. Highest-value source after ENCODE: curated atlases with declared licences, which also exercises the `approved` licence state that GEO/SRA never reach |
 | P1.5 | Trimodal path on a real study | ⬜ | | | A TEA-seq or DOGMA-seq deposition satisfies `multiome_trimodal` end to end |
-| P1.6 | Pairing evidence beyond text inference | ⬜ | | | Observed per-cell barcode intersection upgrades a bundle from `pairing:unverified` to a same-cell claim backed by `FILE_OBSERVED` evidence. The durable answer to P0.0: text inference is what overclaims, observed barcodes cannot |
+| P1.6 | Pairing evidence beyond text inference | 🚧 | | 2026-08-09 | Observed per-cell barcode intersection upgrades a bundle from `pairing:unverified` to a same-cell claim backed by `FILE_OBSERVED` evidence. The durable answer to P0.0: text inference is what overclaims, observed barcodes cannot |
 
 ### Data Card conformance (P1.1)
 
@@ -187,13 +187,53 @@ Non-negotiable per `CONTRIBUTING.md` §2: every field is traceable to an evidenc
 record, or it is written as unknown. A plausible-looking value that nobody observed
 is worse than a blank.
 
+### P1.6 — pairing evidence beyond text inference (built 2026-08-09, not yet field-verified)
+
+`PairUnitResolver` (proposes which files form one physically-curatable unit;
+keeps an unresolved grouping explicitly `provisional` rather than guessing)
+and `PairingVerifier` (the only component allowed to emit a
+`has_pair_relationship` claim) replace the old single-shot text inference
+with tiered evidence: named co-assay technology or an explicit same-cell
+statement in the unit's own sample text (`REPOSITORY_REPORTED`), then LLM
+inference only once both come up empty (`MODEL_INFERRED`, never sufficient
+to satisfy a hard physical-pairing requirement on its own). A provisional
+unit is refused at every tier — an assay-level prior says the *assay*
+supports co-measurement, not that an unresolved blob of files is one correct
+unit.
+
+Post-materialization, `MaterializedQualityAssessmentAgent` recomputes the
+claim from the actual RNA/ATAC barcode overlap
+(`resource_pipeline.barcode_overlap_pairing_claim`) at `FILE_OBSERVED`
+strength — the acceptance criterion above — and `CurationProfile.
+required_evidence` (see `paired_atac_rna_human`) names `FILE_OBSERVED` as the
+only class that can satisfy `has_pair_relationship` at the CORPUS_READY gate,
+versus the weaker `REPOSITORY_REPORTED`/`MODEL_INFERRED` floor that is enough
+to continue into acquisition. `tests/test_qc_metrics_v2.py::
+TestRnaAtacBarcodeOverlap` exercises the barcode-overlap computation with
+synthetic fixtures offline.
+
+Not yet ✅: this hasn't been run against a real downloaded dataset.
+`tests/regression/paired_atac_rna_human/` (Phase 7, landed 2026-08-08) has 13
+golden cases sourced from a curator's real manual review, but
+`test_real_pipeline_matches_the_curator` is still `@pytest.mark.skip` —
+wiring it up needs a real `agent-run` against live sources with a real LLM,
+captured into an offline replay corpus (see that directory's README). That
+live-capture step is P1.6's remaining acceptance work.
+
+This same change generalised the requirement/admission model that used to be
+a `Modality` enum into `OmicsLayer` + a registered `CurationProfile`
+(`domain/curation/`, one instance so far: `paired_atac_rna_human`) — declared
+data (required evidence per predicate, bundle schemas, grouping signals,
+search hints) that the kernel reads rather than branches on. That is a real
+step toward P2.1 below, not yet proven by a second registered profile.
+
 ---
 
 ## P2 — Generalisation and demo
 
 | # | Task | Status | Owner | Updated | Acceptance criterion |
 |---|---|---|---|---|---|
-| P2.1 | Make `BUNDLE_SCHEMAS` a registry rather than a fixed enum | ⬜ | | | A new modality direction can be added as data + role rules, without editing the completeness engine |
+| P2.1 | Make `BUNDLE_SCHEMAS` a registry rather than a fixed enum | 🚧 | | 2026-08-09 | A new modality direction can be added as data + role rules, without editing the completeness engine |
 | P2.2 | Role inference beyond ATAC-centric filename conventions | ⬜ | | | Test cases drawn from real listings in a second direction (scRNA-only, spatial, or methylation) classify correctly |
 | P2.3 | Demo path in the control room | ⬜ | | | Single page carries question → plan → candidates → approval → data card; a bystander can follow it without narration |
 | P2.4 | Reproducible demo script + pre-seeded database | ⬜ | | | Runs offline from a clean checkout; no API key, no network, same output every time |
@@ -204,6 +244,14 @@ already generalises — `MODALITY_ALIASES` is shared by both compiler paths, and
 unrecognised technology name survives as `supplementary_search_terms`. What does not
 generalise is the judgement of **completeness**: a new direction needs its own
 schemas and role rules. P2.1 is about making that an addition rather than a surgery.
+
+`domain/curation/CurationProfile` (see the P1.6 writeup above) is that
+registry — `bundle_schemas`, `required_evidence`, `curation_unit_grouping`
+and `search_hints` are declared per profile, and the kernel reads fields off
+an instance rather than branching on which one it got. Still 🚧 rather than
+✅: only one profile (`paired_atac_rna_human`) is registered, so the
+"add a direction without touching the engine" claim hasn't actually been
+exercised by adding a second one yet.
 
 ---
 

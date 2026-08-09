@@ -190,7 +190,7 @@ class AcquisitionStrategistAgent:
             ),
             "verified_access": 20.0 if summary and summary.access_status == BundleAccessStatus.VERIFIED else 0.0,
             "preflight": 15.0 if report and report.decision == BundleStatus.PREFLIGHT_READY else 0.0,
-            "modality_pairing": 10.0 if report and report.dimensions.get("modality_authenticity") == GateStatus.PASS else 0.0,
+            "modality_pairing": 10.0 if report and report.dimensions.get("layer_authenticity") == GateStatus.PASS else 0.0,
             "known_size": 5.0 if summary and summary.total_bytes is not None else 0.0,
         }
 

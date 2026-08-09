@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from scdata_agent.application.collaboration import AgentArtifact, AgentName, CollaborationLedger
+from scdata_agent.domain.curation.profile import CurationProfile
 from scdata_agent.domain.models import (
     DatasetCandidate,
     DiscoveryRunResult,
-    Modality,
+    OmicsLayer,
     ResearchRequirement,
 )
 from scdata_agent.domain.planning import ResearchPlan
@@ -43,7 +44,9 @@ class FixedRequirementCompiler:
     def __init__(self, requirement: ResearchRequirement) -> None:
         self.requirement = requirement
 
-    def compile(self, question: str) -> ResearchRequirement:
+    def compile(
+        self, question: str, profile: CurationProfile | None = None
+    ) -> ResearchRequirement:
         return self.requirement
 
 
@@ -53,26 +56,22 @@ def need_discovery(context: AgentContext) -> DiscoveryRunResult:
     return context.discovery
 
 
-def candidate_modalities(
+def candidate_layers(
     candidate: DatasetCandidate, requirement: ResearchRequirement | None
-) -> set[Modality]:
-    """Modalities this candidate actually declares, narrowed by the contract.
+) -> set[OmicsLayer]:
+    """Omics layers this candidate actually declares, narrowed by the contract.
 
-    Assay profiles are preferred over the candidate's coarse modality list
-    because they carry a verified pairing level. The requirement only narrows
-    the result — it never adds a modality the candidate never claimed. Applying
-    the question's union of modalities to every candidate is what made
-    standalone scATAC depositions get judged as though they were multiome.
+    The requirement only narrows what the candidate already claims, it never
+    adds a layer the candidate never declared -- applying the question's union
+    of layers to every candidate is what made standalone scATAC depositions
+    get judged as though they were multiome.
     """
     observed = {
-        modality
+        layer
         for profile in candidate.assay_profiles
-        for modality in profile.modalities
-    } or set(candidate.modalities)
-    acceptable = set(
-        (requirement.acceptable_modalities if requirement else [])
-        or (requirement.modalities if requirement else [])
-    )
+        for layer in profile.omics_layers
+    }
+    acceptable = set(requirement.required_omics_layers if requirement else [])
     return (observed & acceptable) or observed
 
 

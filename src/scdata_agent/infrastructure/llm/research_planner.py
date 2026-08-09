@@ -11,8 +11,10 @@ from typing import Any, Protocol, TypedDict
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
+from scdata_agent.domain.curation.profile import CurationProfile
+from scdata_agent.domain.curation.profiles import select_profile
 from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.domain.models import Modality, ResearchRequirement
+from scdata_agent.domain.models import OmicsLayer, ResearchRequirement
 from scdata_agent.domain.planning import (
     AnalysisStep,
     ConstraintKind,
@@ -30,11 +32,9 @@ from scdata_agent.domain.planning import (
     StudyStrategyDraft,
 )
 from scdata_agent.domain.requirements import (
-    MODALITY_ALIASES,
     RuleBasedRequirementCompiler,
-    _contains,
-    restrict_modalities_to_pairing,
-    roles_for_modalities,
+    _known_layers,
+    roles_for_layers,
 )
 from scdata_agent.infrastructure.llm import tracing
 from scdata_agent.infrastructure.llm.requirement_compiler import _safe_terms
@@ -153,11 +153,18 @@ class MultiStageResearchPlanner:
         fallback: RuleBasedRequirementCompiler | None = None,
         capabilities: dict[str, Any] | None = None,
         mode: str | None = None,
+        profile: CurationProfile | None = None,
     ) -> None:
         self.planner_client = planner_client
         self.review_client = review_client or planner_client
         self.fallback = fallback or RuleBasedRequirementCompiler()
         self.capabilities = capabilities or DEFAULT_CAPABILITIES
+        # None means "select per question in .plan()" (see below) -- a
+        # profile is a decision about the specific research goal being asked,
+        # not a blanket default every question gets tagged with. Passing one
+        # explicitly here forces it regardless of question text, which tests
+        # and callers that already know the right profile may still want.
+        self._profile_override = profile
         self.mode = (mode or os.getenv("SCDATA_AGENT_PLANNER_MODE", "fast")).lower()
         if self.mode not in {"fast", "deep"}:
             raise ValueError("Planner mode must be fast or deep.")
@@ -182,6 +189,7 @@ class MultiStageResearchPlanner:
         return graph.compile()
 
     async def plan(self, question: str) -> ResearchPlan:
+        profile = self._profile_override or select_profile(question)
         try:
             timeout_seconds = float(
                 os.getenv(
@@ -209,12 +217,31 @@ class MultiStageResearchPlanner:
                     "planner:critical_review",
                     "planner:synthesis",
                 ]
-            return _finalize_plan(question, draft, self.fallback, self.capabilities, diagnostics)
+            return _finalize_plan(
+                question, draft, self.fallback, self.capabilities, diagnostics, profile
+            )
         except Exception as error:
+            # "fast" mode's own documented contract (see the CLI's
+            # --planner-mode help text) is to race a short budget and degrade
+            # to a generic template on timeout -- that is the point of
+            # choosing it. "deep" mode promises the opposite: it runs however
+            # long it takes so the model actually completes its reasoning,
+            # and is what --llm/agent-run uses by default. Silently
+            # swallowing a deep-mode failure (a transient ReadTimeout, a
+            # malformed structured-output response, ...) into the same
+            # generic fallback plan would mean the "core dependency, not an
+            # optional enhancement" promise this agent makes for --llm is
+            # broken exactly when it matters most, and invisibly so -- the
+            # run reports success with a plan that never saw the research
+            # question's actual population/cell-type/disease detail. Let it
+            # propagate instead, same as any other node failure in the graph.
+            if self.mode != "fast":
+                raise
             return fallback_research_plan(
                 question,
                 self.fallback,
                 f"planner:degraded:{type(error).__name__}:{str(error)[:180]}",
+                profile,
             )
 
     async def _direct_plan(self, state: PlannerState) -> dict[str, Any]:
@@ -720,6 +747,7 @@ def _finalize_plan(
     fallback: RuleBasedRequirementCompiler,
     capabilities: dict[str, Any],
     diagnostics: list[str],
+    profile: CurationProfile | None = None,
 ) -> ResearchPlan:
     data_needs, gaps = _resolve_data_capabilities(draft.data_needs, capabilities)
     resource_needs, resource_gaps = _resolve_resource_capabilities(
@@ -728,10 +756,10 @@ def _finalize_plan(
     normalized = draft.model_copy(
         update={"data_needs": data_needs, "resource_needs": resource_needs}
     )
-    contracts = _compile_contracts(question, normalized, fallback)
+    contracts = _compile_contracts(question, normalized, fallback, profile)
     if not contracts:
         contracts = [
-            fallback.compile(question).model_copy(
+            fallback.compile(question, profile).model_copy(
                 update={
                     "compiler": "research_plan_v1_bridge",
                     "compiler_warnings": [
@@ -812,33 +840,35 @@ def _compile_contracts(
     question: str,
     draft: ResearchPlanDraft,
     fallback: RuleBasedRequirementCompiler,
+    profile: CurationProfile | None = None,
 ) -> list[ResearchRequirement]:
-    baseline = fallback.compile(question)
-    modalities: list[Modality] = []
+    baseline = fallback.compile(question, profile)
+    layers: list[OmicsLayer] = []
     unclassified_terms: list[str] = []
+    population_terms: list[str] = []
     for need in draft.data_needs:
         if need.execution_status != ExecutionStatus.SUPPORTED:
             continue
         for value in [need.data_type, *need.modalities]:
-            for modality in _known_modalities(value):
-                if modality not in modalities:
-                    modalities.append(modality)
+            for layer in _known_layers(value):
+                if layer not in layers:
+                    layers.append(layer)
         # Harvest terms only from the short, technology-focused `modalities`
         # list. `data_type`/`name` are full sentences and would inject long,
         # low-precision phrases into a boolean search query if quoted whole.
         unclassified_terms.extend(
-            value for value in need.modalities if not _known_modalities(value)
+            value for value in need.modalities if not _known_layers(value)
         )
-    if not modalities:
+        if population := _population_query_term(need.population):
+            population_terms.append(population)
+    # A data need whose assay names no layer or layer-combination this table
+    # recognises used to make this function return nothing at all -- the same
+    # silent-fallback failure mode fixed in
+    # domain.requirements.RuleBasedRequirementCompiler.
+    if not layers:
         return []
-    # A same-cell pairing requirement must survive the LLM's own reading of
-    # the question: without this, a data need that also mentions standalone
-    # scATAC would silently reintroduce it even though the rule-based baseline
-    # already excluded it for the same question.
-    modalities = restrict_modalities_to_pairing(
-        modalities, baseline.minimum_pairing_level
-    )
-    required_roles, preferred_roles = roles_for_modalities(modalities)
+    required_omics_layers = list(dict.fromkeys([*baseline.required_omics_layers, *layers]))
+    required_roles, preferred_roles = roles_for_layers(required_omics_layers)
     inferred_constraints = [
         item.statement
         for item in draft.constraints
@@ -847,13 +877,22 @@ def _compile_contracts(
     return [
         baseline.model_copy(
             update={
-                "modalities": modalities,
-                "acceptable_modalities": modalities,
+                "required_omics_layers": required_omics_layers,
                 "required_data_roles": required_roles,
                 "preferred_data_roles": preferred_roles,
-                # A technology name the LLM surfaced but that no Modality alias
-                # covers yet -- kept for recall rather than discarded, so a
-                # niche assay can still widen the search without a code change.
+                # QueryPlanner ANDs tissues/diseases/cell_types together as a
+                # biological-relevance filter (unlike supplementary_search_terms,
+                # which it ORs into the technology clause) -- a population the
+                # LLM identified (e.g. "human endothelial cells") belongs here,
+                # not there, or it would silently fail to narrow the search at
+                # all. `baseline.cell_types` alone only ever contains hits
+                # against the closed CELL_TYPE_ALIASES table, which does not
+                # and cannot enumerate every population a question might name.
+                "cell_types": _safe_terms([*baseline.cell_types, *population_terms]),
+                # A technology name the LLM surfaced but that no layer/
+                # combination alias covers yet -- kept for recall rather than
+                # discarded, so a niche assay can still widen the search
+                # without a code change.
                 "supplementary_search_terms": _safe_terms(
                     [*baseline.supplementary_search_terms, *unclassified_terms]
                 ),
@@ -871,28 +910,32 @@ def _compile_contracts(
     ]
 
 
-def _known_modalities(value: str) -> list[Modality]:
-    """Every Modality whose alias appears in this free-text string.
+def _population_query_term(population: str | None, max_length: int = 80) -> str | None:
+    """Reduce a `DataNeed.population` phrase to a query-safe head noun phrase.
 
-    Reuses the same alias table the rule-based compiler scans (rather than a
-    separate, narrower keyword list) so a phrase like "TEA-seq" or "matched
-    scRNA-seq and scATAC-seq" is recognised the same way regardless of which
-    compiler produced it. A string may legitimately match more than one
-    modality -- e.g. a matched-sample study that also names scATAC on its own.
+    The model writes population as a short clause, often with a trailing
+    parenthetical qualifier (e.g. "Human endothelial cells (any tissue/
+    disease context with clear sample metadata)") -- quoting that whole
+    string as one boolean term would not match anything real. Strip the
+    parenthetical and bound the length rather than guess at further
+    structure; anything still too long after that is dropped, same as an
+    unclassified modality term that doesn't fit the query's shape.
     """
-    return [
-        modality
-        for modality, aliases in MODALITY_ALIASES.items()
-        if _contains(value, aliases)
-    ]
+    if not population:
+        return None
+    head = population.split("(", 1)[0].strip()
+    if not head or len(head) > max_length:
+        return None
+    return head
 
 
 def fallback_research_plan(
     question: str,
     fallback: RuleBasedRequirementCompiler,
     diagnostic: str,
+    profile: CurationProfile | None = None,
 ) -> ResearchPlan:
-    requirement = fallback.compile(question).model_copy(
+    requirement = fallback.compile(question, profile).model_copy(
         update={
             "compiler": "rule_based_research_plan_fallback",
             "compiler_warnings": [
@@ -909,7 +952,7 @@ def fallback_research_plan(
         )
         for item in requirement.hard_constraints
     ]
-    modalities = [item.value for item in requirement.modalities]
+    modalities = [item.value for item in requirement.required_omics_layers]
     need = DataNeed(
         need_id=stable_id("need", f"{question}:epigenomics"),
         name="Public single-cell epigenomics data",

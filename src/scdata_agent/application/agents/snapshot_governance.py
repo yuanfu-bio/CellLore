@@ -7,11 +7,14 @@ import json
 
 from scdata_agent.application.agents.shared import AgentContext, latest_artifact
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
+from scdata_agent.domain.curation.decision import EvidenceGate, evaluate_evidence_completeness
+from scdata_agent.domain.curation.profiles import profile_by_id
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import (
     BundleStatus,
     CorpusBundleDecision,
     CorpusSnapshot,
+    EvidenceClaim,
     LicenseStatus,
     LineageGraphSnapshot,
     MaterializationManifest,
@@ -37,6 +40,9 @@ class SnapshotCorpusGovernanceAgent:
         )
         lineage_artifact = latest_artifact(
             context.artifacts, ArtifactKind.LINEAGE_REPORT.value
+        )
+        inventory_artifact = latest_artifact(
+            context.artifacts, ArtifactKind.ASSET_INVENTORY.value
         )
         preflight = {
             item.bundle_id: item
@@ -87,6 +93,55 @@ class SnapshotCorpusGovernanceAgent:
         all_bundle_ids = sorted(
             set(preflight) | set(manifests) | set(quality)
         )
+        # Phase 5B: CORPUS_READY evidence completeness, the same formula
+        # Phase 5A wired into preflight's ACQUISITION gate, now re-evaluated
+        # at the EvidenceGate.CORPUS_READY threshold against the union of
+        # declared-level claims (still valid; they never disappear) and the
+        # new FILE_OBSERVED/RECOMPUTED claims Phase 5B's post-materialization
+        # validators produce. For most predicates the corpus-ready set equals
+        # the acquisition set, so this is a no-op re-check; for
+        # `has_pair_relationship` it is the strictly narrower
+        # FILE_OBSERVED/RECOMPUTED bar the declared-only claim cannot satisfy
+        # on its own. A bundle reaching this stage already cleared preflight's
+        # profile-scope check (Round 5.1), so scope is not re-derived here.
+        profile = None
+        if context.requirement is not None and context.requirement.profile_id is not None:
+            try:
+                profile = profile_by_id(context.requirement.profile_id)
+            except KeyError:
+                profile = None
+        bundle_pair_units = {
+            item.get("bundle_id"): item.get("pair_unit_id")
+            for item in (inventory_artifact.payload.get("bundles", []) if inventory_artifact else [])
+        }
+        layer_claims_by_candidate: dict[str, list[EvidenceClaim]] = {}
+        for raw in (inventory_artifact.payload.get("layer_claims", []) if inventory_artifact else []):
+            claim = EvidenceClaim.model_validate(raw)
+            layer_claims_by_candidate.setdefault(claim.subject_id, []).append(claim)
+        declared_pairing_by_pair_unit = {
+            claim.subject_id: claim
+            for claim in (
+                EvidenceClaim.model_validate(raw)
+                for raw in (inventory_artifact.payload.get("pairing_claims", []) if inventory_artifact else [])
+            )
+            if claim.predicate == "has_pair_relationship"
+        }
+        recomputed_pairing_by_pair_unit = {
+            claim.subject_id: claim
+            for claim in (
+                EvidenceClaim.model_validate(raw)
+                for raw in (quality_artifact.payload.get("pairing_claims", []) if quality_artifact else [])
+            )
+            if claim.predicate == "has_pair_relationship"
+        }
+        assembly_claims_by_bundle = {
+            claim.subject_id: claim
+            for claim in (
+                EvidenceClaim.model_validate(raw)
+                for raw in (preflight_artifact.payload.get("assembly_claims", []) if preflight_artifact else [])
+            )
+            if claim.predicate == "resolved_assembly"
+        }
         decisions: list[CorpusBundleDecision] = []
         for bundle_id in all_bundle_ids:
             report = preflight.get(bundle_id)
@@ -99,6 +154,18 @@ class SnapshotCorpusGovernanceAgent:
                 if manifest
                 else qc.candidate_id
             )
+            pair_unit_id = bundle_pair_units.get(bundle_id)
+            corpus_ready_result = None
+            if profile is not None and pair_unit_id is not None:
+                bundle_claims = [
+                    *layer_claims_by_candidate.get(candidate_id, []),
+                    *([assembly_claims_by_bundle[bundle_id]] if bundle_id in assembly_claims_by_bundle else []),
+                    *([declared_pairing_by_pair_unit[pair_unit_id]] if pair_unit_id in declared_pairing_by_pair_unit else []),
+                    *([recomputed_pairing_by_pair_unit[pair_unit_id]] if pair_unit_id in recomputed_pairing_by_pair_unit else []),
+                ]
+                corpus_ready_result = evaluate_evidence_completeness(
+                    profile, EvidenceGate.CORPUS_READY, bundle_claims
+                )
             reasons: list[str] = []
             if bundle_id in evaluation_bundle_ids:
                 pool = "exclude"
@@ -134,6 +201,12 @@ class SnapshotCorpusGovernanceAgent:
             ):
                 pool = "quarantine"
                 reasons.append("materialized_qc_warning")
+            elif corpus_ready_result is not None and not corpus_ready_result.satisfied:
+                pool = "quarantine"
+                reasons.extend(
+                    f"corpus_ready_evidence_incomplete:{item.predicate}"
+                    for item in corpus_ready_result.missing
+                )
             else:
                 pool = "pretrain"
                 reasons.append("hard_gates_passed")

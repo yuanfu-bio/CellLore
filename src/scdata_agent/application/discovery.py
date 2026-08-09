@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from scdata_agent.domain.curation.profiles import select_profile
 from scdata_agent.domain.feasibility import FeasibilityAssessor
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.models import (
@@ -79,7 +80,7 @@ class DiscoveryWorkflow:
 
     async def _compile_requirement(self, state: DiscoveryState) -> dict[str, Any]:
         question = state["question"]
-        requirement = self.compiler.compile(question)
+        requirement = self.compiler.compile(question, select_profile(question))
         if inspect.isawaitable(requirement):
             requirement = await requirement
         assert isinstance(requirement, ResearchRequirement)
@@ -89,13 +90,14 @@ class DiscoveryWorkflow:
             "errors": list(requirement.compiler_warnings),
         }
 
-    def _plan_queries(self, state: DiscoveryState) -> dict[str, Any]:
-        return {
-            "query_plan": self.planner.plan(
-                state["requirement"],
-                max_results=state.get("max_results", 20),
-            )
-        }
+    async def _plan_queries(self, state: DiscoveryState) -> dict[str, Any]:
+        query_plan = self.planner.plan(
+            state["requirement"],
+            max_results=state.get("max_results", 20),
+        )
+        if inspect.isawaitable(query_plan):
+            query_plan = await query_plan
+        return {"query_plan": query_plan}
 
     async def _search_sources(
         self, state: DiscoveryState
@@ -169,13 +171,19 @@ def _result_from_state(state: DiscoveryState) -> DiscoveryRunResult:
 
 
 def configured_requirement_compiler(use_llm: bool = True) -> object:
-    """Return StepFun compiler when configured; otherwise remain offline-safe."""
+    """Return the LLM-backed compiler, or the deterministic one when
+    explicitly requested via ``use_llm=False`` (tests/offline debugging only).
+
+    Semantic requirement compilation is a core dependency of this agent, not
+    an optional enhancement -- if the caller asked for LLM compilation and no
+    model is actually configured, that is a deployment error and must fail
+    fast (``ModelRouter.from_environment()``'s ``RuntimeError`` propagates)
+    rather than silently downgrading to a deterministic contract nobody
+    asked for and no downstream reviewer will know happened.
+    """
     if not use_llm:
         return RuleBasedRequirementCompiler()
-    try:
-        client = ModelRouter.from_environment().client(ReasoningProfile.PLANNER)
-    except RuntimeError:
-        return RuleBasedRequirementCompiler()
+    client = ModelRouter.from_environment().client(ReasoningProfile.PLANNER)
     return StepFunRequirementCompiler(
         client,
         structured_model=ModelRouter.from_environment().tool_model(ReasoningProfile.PLANNER),

@@ -126,9 +126,6 @@ def _merge_group(records: list[SourceRecord]) -> DatasetCandidate:
         organisms=_unique(
             organism for record in records for organism in record.organisms
         ),
-        modalities=_unique(
-            modality for record in records for modality in record.modalities
-        ),
         assay_profiles=_unique(
             profile for record in records for profile in record.assay_profiles
         ),

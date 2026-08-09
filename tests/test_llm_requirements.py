@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scdata_agent.domain.models import DataRole, Modality
+from scdata_agent.domain.models import DataRole, OmicsLayer
 from scdata_agent.infrastructure.llm.requirement_compiler import StepFunRequirementCompiler
 
 
@@ -28,7 +28,7 @@ async def test_stepfun_compiler_validates_and_merges_semantic_draft():
                 "tissues": ["lung"],
                 "diseases": ["lung adenocarcinoma"],
                 "cell_types": ["CD8 T cell"],
-                "modalities": ["multiome_rna_atac"],
+                "omics_layers": ["chromatin_accessibility", "transcriptome"],
                 "minimum_donors": 6,
                 "downstream_tasks": ["sparse_signal_recovery"],
                 "search_terms": ["LUAD", "CD8 T cell"],
@@ -42,7 +42,8 @@ async def test_stepfun_compiler_validates_and_merges_semantic_draft():
     assert requirement.compiler == "stepfun_structured_v2:stepfun-test"
     assert "lung adenocarcinoma" in requirement.diseases
     assert requirement.minimum_donors == 6
-    assert Modality.MULTIOME_RNA_ATAC in requirement.modalities
+    assert OmicsLayer.CHROMATIN_ACCESSIBILITY in requirement.required_omics_layers
+    assert OmicsLayer.TRANSCRIPTOME in requirement.required_omics_layers
     assert DataRole.RNA_MATRIX in requirement.required_data_roles
     assert DataRole.BARCODE_LINKAGE in requirement.required_data_roles
     assert requirement.downstream_tasks == ["sparse_signal_recovery"]
@@ -58,12 +59,12 @@ async def test_stepfun_compiler_falls_back_on_invalid_schema():
 
     assert requirement.compiler == "rule_based_v1_fallback"
     assert requirement.compiler_warnings
-    assert Modality.SCATAC in requirement.modalities
+    assert OmicsLayer.CHROMATIN_ACCESSIBILITY in requirement.required_omics_layers
 
 
 @pytest.mark.asyncio
 async def test_critic_revises_explicitly_missing_requirement_fields():
-    planner = FakeStepFun(json.dumps({"modalities": ["scatac_seq"]}))
+    planner = FakeStepFun(json.dumps({"omics_layers": ["chromatin_accessibility"]}))
     critic = FakeStepFun(json.dumps({
         "missing_constraints": ["CD8 T cell"],
         "conflicts": [],

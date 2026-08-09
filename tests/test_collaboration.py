@@ -51,9 +51,9 @@ async def test_supervisor_persists_specialist_handoffs_and_checkpoint(tmp_path, 
     await supervisor.execute(run.run_id)
 
     assert ledger.get_run(run.run_id).status == RunStatus.WAITING_FOR_DECISION
-    # The pre-download workflow includes direct/enriched scouting,
-    # metadata evidence, escalation, and inventory reconciliation.
-    assert len(ledger.list_tasks(run.run_id)) == 10
+    # The pre-download workflow includes direct/enriched scouting, metadata
+    # evidence, escalation, GEO sample metadata, and inventory reconciliation.
+    assert len(ledger.list_tasks(run.run_id)) == 11
     assert len(ledger.list_artifacts(run.run_id)) >= 8
     checkpoint = ledger.list_checkpoints(run.run_id)[0]
     await supervisor.resume_checkpoint(checkpoint.checkpoint_id, {"option": "plan_only"})

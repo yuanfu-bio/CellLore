@@ -37,6 +37,51 @@
 - The LLM-derived planner path (`research_planner.py::_compile_contracts`) recognises modalities via the same `MODALITY_ALIASES` table the rule-based compiler scans (`_known_modalities`, matching every applicable modality rather than at most one), instead of a separately maintained, narrower keyword list that could not name trimodal, ASAP-seq/ISSAAC-seq, or matched scRNA/scATAC. Same-cell pairing narrowing (`restrict_modalities_to_pairing`) and role derivation (`roles_for_modalities`) are single shared functions used by both the rule-based compiler and both LLM integration points (`research_planner.py`, `requirement_compiler.py`), replacing three independently drifted copies -- one of which lacked the PROTEIN_MATRIX branch entirely. A technology name that matches no known alias is preserved as `ResearchRequirement.supplementary_search_terms` rather than discarded; `QueryPlanner` ORs a bounded number of these into the query, alongside the deterministic modality terms rather than replacing them.
 - `agent-run` defaults to the planner's `deep` mode (`--planner-mode`, four sequential LLM calls, ~600s budget) instead of `fast` (two parallel calls racing a 30s-per-branch budget, prone to timing out into the offline template on a demanding question). `compile`/`discover` keep defaulting to `fast` for quick iteration.
 
+- The requirement/admission model generalised from a fixed `Modality` enum to
+  `OmicsLayer` plus a registered `domain.curation.CurationProfile`: declared
+  data (hard requirements, curation-unit grouping signals, per-predicate
+  required evidence at two gates, bundle schemas, search-vocabulary hints)
+  that the kernel reads off an instance rather than branches on `profile_id`.
+  One profile is registered so far, `paired_atac_rna_human`; `select_profile`
+  picks it per question and threads it through both requirement compilers and
+  both research planners.
+- Pairing evidence is now tiered and gated by evidence class, not a single
+  text-inference pass. `PairUnitResolver` proposes which files form one
+  physically-curatable unit (an unresolved grouping stays explicitly
+  `provisional`, never guessed complete); `PairingVerifier` is the only
+  component allowed to emit a `has_pair_relationship` claim, in strength
+  order — named co-assay technology or an explicit same-cell/same-nucleus
+  statement in the unit's own sample text (`REPOSITORY_REPORTED`), then LLM
+  inference only once both come up empty (`MODEL_INFERRED`, never sufficient
+  alone to satisfy a hard physical-pairing requirement) — and refuses every
+  tier on a `provisional` unit. Post-materialization,
+  `MaterializedQualityAssessmentAgent` recomputes the claim from the actual
+  RNA/ATAC barcode overlap at `FILE_OBSERVED` strength, and
+  `CurationProfile.required_evidence` names which evidence classes are
+  acceptable to continue into acquisition versus to reach CORPUS_READY.
+  `GeoSampleMetadataAgent` fetches the per-sample GEO metadata this all reads,
+  so the text a resolver/verifier reasons over is the sample's own record,
+  not the whole study's. See `docs/roadmap.md`'s P1.6 writeup for what
+  remains: this hasn't yet been run against a real downloaded dataset.
+- Every `configured_*` factory (requirement compiler, research planner,
+  `PairUnitResolver`, `PairingVerifier`) fails fast when `use_llm=True` (the
+  default) and no model is configured, instead of silently downgrading to a
+  deterministic fallback that looks like a resolved result but never
+  performed the semantic reasoning it claims to. `use_llm=False` stays a
+  legitimate explicit choice for tests and offline debugging.
+- `SCDATA_AGENT_MODEL_PROVIDER=deepseek` is a supported provider
+  (`DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL`/`DEEPSEEK_BASE_URL`), and the
+  per-request LLM HTTP timeout is now configurable
+  (`SCDATA_AGENT_LLM_HTTP_TIMEOUT_SECONDS`, default 240s) rather than a flat
+  60s that fired before the deep research planner's largest single call
+  (up to 16,000 output tokens) was actually done.
+- `tests/regression/paired_atac_rna_human/` holds a Phase 7 benchmark: 13
+  golden cases drawn from a curator's real manual review of ~114 studies,
+  plus direction-match scoring (`scoring.py`) decoupled from how an outcome
+  was produced. Frozen for now — `test_real_pipeline_matches_the_curator` is
+  `@pytest.mark.skip` pending a real `agent-run` capture into an offline
+  replay corpus (see that directory's README).
+
 - Assay inference reads prose, not serialised metadata. `prose_text` strips
   markup together with its attributes, URLs and document filenames before any
   alias is matched, and aliases match on word boundaries. This stopped a

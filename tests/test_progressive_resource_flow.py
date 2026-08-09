@@ -19,10 +19,11 @@ from scdata_agent.application.resource_pipeline import merge_pointers
 from scdata_agent.domain.lifecycle import PointerStatus, ResourcePointer
 from scdata_agent.domain.models import (
     AccessLevel,
+    AssayProfile,
     DatasetCandidate,
     DiscoveryRunResult,
     Identifier,
-    Modality,
+    OmicsLayer,
     QueryPlan,
     ResearchRequirement,
     SourceRecord,
@@ -76,6 +77,10 @@ def test_studio_graph_exposes_both_asset_scout_inputs(tmp_path):
     ) in edges
     assert (
         "asset_scout_enriched",
+        "geo_sample_metadata",
+    ) in edges
+    assert (
+        "geo_sample_metadata",
         "inventory_reconcile",
     ) in edges
     assert ("inventory_reconcile", "preflight_assessment") in edges
@@ -274,17 +279,15 @@ async def test_native_repository_metadata_does_not_require_fulltext(
     assert report.candidates[0].unresolved_fields == []
 
 
-async def _pairing_escalation(tmp_path, candidate_modalities):
+async def _pairing_escalation(tmp_path, assay_profiles):
     """Escalate one candidate against a question naming BOTH scATAC and multiome."""
     requirement = ResearchRequirement(
         question="scATAC-seq and multiome for representation learning",
-        modalities=[Modality.SCATAC, Modality.MULTIOME_RNA_ATAC],
-        acceptable_modalities=[Modality.SCATAC, Modality.MULTIOME_RNA_ATAC],
     )
     candidate = DatasetCandidate(
         candidate_id="candidate_1",
         title="Repository dataset",
-        modalities=candidate_modalities,
+        assay_profiles=assay_profiles,
         identifiers=[Identifier(namespace="geo_series", value="GSE1")],
         source_record_ids=["record_1"],
     )
@@ -333,10 +336,21 @@ async def test_standalone_scatac_is_not_asked_to_prove_multiome_pairing(tmp_path
 
     Deriving this from the requirement's union of modalities made standalone
     scATAC depositions carry an unresolvable `multiome_pairing` field, which
-    held them at needs_evidence and sent them for open full text.
+    held them at needs_evidence and sent them for open full text. Two
+    separate single-layer profiles (a standalone ATAC assay and a standalone
+    RNA assay merely co-reported in the same study) must not be conflated
+    with one profile that itself spans both layers.
     """
     report = await _pairing_escalation(
-        tmp_path, [Modality.SCATAC, Modality.SCRNA]
+        tmp_path,
+        [
+            AssayProfile(
+                label="scatac", omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY], rationale="x",
+            ),
+            AssayProfile(
+                label="scrna", omics_layers=[OmicsLayer.TRANSCRIPTOME], rationale="x",
+            ),
+        ],
     )
 
     assert "multiome_pairing" not in report.candidates[0].unresolved_fields
@@ -346,7 +360,14 @@ async def test_standalone_scatac_is_not_asked_to_prove_multiome_pairing(tmp_path
 @pytest.mark.asyncio
 async def test_a_multiome_candidate_still_owes_pairing_evidence(tmp_path):
     """Guard against over-correcting: real multiome must still be challenged."""
-    report = await _pairing_escalation(tmp_path, [Modality.MULTIOME_RNA_ATAC])
+    report = await _pairing_escalation(
+        tmp_path,
+        [AssayProfile(
+            label="10x_multiome_rna_atac",
+            omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
+            rationale="x",
+        )],
+    )
 
     assert "multiome_pairing" in report.candidates[0].unresolved_fields
 

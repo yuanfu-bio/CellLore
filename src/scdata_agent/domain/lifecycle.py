@@ -42,6 +42,28 @@ class LicenseStatus(StrEnum):
 
 
 class BundleStatus(StrEnum):
+    """A bundle's lifecycle stage.
+
+    This is the two-stage evidence-admission lifecycle a ``CurationProfile``
+    gates against (see ``RequiredEvidence.acceptable_for_acquisition`` vs
+    ``acceptable_for_corpus_ready``), already present rather than needing a new
+    enum: declared/reported evidence is enough to reach ``PREFLIGHT_READY``
+    (ready to acquire) without waiting on evidence that cannot exist before a
+    download happens; only ``ADMITTED`` (via ``QC_PASSED``/``QC_WARN``) claims
+    the stronger, post-download, deterministically-validated state.
+
+        LEAD               -- discovered, no evidence linked yet
+        EVIDENCE_LINKED     -- declared/reported evidence attached
+        NEEDS_EVIDENCE      -- a pre-acquisition hold: evidence gap
+        PREFLIGHT_READY     -- cleared to acquire on declared evidence alone
+        ...TRANSFERRED...
+        MATERIALIZED        -- files downloaded
+        QC_PASSED/QC_WARN   -- post-download deterministic validators ran
+        QUARANTINED         -- a post-materialization hold
+        ADMITTED            -- final corpus-ready terminal state
+        REJECTED/EXCLUDED   -- terminal exclusion, at either stage
+    """
+
     LEAD = "lead"
     EVIDENCE_LINKED = "evidence_linked"
     REMOTE_INVENTORIED = "remote_inventoried"
@@ -149,6 +171,7 @@ class EvidenceClaim(StrictModel):
     evidence_class: EvidenceClass
     validation_status: ValidationStatus = ValidationStatus.UNVALIDATED
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    rationale: str = ""
     schema_version: str = SCHEMA_VERSION
 
     @model_validator(mode="after")
@@ -205,6 +228,13 @@ class RemoteAssetObservation(StrictModel):
 class SemanticBundle(StrictModel):
     bundle_id: str
     candidate_id: str
+    # The ProposedPairUnit (domain.pair_units) this bundle was built from, when
+    # the candidate's assets were split by PairUnitResolver rather than kept as
+    # one bundle per candidate. None for candidates with no resolved units
+    # (e.g. no GEO sample metadata was available) and for bundles built via the
+    # curated-manifest path, which already carries its own `pair_unit_id`
+    # concept at the manifest-row level.
+    pair_unit_id: str | None = None
     bundle_type: str
     asset_ids: list[str] = Field(default_factory=list)
     required_roles: list[DataRole] = Field(default_factory=list)
@@ -411,6 +441,64 @@ class CorpusSnapshot(StrictModel):
     excluded_bundle_ids: list[str] = Field(default_factory=list)
     manifest_hash: str
     approved: bool = False
+    created_at: datetime = Field(default_factory=utc_now)
+    schema_version: str = SCHEMA_VERSION
+
+
+class AuditQueueAction(StrEnum):
+    """What kind of human action resolves this hold -- distinct from
+    ``AuditTask.blocking_category``, which says *what* is wrong. Grounded
+    against 04_thinking/agent.xlsx's 04_Audit_Hold sheet's real
+    队列动作(queue action) column, whose five real-world values (verify-then-
+    archive/defer/exclude/reprocess/partial-archive) are exactly these."""
+
+    VERIFY_THEN_ARCHIVE = "verify_then_archive"
+    DEFERRED = "deferred"
+    EXCLUDED = "excluded"
+    #: Needs reprocessing -- e.g. a re-download or re-run pipeline step --
+    #: distinct from merely awaiting more evidence.
+    REPROCESS = "reprocess"
+    #: One study, some pair-units archived and others not -- the pair-unit
+    #: admission granularity Phase 4 introduced made this a real, common case.
+    PARTIAL_ARCHIVE = "partial_archive"
+
+
+class AuditTaskCategoryFamily(StrEnum):
+    """Coarse grouping for aggregate stats only -- never a substitute for
+    ``AuditTask.blocking_category``, which stays an open string."""
+
+    PAIRING = "pairing"
+    MISSING_FILE = "missing_file"
+    METADATA = "metadata"
+    ASSEMBLY = "assembly"
+    DOWNLOAD = "download"
+    VALIDATION = "validation"
+    OTHER = "other"
+
+
+class AuditTask(StrictModel):
+    """One row of the human audit queue.
+
+    ``blocking_category`` is deliberately an open string, not this model's
+    closed enums: 04_Audit_Hold's real data has 46 distinct values for it,
+    which is the evidence this dimension must never be closed into a fixed
+    vocabulary, unlike ``queue_action``/``category_family`` above.
+    """
+
+    task_id: str
+    run_id: str
+    #: The curation-unit-grained identity this task is about: a
+    #: ProposedPairUnit.proposed_unit_id when one exists, else a candidate_id.
+    subject_id: str
+    bundle_id: str | None = None
+    queue_action: AuditQueueAction
+    blocking_category: str
+    category_family: AuditTaskCategoryFamily = AuditTaskCategoryFamily.OTHER
+    audit_method: str = ""
+    audit_steps: str = ""
+    pass_criteria: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    rationale: str = ""
     created_at: datetime = Field(default_factory=utc_now)
     schema_version: str = SCHEMA_VERSION
 

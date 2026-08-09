@@ -25,7 +25,6 @@ class FakeAdapter:
                     Identifier(namespace="geo_series", value="GSE12345")
                 ],
                 organisms=["Homo sapiens"],
-                modalities=["scatac_seq"],
                 access_level=AccessLevel.PUBLIC_DECLARED,
             )
         ]

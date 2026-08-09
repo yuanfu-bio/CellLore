@@ -17,19 +17,6 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Modality(StrEnum):
-    SCATAC = "scatac_seq"
-    SNATAC = "snatac_seq"
-    MULTIOME_RNA_ATAC = "multiome_rna_atac"
-    MATCHED_SCRNA_SCATAC = "matched_scrna_scatac"
-    MULTIOME_ATAC_PROTEIN = "multiome_atac_protein"
-    MULTIOME_RNA_ATAC_PROTEIN = "multiome_rna_atac_protein"
-    ATAC_OTHER_MULTIOMICS = "atac_other_multiomics"
-    SCRNA = "scrna_seq"
-    OTHER = "other"
-    UNKNOWN = "unknown"
-
-
 class OmicsLayer(StrEnum):
     CHROMATIN_ACCESSIBILITY = "chromatin_accessibility"
     TRANSCRIPTOME = "transcriptome"
@@ -76,12 +63,77 @@ def pairing_satisfies(observed: PairingLevel, minimum: PairingLevel | None) -> b
 
     ``NOT_APPLICABLE`` never satisfies a requirement: a standalone assay has no
     pairing to offer, which is different from having one that is merely unproven.
+
+    This is a *soft* ordinal comparison -- useful for ranking alternative
+    readings of the same study (see ``best_pairing_level``) -- and must never
+    be the mechanism a hard physical-relationship requirement is checked
+    against. A future high-confidence computational/imputed pairing method
+    could rank arbitrarily high on this scale without ever being a physical
+    co-measurement; ``PairingRequirement.is_satisfied_by`` gates on category
+    membership instead, precisely to close that hole.
     """
     if minimum is None:
         return True
     if observed == PairingLevel.NOT_APPLICABLE:
         return False
     return pairing_rank(observed) >= pairing_rank(minimum)
+
+
+class RelationshipKind(StrEnum):
+    """What kind of claim a ``PairingLevel`` actually makes.
+
+    ``PairingLevel`` used to be read as one ordinal scale, which let a
+    same-donor or same-sample match be treated as "a weaker version of" a
+    same-cell match -- a difference of degree. It is a difference of kind:
+    same-cell/same-nucleus is a barcode-level physical co-measurement, while
+    same-sample/same-donor is a provenance match between assays run
+    separately. A hard requirement for physical pairing must exclude the
+    other categories outright, not merely rank below them.
+    """
+
+    #: Barcode-level, same physical cell or nucleus.
+    PHYSICAL_CO_MEASUREMENT = "physical_co_measurement"
+    #: Same specimen or individual, but measured in separate assays.
+    PROVENANCE_MATCH = "provenance_match"
+    #: Computational imputation/pseudo-pairing. Never a physical relationship,
+    #: regardless of how confidently it was inferred.
+    COMPUTATIONAL_INFERENCE = "computational_inference"
+    UNVERIFIED = "unverified"
+    NOT_APPLICABLE = "not_applicable"
+
+
+RELATIONSHIP_KIND: dict[PairingLevel, RelationshipKind] = {
+    PairingLevel.SAME_CELL: RelationshipKind.PHYSICAL_CO_MEASUREMENT,
+    PairingLevel.SAME_NUCLEUS: RelationshipKind.PHYSICAL_CO_MEASUREMENT,
+    PairingLevel.SAME_SAMPLE: RelationshipKind.PROVENANCE_MATCH,
+    PairingLevel.SAME_DONOR: RelationshipKind.PROVENANCE_MATCH,
+    PairingLevel.STUDY_LEVEL: RelationshipKind.UNVERIFIED,
+    PairingLevel.UNVERIFIED: RelationshipKind.UNVERIFIED,
+    PairingLevel.NOT_APPLICABLE: RelationshipKind.NOT_APPLICABLE,
+}
+
+
+def relationship_kind(level: PairingLevel) -> RelationshipKind:
+    return RELATIONSHIP_KIND.get(level, RelationshipKind.UNVERIFIED)
+
+
+class PairingRequirement(StrictModel):
+    """A hard pairing constraint, expressed as an explicit allow-list.
+
+    Deliberately not "a minimum level plus a rank comparison": that shape
+    cannot exclude an entire relationship category (see ``RelationshipKind``)
+    without also excluding every level ranked below it, which is not the same
+    thing. Satisfaction is set membership -- ``observed in acceptable_levels``
+    -- so a profile can allow exactly ``{SAME_CELL, SAME_NUCLEUS}`` and
+    nothing else, no matter how a future ``PairingLevel`` value would rank.
+    """
+
+    acceptable_levels: list[PairingLevel]
+
+    def is_satisfied_by(self, observed: PairingLevel | None) -> bool:
+        if observed is None:
+            return False
+        return observed in self.acceptable_levels
 
 
 class ProfileBasis(StrEnum):
@@ -99,7 +151,6 @@ class ProfileBasis(StrEnum):
 
 class AssayProfile(StrictModel):
     label: str
-    modalities: list[Modality] = Field(default_factory=list)
     omics_layers: list[OmicsLayer] = Field(default_factory=list)
     pairing_level: PairingLevel = PairingLevel.UNVERIFIED
     technology_terms: list[str] = Field(default_factory=list)
@@ -180,6 +231,46 @@ class EvidenceClass(StrEnum):
     ONTOLOGY_NORMALIZED = "ontology_normalized"
     MODEL_INFERRED = "model_inferred"
     USER_CORRECTED = "user_corrected"
+
+
+# A rough, general sense of how strongly an EvidenceClass supports a
+# decision -- for soft ranking/display only (e.g. picking which of several
+# claims for the same predicate to show a reviewer first). This is NOT used
+# to gate CurationProfile.required_evidence: EvidenceClass is closer to a
+# provenance/type tag than a single totally-ordered strength scale --
+# ONTOLOGY_NORMALIZED and FILE_OBSERVED sharing a rank does not mean either
+# is an appropriate substitute for the other on every predicate, and a
+# future evidence class that ranks "higher" is not guaranteed to be
+# semantically right for a predicate nobody designed it for. Hard gating
+# uses RequiredEvidence.acceptable_for_acquisition/acceptable_for_corpus_ready
+# (domain.curation.profile) -- explicit per-predicate allow-lists, checked by
+# domain.curation.decision.evaluate_evidence_completeness -- exactly the same
+# "set membership, not rank" principle PairingRequirement already applies to
+# PairingLevel.
+_EVIDENCE_CLASS_RANK: dict[EvidenceClass, int] = {
+    EvidenceClass.MODEL_INFERRED: 0,
+    EvidenceClass.REPOSITORY_REPORTED: 1,
+    EvidenceClass.ARTICLE_REPORTED: 1,
+    EvidenceClass.FILE_OBSERVED: 2,
+    EvidenceClass.RECOMPUTED: 2,
+    EvidenceClass.ONTOLOGY_NORMALIZED: 2,
+    EvidenceClass.USER_CORRECTED: 3,
+}
+
+
+def evidence_class_rank(evidence_class: EvidenceClass) -> int:
+    """Soft ranking only -- see the module-level note above. Never use this
+    to decide whether a claim satisfies a CurationProfile's required
+    evidence; use RequiredEvidence's explicit acceptable-class lists."""
+    return _EVIDENCE_CLASS_RANK[evidence_class]
+
+
+def evidence_class_satisfies(observed: EvidenceClass, minimum: EvidenceClass) -> bool:
+    """Soft ordinal comparison, same shape as ``pairing_satisfies`` and for
+    the same reason: useful for ranking/display, never for hard gating. See
+    the module-level note on ``_EVIDENCE_CLASS_RANK`` above.
+    """
+    return evidence_class_rank(observed) >= evidence_class_rank(minimum)
 
 
 class ValidationStatus(StrEnum):
@@ -272,7 +363,15 @@ class BundleSchema(StrictModel):
 
     schema_id: str
     label: str = ""
-    modalities: list[Modality] = Field(default_factory=list)
+    # The exact set of layers this shape needs. Empty means "no layer gate",
+    # matching `raw_reads`, which applies to any layer combination.
+    omics_layers: list[OmicsLayer] = Field(default_factory=list)
+    # None means this shape has no relationship requirement (e.g. standalone
+    # ATAC has nothing to be paired with). Set means the candidate's observed
+    # pairing level must be in the allow-list -- this is what disambiguates
+    # `multiome_same_cell` from `matched_scrna_scatac`: identical layers,
+    # different relationship kind.
+    required_relationship: PairingRequirement | None = None
     required_role_groups: list[list[DataRole]] = Field(default_factory=list)
     preferred_roles: list[DataRole] = Field(default_factory=list)
 
@@ -290,19 +389,30 @@ class BundleSchema(StrictModel):
 
 class ResearchRequirement(StrictModel):
     question: str
+    # Which CurationProfile (domain.curation.profile.CurationProfile) compiled
+    # this requirement, if any. None during the migration means the legacy
+    # module-constant-driven path was used.
+    profile_id: str | None = None
     organisms: list[str] = Field(default_factory=list)
     tissues: list[str] = Field(default_factory=list)
     diseases: list[str] = Field(default_factory=list)
     cell_types: list[str] = Field(default_factory=list)
-    modalities: list[Modality] = Field(default_factory=list)
-    acceptable_modalities: list[Modality] = Field(default_factory=list)
-    preferred_modalities: list[Modality] = Field(default_factory=list)
     required_data_roles: list[DataRole] = Field(default_factory=list)
     preferred_data_roles: list[DataRole] = Field(default_factory=list)
     minimum_donors: int | None = Field(default=None, ge=1)
     # Weakest pairing a candidate may offer and still count. Unset means the
     # question did not ask for paired data and pairing is not gated at all.
+    # Kept for backward compatibility; ``pairing_requirement`` below is the
+    # hard-gate successor and must be preferred by any new gating logic.
     minimum_pairing_level: PairingLevel | None = None
+    # What layers this question needs regardless of whether a named
+    # technology covers them, and (when pairing was asked for at all) the
+    # explicit allow-list of relationship kinds that satisfy it.
+    required_omics_layers: list[OmicsLayer] = Field(default_factory=list)
+    pairing_requirement: PairingRequirement | None = None
+    # Whether the question requires single-cell/single-nucleus resolution as
+    # opposed to bulk. None means the question did not say either way.
+    single_cell_requirement: bool | None = None
     public_only: bool = True
     excluded_access_levels: list[AccessLevel] = Field(default_factory=list)
     excluded_biological_sources: list[str] = Field(default_factory=list)
@@ -313,9 +423,10 @@ class ResearchRequirement(StrictModel):
     unresolved_constraints: list[str] = Field(default_factory=list)
     search_terms: list[str] = Field(default_factory=list)
     # Free text the LLM identified as relevant but that does not map to any
-    # known Modality -- e.g. a co-assay technology not yet in MODALITY_ALIASES.
-    # QueryPlanner ORs a bounded number of these into the query so recall for
-    # a technology can improve before anyone updates the alias table for it.
+    # known layer/combination alias -- e.g. a co-assay technology not yet in
+    # the alias tables. QueryPlanner ORs a bounded number of these into the
+    # query so recall for a technology can improve before anyone updates the
+    # alias table for it.
     supplementary_search_terms: list[str] = Field(default_factory=list)
     compiler: str = "rule_based_v1"
     compiler_warnings: list[str] = Field(default_factory=list)
@@ -345,7 +456,6 @@ class SourceRecord(StrictModel):
     identifiers: list[Identifier] = Field(default_factory=list)
     publication_identifiers: list[Identifier] = Field(default_factory=list)
     organisms: list[str] = Field(default_factory=list)
-    modalities: list[Modality] = Field(default_factory=list)
     assay_profiles: list[AssayProfile] = Field(default_factory=list)
     deposition_relation: DepositionRelation = DepositionRelation.UNKNOWN
     access_level: AccessLevel = AccessLevel.UNKNOWN
@@ -364,7 +474,6 @@ class DatasetCandidate(StrictModel):
     organisms: list[str] = Field(default_factory=list)
     tissues: list[str] = Field(default_factory=list)
     diseases: list[str] = Field(default_factory=list)
-    modalities: list[Modality] = Field(default_factory=list)
     assay_profiles: list[AssayProfile] = Field(default_factory=list)
     # Whether this candidate owns the data it names. Resolution unions the
     # source records, so a paper that reuses a dataset alongside a repository
@@ -377,6 +486,36 @@ class DatasetCandidate(StrictModel):
     access_level: AccessLevel = AccessLevel.UNKNOWN
     evidence: list[Evidence] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class GeoSampleRecord(StrictModel):
+    """One GSM sample block from a GEO series' per-sample metadata.
+
+    Neither of this project's two other GEO touchpoints capture this:
+    ``infrastructure.sources.ncbi``'s ESummary call is study-level only, and
+    ``infrastructure.sources.asset_registry.GEOSupplementaryAssetResolver``
+    parses only ``!Series_supplementary_file`` (series-level, no per-sample
+    split). This is the raw material ``PairUnitResolver`` needs to do genuine
+    semantic grouping instead of guessing from accession-number adjacency --
+    sample title/characteristics/source/organism/files are exactly the fields
+    a human curator reads to work out which files belong to which patient or
+    library.
+    """
+
+    gsm_accession: str
+    series_accession: str
+    title: str | None = None
+    source_name: str | None = None
+    organism: str | None = None
+    characteristics: list[str] = Field(default_factory=list)
+    #: Raw supplementary-file locators (may be ftp:// URLs, filenames, or
+    #: descriptive labels; as reported by GEO, not yet resolved to an asset).
+    supplementary_files: list[str] = Field(default_factory=list)
+    #: The full parsed text block, kept for the Evidence this becomes -- so a
+    #: downstream reviewer or PairingVerifier can see exactly what a
+    #: PairUnitResolver claim was based on, not just the extracted fields.
+    raw_text: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 class FeasibilityDimension(StrictModel):

@@ -8,19 +8,20 @@ from typing import Any, Protocol
 
 from pydantic import Field
 
+from scdata_agent.domain.curation.profile import CurationProfile
+from scdata_agent.domain.curation.profiles import select_profile
 from scdata_agent.domain.models import (
     AccessLevel,
     DataRole,
     EvaluationPolicy,
-    Modality,
+    OmicsLayer,
     ResearchRequirement,
     StrictModel,
 )
 from scdata_agent.domain.requirements import (
     TASK_ALIASES,
     RuleBasedRequirementCompiler,
-    restrict_modalities_to_pairing,
-    roles_for_modalities,
+    roles_for_layers,
 )
 
 
@@ -33,9 +34,10 @@ class LLMRequirementDraft(StrictModel):
     tissues: list[str] = Field(default_factory=list)
     diseases: list[str] = Field(default_factory=list)
     cell_types: list[str] = Field(default_factory=list)
-    modalities: list[Modality] = Field(default_factory=list)
-    acceptable_modalities: list[Modality] = Field(default_factory=list)
-    preferred_modalities: list[Modality] = Field(default_factory=list)
+    # Open-vocabulary: layers the model read out of the question even when no
+    # named technology or layer-combination alias covers the assay, e.g. an
+    # unnamed RNA+surface-protein co-assay.
+    omics_layers: list[OmicsLayer] = Field(default_factory=list)
     required_data_roles: list[DataRole] = Field(default_factory=list)
     preferred_data_roles: list[DataRole] = Field(default_factory=list)
     minimum_donors: int | None = Field(default=None, ge=1)
@@ -62,8 +64,11 @@ class StepFunRequirementCompiler:
         self.structured_model = structured_model
         self.critic_client = critic_client
 
-    async def compile(self, question: str) -> ResearchRequirement:
-        baseline = self.fallback.compile(question)
+    async def compile(
+        self, question: str, profile: CurationProfile | None = None
+    ) -> ResearchRequirement:
+        profile = profile or select_profile(question)
+        baseline = self.fallback.compile(question, profile)
         diagnostics: list[str] = []
         draft: LLMRequirementDraft | None = None
         if self.structured_model is not None:
@@ -125,13 +130,8 @@ def _json_object(response: str) -> dict[str, object]:
 def _merge_requirement_draft(baseline: ResearchRequirement, draft: LLMRequirementDraft | None, client: ChatCompletionClient, diagnostics: list[str]) -> ResearchRequirement:
     if draft is None:
         return baseline
-    acceptable = _unique([*baseline.acceptable_modalities, *baseline.modalities, *draft.modalities, *draft.acceptable_modalities])
-    # The LLM draft can reintroduce a modality the rule-based baseline already
-    # excluded for a same-cell pairing requirement (e.g. standalone scATAC);
-    # narrowing must be re-applied after the union, not only inside the baseline.
-    acceptable = restrict_modalities_to_pairing(acceptable, baseline.minimum_pairing_level)
-    preferred = _unique([*baseline.preferred_modalities, *draft.preferred_modalities])
-    required_roles, preferred_roles = roles_for_modalities(acceptable)
+    required_omics_layers = _unique([*baseline.required_omics_layers, *draft.omics_layers])
+    required_roles, preferred_roles = roles_for_layers(required_omics_layers)
     required_roles = _unique([*required_roles, *baseline.required_data_roles, *draft.required_data_roles])
     preferred_roles = _unique([*preferred_roles, *baseline.preferred_data_roles, *draft.preferred_data_roles])
     min_donors = baseline.minimum_donors or draft.minimum_donors
@@ -146,7 +146,7 @@ def _merge_requirement_draft(baseline: ResearchRequirement, draft: LLMRequiremen
         "tissues": _safe_terms([*baseline.tissues, *draft.tissues]),
         "diseases": _safe_terms([*baseline.diseases, *draft.diseases]),
         "cell_types": _safe_terms([*baseline.cell_types, *draft.cell_types]),
-        "modalities": acceptable, "acceptable_modalities": acceptable, "preferred_modalities": preferred,
+        "required_omics_layers": required_omics_layers,
         "required_data_roles": required_roles, "preferred_data_roles": preferred_roles,
         "minimum_donors": min_donors,
         "excluded_access_levels": _unique([*baseline.excluded_access_levels, *draft.excluded_access_levels]),
@@ -157,7 +157,7 @@ def _merge_requirement_draft(baseline: ResearchRequirement, draft: LLMRequiremen
         "unresolved_constraints": _safe_terms([*baseline.unresolved_constraints, *draft.unresolved_constraints]),
         "search_terms": _safe_terms([*baseline.search_terms, *draft.search_terms]),
         # The LLM's own free-text search terms extend recall for technologies
-        # the modality enum cannot yet name, without waiting on an alias-table
+        # the alias tables cannot yet name, without waiting on an alias-table
         # update; QueryPlanner ORs a bounded number of these into the query.
         "supplementary_search_terms": _safe_terms(
             [*baseline.supplementary_search_terms, *draft.search_terms]

@@ -1,0 +1,221 @@
+"""InventoryReconcileAgent builds one bundle per resolved pair unit.
+
+The gap this closes: a six-patient study reconciled to one undifferentiated
+bundle no matter how many independent RNA+ATAC pairings it actually
+contained. With PairUnitResolver/PairingVerifier wired in, a two-patient
+study now reconciles to two independently-judgeable bundles.
+"""
+
+import pytest
+
+from scdata_agent.application.agents.inventory_reconcile import (
+    InventoryReconcileAgent,
+)
+from scdata_agent.application.agents.pair_unit_resolver import (
+    PairUnitResolutionDraft,
+    PairUnitResolver,
+)
+from scdata_agent.application.agents.pairing_verifier import PairingVerifier
+from scdata_agent.application.agents.shared import AgentContext
+from scdata_agent.application.collaboration import (
+    ArtifactKind,
+    CollaborationLedger,
+    artifact,
+)
+from scdata_agent.domain.models import (
+    AccessLevel,
+    AssayProfile,
+    AssetAvailability,
+    AssetLocation,
+    DataAsset,
+    DataRole,
+    DatasetCandidate,
+    DiscoveryRunResult,
+    GeoSampleRecord,
+    OmicsLayer,
+    PairingLevel,
+    ProfileBasis,
+    QueryPlan,
+    ResearchRequirement,
+    TransferProtocol,
+)
+from scdata_agent.domain.resource_pipeline import AssetInventoryDelta, ScoutPhase
+
+
+class _FakeClient:
+    def __init__(self, response: str):
+        self.response = response
+
+    async def complete(self, messages, *, temperature=0.1, max_tokens=2_000):
+        return self.response
+
+
+def _asset(asset_id: str, candidate_id: str, role: DataRole, file_name: str) -> DataAsset:
+    return DataAsset(
+        asset_id=asset_id, candidate_id=candidate_id, role=role, file_name=file_name,
+        locations=[AssetLocation(
+            url=f"https://example.test/{file_name}",
+            protocol=TransferProtocol.HTTPS,
+            access_level=AccessLevel.PUBLIC_VERIFIED,
+            availability=AssetAvailability.OBSERVED, size_bytes=1024,
+        )],
+    )
+
+
+def _sample(gsm, title, supplementary_files):
+    return GeoSampleRecord(
+        gsm_accession=gsm, series_accession="GSE_TEST", title=title,
+        supplementary_files=supplementary_files, evidence_ids=[f"ev_{gsm}"],
+    )
+
+
+async def _run(tmp_path, candidate, assets, samples, resolver, verifier):
+    requirement = ResearchRequirement(question="paired multiome")
+    discovery = DiscoveryRunResult(
+        run_id="run_1", requirement=requirement,
+        query_plan=QueryPlan(requirement=requirement, queries=[]),
+        candidates=[candidate], source_records=[], feasibility_reports=[],
+    )
+    database = tmp_path / "reconcile.sqlite"
+    context = AgentContext(
+        run_id="run_1", question=requirement.question, database_path=str(database),
+        ledger=CollaborationLedger(database), policy={"use_llm": False},
+        requirement=requirement, discovery=discovery,
+    )
+    context.artifacts.append(artifact(
+        "run_1", ArtifactKind.ASSET_INVENTORY_DELTA, InventoryReconcileAgent.name,
+        AssetInventoryDelta(
+            inventory_id="delta_1", run_id="run_1", phase=ScoutPhase.DIRECT, assets=assets,
+        ).model_dump(mode="json"),
+    ))
+    context.artifacts.append(artifact(
+        "run_1", ArtifactKind.GEO_SAMPLE_METADATA, InventoryReconcileAgent.name,
+        {"samples_by_candidate": {
+            candidate.candidate_id: [item.model_dump(mode="json") for item in samples]
+        }},
+    ))
+    outputs = await InventoryReconcileAgent(resolver=resolver, verifier=verifier).run(context)
+    return outputs[0].payload
+
+
+@pytest.mark.asyncio
+async def test_two_patients_resolve_to_two_independent_bundles(tmp_path):
+    candidate = DatasetCandidate(
+        candidate_id="cand_1", title="Two-patient paired multiome study",
+        assay_profiles=[AssayProfile(
+            label="10x_multiome_rna_atac",
+            omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
+            pairing_level=PairingLevel.SAME_NUCLEUS,
+            inferred_from=ProfileBasis.NAMED_TECHNOLOGY,
+            rationale="Named co-assay technology was observed.",
+        )],
+    )
+    assets = [
+        _asset("a1", "cand_1", DataRole.FRAGMENTS, "GSM1_HF1_atac_fragments.tsv.gz"),
+        _asset("a2", "cand_1", DataRole.RNA_MATRIX, "GSM2_HF1_filtered_feature_bc_matrix.h5"),
+        _asset("a5", "cand_1", DataRole.CELL_METADATA, "GSM1_HF1_barcodes.tsv.gz"),
+        _asset("a3", "cand_1", DataRole.FRAGMENTS, "GSM3_HF2_atac_fragments.tsv.gz"),
+        _asset("a4", "cand_1", DataRole.RNA_MATRIX, "GSM4_HF2_filtered_feature_bc_matrix.h5"),
+        _asset("a6", "cand_1", DataRole.CELL_METADATA, "GSM3_HF2_barcodes.tsv.gz"),
+    ]
+    samples = [
+        _sample("GSM1", "Sample HF1 ATAC", ["GSM1_HF1_atac_fragments.tsv.gz", "GSM1_HF1_barcodes.tsv.gz"]),
+        _sample("GSM2", "Sample HF1 RNA", ["GSM2_HF1_filtered_feature_bc_matrix.h5"]),
+        _sample("GSM3", "Sample HF2 ATAC", ["GSM3_HF2_atac_fragments.tsv.gz", "GSM3_HF2_barcodes.tsv.gz"]),
+        _sample("GSM4", "Sample HF2 RNA", ["GSM4_HF2_filtered_feature_bc_matrix.h5"]),
+    ]
+    draft = PairUnitResolutionDraft(units=[
+        {"proposed_unit_id": "hf1", "member_samples": ["GSM1", "GSM2"], "grouping_rationale": "Both name HF1."},
+        {"proposed_unit_id": "hf2", "member_samples": ["GSM3", "GSM4"], "grouping_rationale": "Both name HF2."},
+    ])
+    resolver = PairUnitResolver(client=_FakeClient(draft.model_dump_json()))
+    verifier = PairingVerifier(client=None)  # tier 1 (named technology) fires deterministically
+
+    payload = await _run(tmp_path, candidate, assets, samples, resolver, verifier)
+    bundles = payload["bundles"]
+
+    assert len(bundles) == 2
+    pair_unit_ids = {item["pair_unit_id"] for item in bundles}
+    assert len(pair_unit_ids) == 2  # distinct, non-null
+    assert all(item["pair_unit_id"] for item in bundles)
+
+    by_assets = {frozenset(item["asset_ids"]): item for item in bundles}
+    assert frozenset({"a1", "a2", "a5"}) in by_assets
+    assert frozenset({"a3", "a4", "a6"}) in by_assets
+
+    # Both units satisfy multiome_same_cell independently -- the physical
+    # relationship claim (tier 1, named technology) applies to both.
+    for item in bundles:
+        assert "multiome_same_cell" in item["satisfied_schema_ids"]
+
+    assert len(payload["proposed_pair_units"]) == 2
+    assert len(payload["pairing_claims"]) == 2
+    # Candidate-scoped, not per-unit: one candidate declaring two layers
+    # produces two layer_claims regardless of how many pair units it split into.
+    assert {item["predicate"] for item in payload["layer_claims"]} == {
+        "has_omics_layer:chromatin_accessibility", "has_omics_layer:transcriptome",
+    }
+    assert all(
+        claim["evidence_class"] == "repository_reported"
+        for claim in payload["pairing_claims"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_one_patient_missing_rna_does_not_block_the_other_patients_bundle(tmp_path):
+    """The whole point of splitting: an incomplete pair unit must not drag
+    down a sibling unit's admission the way one undifferentiated bundle did."""
+    candidate = DatasetCandidate(
+        candidate_id="cand_1", title="Two-patient study, one incomplete",
+        assay_profiles=[AssayProfile(
+            label="10x_multiome_rna_atac",
+            omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
+            pairing_level=PairingLevel.SAME_NUCLEUS,
+            inferred_from=ProfileBasis.NAMED_TECHNOLOGY,
+            rationale="Named co-assay technology was observed.",
+        )],
+    )
+    assets = [
+        _asset("a1", "cand_1", DataRole.FRAGMENTS, "GSM1_HF1_atac_fragments.tsv.gz"),
+        _asset("a2", "cand_1", DataRole.RNA_MATRIX, "GSM2_HF1_filtered_feature_bc_matrix.h5"),
+        _asset("a5", "cand_1", DataRole.CELL_METADATA, "GSM1_HF1_barcodes.tsv.gz"),
+        # HF2 is missing its RNA matrix.
+        _asset("a3", "cand_1", DataRole.FRAGMENTS, "GSM3_HF2_atac_fragments.tsv.gz"),
+    ]
+    samples = [
+        _sample("GSM1", "Sample HF1 ATAC", ["GSM1_HF1_atac_fragments.tsv.gz", "GSM1_HF1_barcodes.tsv.gz"]),
+        _sample("GSM2", "Sample HF1 RNA", ["GSM2_HF1_filtered_feature_bc_matrix.h5"]),
+        _sample("GSM3", "Sample HF2 ATAC", ["GSM3_HF2_atac_fragments.tsv.gz"]),
+    ]
+    draft = PairUnitResolutionDraft(units=[
+        {"proposed_unit_id": "hf1", "member_samples": ["GSM1", "GSM2"], "grouping_rationale": "Both name HF1."},
+        {"proposed_unit_id": "hf2", "member_samples": ["GSM3"], "grouping_rationale": "Names HF2; no RNA sample in this study."},
+    ])
+    resolver = PairUnitResolver(client=_FakeClient(draft.model_dump_json()))
+    verifier = PairingVerifier(client=None)
+
+    payload = await _run(tmp_path, candidate, assets, samples, resolver, verifier)
+    bundles = {frozenset(item["asset_ids"]): item for item in payload["bundles"]}
+
+    complete_unit = bundles[frozenset({"a1", "a2", "a5"})]
+    incomplete_unit = bundles[frozenset({"a3"})]
+    assert "multiome_same_cell" in complete_unit["satisfied_schema_ids"]
+    assert "multiome_same_cell" not in incomplete_unit["satisfied_schema_ids"]
+
+
+@pytest.mark.asyncio
+async def test_no_geo_sample_metadata_falls_back_to_one_bundle_for_the_candidate(tmp_path):
+    """Backward compatibility: a candidate this system has no per-sample
+    metadata for degrades to today's one-bundle-per-candidate shape."""
+    candidate = DatasetCandidate(candidate_id="cand_1", title="No GEO metadata available")
+    assets = [
+        _asset("a1", "cand_1", DataRole.FRAGMENTS, "atac_fragments.tsv.gz"),
+        _asset("a2", "cand_1", DataRole.RNA_MATRIX, "filtered_feature_bc_matrix.h5"),
+    ]
+    payload = await _run(
+        tmp_path, candidate, assets, samples=[],
+        resolver=PairUnitResolver(client=None), verifier=PairingVerifier(client=None),
+    )
+
+    assert len(payload["bundles"]) == 1
+    assert set(payload["bundles"][0]["asset_ids"]) == {"a1", "a2"}

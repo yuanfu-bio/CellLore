@@ -1,18 +1,19 @@
-"""Modality recognition in the LLM-derived research-planner path.
+"""Layer recognition in the LLM-derived research-planner path.
 
 Regression cover for a live-run defect: a question explicitly asking for
-"TEA-seq/DOGMA-seq trimodal data" compiled to acceptable_modalities missing
-trimodal entirely, which excluded two genuinely trimodal candidates as
-modality:mismatch. The cause was `_known_modality`, a narrow, independently
-maintained re-implementation of the alias table the rule-based compiler
-already scans -- it recognised only 3 of the 8 known modalities and returned
-at most one match per string. `_known_modalities` now reuses the same table
-used everywhere else, matching every applicable modality.
+"TEA-seq/DOGMA-seq trimodal data" compiled to a role/layer set missing the
+protein layer entirely, which excluded two genuinely trimodal candidates.
+The cause was `_known_modality`, a narrow, independently maintained
+re-implementation of the alias table the rule-based compiler already scans --
+it recognised only 3 of the 8 known modalities and returned at most one match
+per string. `_known_layers` now reuses the same open-vocabulary layer/
+layer-combination tables used everywhere else, matching every applicable
+combination.
 """
 
 import pytest
 
-from scdata_agent.domain.models import Modality
+from scdata_agent.domain.models import OmicsLayer
 from scdata_agent.domain.planning import (
     DataNeed,
     ExecutionStatus,
@@ -21,38 +22,36 @@ from scdata_agent.domain.planning import (
     ResearchIntent,
     ResearchPlanDraft,
 )
-from scdata_agent.domain.requirements import RuleBasedRequirementCompiler
-from scdata_agent.infrastructure.llm.research_planner import (
-    _compile_contracts,
-    _known_modalities,
-)
+from scdata_agent.domain.requirements import RuleBasedRequirementCompiler, _known_layers
+from scdata_agent.infrastructure.llm.research_planner import _compile_contracts
 
 
-class TestKnownModalities:
+class TestKnownLayers:
     @pytest.mark.parametrize(
         ("text", "expected"),
         [
-            ("TEA-seq and DOGMA-seq trimodal data", Modality.MULTIOME_RNA_ATAC_PROTEIN),
-            ("ASAP-seq", Modality.MULTIOME_ATAC_PROTEIN),
-            ("10x Multiome RNA+ATAC", Modality.MULTIOME_RNA_ATAC),
-            ("single nucleus ATAC-seq", Modality.SNATAC),
-            ("scATAC-seq", Modality.SCATAC),
+            ("TEA-seq and DOGMA-seq trimodal data", OmicsLayer.PROTEIN),
+            ("ASAP-seq", OmicsLayer.PROTEIN),
+            ("10x Multiome RNA+ATAC", OmicsLayer.TRANSCRIPTOME),
+            ("single nucleus ATAC-seq", OmicsLayer.CHROMATIN_ACCESSIBILITY),
+            ("scATAC-seq", OmicsLayer.CHROMATIN_ACCESSIBILITY),
         ],
     )
-    def test_recognises_every_modality_the_alias_table_covers(self, text, expected):
+    def test_recognises_every_layer_the_alias_tables_cover(self, text, expected):
         """The old matcher recognised only 3 of these 5 -- notably never the
         trimodal case that caused the live-run regression."""
-        assert expected in _known_modalities(text)
+        assert expected in _known_layers(text)
 
-    def test_a_string_may_match_more_than_one_modality(self):
+    def test_a_string_may_match_more_than_one_technology(self):
         """The old function returned at most one match per string; a data
-        need can legitimately name more than one modality at once."""
-        matches = _known_modalities("scATAC-seq or RNA+ATAC multiome")
-        assert Modality.SCATAC in matches
-        assert Modality.MULTIOME_RNA_ATAC in matches
+        need can legitimately name more than one technology at once -- the
+        union of layers must reflect all of them."""
+        layers = _known_layers("scATAC-seq or RNA+ATAC multiome")
+        assert OmicsLayer.CHROMATIN_ACCESSIBILITY in layers
+        assert OmicsLayer.TRANSCRIPTOME in layers
 
     def test_unrecognisable_text_returns_nothing(self):
-        assert _known_modalities("CRISPR screen perturbation atlas") == []
+        assert _known_layers("CRISPR screen perturbation atlas") == []
 
 
 def _draft(question: str, data_needs: list[DataNeed]) -> ResearchPlanDraft:
@@ -81,15 +80,15 @@ def _need(modalities: list[str], data_type: str = "single-cell data") -> DataNee
 
 class TestCompileContracts:
     def test_trimodal_data_need_survives_into_the_contract(self):
-        """The exact live-run regression: TEA-seq/DOGMA-seq must appear in
-        acceptable_modalities, not be silently dropped."""
+        """The exact live-run regression: TEA-seq/DOGMA-seq's protein layer
+        must appear in required_omics_layers, not be silently dropped."""
         question = "TEA-seq and DOGMA-seq trimodal single-cell data (human)"
         draft = _draft(question, [_need(["TEA-seq", "DOGMA-seq"], "trimodal data")])
         contract = _compile_contracts(
             question, draft, RuleBasedRequirementCompiler()
         )[0]
 
-        assert Modality.MULTIOME_RNA_ATAC_PROTEIN in contract.acceptable_modalities
+        assert OmicsLayer.PROTEIN in contract.required_omics_layers
 
     def test_organism_is_untouched_by_the_llm_merge(self):
         """organisms/tissues/diseases/cell_types come entirely from the
@@ -104,8 +103,9 @@ class TestCompileContracts:
         assert contract.organisms == ["Homo sapiens"]
 
     def test_pairing_requirement_survives_the_llm_merge(self):
-        """A same-cell requirement narrows the LLM's own modality list too,
-        not only the rule-based baseline's."""
+        """A same-cell requirement detected by the rule-based baseline must
+        survive into the merged contract even though the LLM's own data needs
+        say nothing about pairing themselves."""
         question = "配对的单细胞多组学数据（human）：同细胞同时测量ATAC和RNA"
         draft = _draft(
             question,
@@ -115,8 +115,9 @@ class TestCompileContracts:
             question, draft, RuleBasedRequirementCompiler()
         )[0]
 
-        assert Modality.SCATAC not in contract.acceptable_modalities
-        assert Modality.MULTIOME_RNA_ATAC in contract.acceptable_modalities
+        assert contract.pairing_requirement is not None
+        assert OmicsLayer.CHROMATIN_ACCESSIBILITY in contract.required_omics_layers
+        assert OmicsLayer.TRANSCRIPTOME in contract.required_omics_layers
 
     def test_unclassifiable_technology_becomes_a_supplementary_term(self):
         question = "single-cell data using a novel co-assay technology"
@@ -152,7 +153,7 @@ class TestCompileContracts:
 
     def test_protein_matrix_role_is_required_for_trimodal(self):
         """Regression: the old research_planner.py role derivation lacked
-        the PROTEIN_MATRIX branch that the shared roles_for_modalities has."""
+        the PROTEIN_MATRIX branch that the shared roles_for_layers has."""
         from scdata_agent.domain.models import DataRole
 
         question = "TEA-seq trimodal data"

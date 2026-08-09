@@ -6,11 +6,8 @@ one unioned role list, which was then applied to standalone scATAC depositions
 that legitimately ship no RNA matrix and no barcode linkage.
 """
 
-from scdata_agent.domain.models import BundleSchema, DataRole, Modality
-from scdata_agent.domain.requirements import (
-    BUNDLE_SCHEMAS,
-    applicable_bundle_schemas,
-)
+from scdata_agent.domain.models import BundleSchema, DataRole
+from scdata_agent.domain.requirements import BUNDLE_SCHEMAS
 
 
 def _schema(schema_id: str) -> BundleSchema:
@@ -45,28 +42,6 @@ def test_accessibility_may_be_fragments_or_a_peak_matrix():
 def test_a_joint_object_satisfies_matrix_and_cell_axis_at_once():
     """An AnnData/MuData carries the matrix and the cell axis together."""
     assert _schema("multiome_same_cell").is_satisfied_by({DataRole.STANDARD_OBJECT})
-
-
-def test_raw_reads_schema_applies_to_every_modality():
-    for modalities in ([Modality.SCATAC], [Modality.MULTIOME_RNA_ATAC], []):
-        ids = {item.schema_id for item in applicable_bundle_schemas(modalities)}
-        assert "raw_reads" in ids
-
-
-def test_schema_selection_follows_the_candidate_not_the_question():
-    scatac_only = applicable_bundle_schemas([Modality.SCATAC])
-    assert {item.schema_id for item in scatac_only} == {
-        "scatac_standalone", "raw_reads",
-    }
-    multiome_only = applicable_bundle_schemas([Modality.MULTIOME_RNA_ATAC])
-    assert {item.schema_id for item in multiome_only} == {
-        "multiome_same_cell", "raw_reads",
-    }
-
-
-def test_undeclared_modality_offers_every_schema():
-    """An unlabelled deposition is judged on contents, not excluded outright."""
-    assert len(applicable_bundle_schemas([])) == len(BUNDLE_SCHEMAS)
 
 
 def test_unmet_groups_name_what_is_actually_missing():

@@ -20,13 +20,14 @@ from scdata_agent.application.collaboration import (
 from scdata_agent.domain.lifecycle import LicenseStatus, SemanticBundle
 from scdata_agent.domain.models import (
     AccessLevel,
+    AssayProfile,
     AssetAvailability,
     AssetLocation,
     DataAsset,
     DataRole,
     DatasetCandidate,
     DiscoveryRunResult,
-    Modality,
+    OmicsLayer,
     QueryPlan,
     ResearchRequirement,
     TransferProtocol,
@@ -62,11 +63,14 @@ def _asset(url: str, license_id: str | None = None) -> DataAsset:
 
 async def _report(tmp_path, assets, **policy):
     requirement = ResearchRequirement(
-        question="scATAC", modalities=[Modality.SCATAC],
-        acceptable_modalities=[Modality.SCATAC],
+        question="scATAC",
+        required_omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY],
     )
     candidate = DatasetCandidate(
-        candidate_id="cand_1", title="study", modalities=[Modality.SCATAC]
+        candidate_id="cand_1", title="study",
+        assay_profiles=[AssayProfile(
+            label="scatac", omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY], rationale="x",
+        )],
     )
     discovery = DiscoveryRunResult(
         run_id="run_1", requirement=requirement,
@@ -83,7 +87,7 @@ async def _report(tmp_path, assets, **policy):
         summary_id="summary_1", bundle_id="bundle_1", candidate_id="cand_1",
         access_status=BundleAccessStatus.VERIFIED, asset_count=len(assets),
         verified_asset_count=len(assets), known_bytes=10, total_bytes=10,
-        reported_modalities=[Modality.SCATAC.value],
+        reported_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY.value],
     )
     database = tmp_path / "preflight.sqlite"
     context = AgentContext(

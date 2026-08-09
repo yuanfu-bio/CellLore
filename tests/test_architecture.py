@@ -10,7 +10,8 @@ def test_public_entrypoints_and_all_specialists_import():
     for module in (
         "planning", "discovery", "supervisor", "shared", "evidence_advice",
         "progressive_evidence", "evidence_escalation", "progressive_asset_scout",
-        "manifest_ingest", "inventory_reconcile", "progressive_preflight",
+        "manifest_ingest", "geo_sample_metadata", "pair_unit_resolver",
+        "pairing_verifier", "inventory_reconcile", "progressive_preflight",
         "progressive_lineage_v2", "acquisition_v2", "transfer_execution", "curator",
         "materialized_quality", "snapshot_governance",
     ):

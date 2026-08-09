@@ -24,7 +24,6 @@ from scdata_agent.domain.models import (
     DiscoveryRunResult,
     FeasibilityReport,
     Identifier,
-    Modality,
     QueryPlan,
     TransferProtocol,
 )
@@ -41,7 +40,6 @@ class FakeWorkflow:
             identifiers=[
                 Identifier(namespace="geo_series", value="GSE_TEST")
             ],
-            modalities=[Modality.SCATAC],
             access_level=AccessLevel.PUBLIC_VERIFIED,
         )
         return DiscoveryRunResult(

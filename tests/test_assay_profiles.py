@@ -2,9 +2,10 @@ from scdata_agent.domain.feasibility import FeasibilityAssessor
 from scdata_agent.domain.models import (
     AssayProfile,
     DatasetCandidate,
-    Modality,
     OmicsLayer,
     PairingLevel,
+    PairingRequirement,
+    ProfileBasis,
     ResearchRequirement,
 )
 from scdata_agent.domain.requirements import CorpusQueryPlanner, RuleBasedRequirementCompiler
@@ -21,7 +22,9 @@ def test_named_rna_atac_coassays_have_explicit_pairing_levels():
     tenx = _profile("10x Multiome ATAC + Gene Expression from PBMC nuclei")
     share = _profile("SHARE-seq profiling of chromatin accessibility and RNA")
 
-    assert tenx.modalities == [Modality.MULTIOME_RNA_ATAC]
+    assert set(tenx.omics_layers) == {
+        OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME,
+    }
     assert tenx.pairing_level == PairingLevel.SAME_NUCLEUS
     assert share.pairing_level == PairingLevel.SAME_CELL
     assert set(share.omics_layers) == {
@@ -33,25 +36,53 @@ def test_atac_protein_and_trimodal_technologies_are_distinct():
     asap = _profile("ASAP-seq measures chromatin accessibility and surface proteins")
     tea = _profile("TEA-seq joint RNA, epitopes, and chromatin accessibility")
 
-    assert asap.modalities == [Modality.MULTIOME_ATAC_PROTEIN]
-    assert tea.modalities == [Modality.MULTIOME_RNA_ATAC_PROTEIN]
-    assert OmicsLayer.PROTEIN in tea.omics_layers
+    assert set(asap.omics_layers) == {OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.PROTEIN}
+    assert set(tea.omics_layers) == {
+        OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME, OmicsLayer.PROTEIN,
+    }
 
 
 def test_matched_samples_are_not_mislabeled_as_same_cell():
     matched = _profile("paired scRNA-seq and scATAC-seq from matched samples")
     co_reported = _profile("scRNA-seq and scATAC-seq profiles from the study")
 
-    assert matched.modalities == [Modality.MATCHED_SCRNA_SCATAC]
+    assert matched.label == "matched_scrna_scatac"
     assert matched.pairing_level == PairingLevel.SAME_SAMPLE
     assert co_reported.pairing_level == PairingLevel.STUDY_LEVEL
-    assert Modality.MATCHED_SCRNA_SCATAC not in co_reported.modalities
+    assert co_reported.label != "matched_scrna_scatac"
 
 
 def test_standalone_scatac_profile_is_not_paired():
     profile = _profile("single-cell ATAC-seq atlas of human tissues")
-    assert profile.modalities == [Modality.SCATAC]
+    assert profile.omics_layers == [OmicsLayer.CHROMATIN_ACCESSIBILITY]
     assert profile.pairing_level == PairingLevel.NOT_APPLICABLE
+
+
+def test_named_technology_match_sets_named_technology_basis():
+    """PairingVerifier's strongest tier gates on exactly this field: a named
+    co-assay technology (e.g. DOGMA-seq) asserts its pairing relationship by
+    definition, which is a materially stronger claim than assembling the
+    same reading from separate layer mentions. It must not silently default
+    to LAYER_INFERENCE."""
+    profile = _profile("DOGMA-seq joint RNA, ATAC, and protein profiling")
+    assert profile.inferred_from == ProfileBasis.NAMED_TECHNOLOGY
+
+
+def test_named_cite_seq_is_classified_without_a_chromatin_accessibility_layer():
+    profile = _profile("CITE-seq profiling of PBMC surface protein and gene expression")
+    assert set(profile.omics_layers) == {OmicsLayer.TRANSCRIPTOME, OmicsLayer.PROTEIN}
+    assert OmicsLayer.CHROMATIN_ACCESSIBILITY not in profile.omics_layers
+
+
+def test_unnamed_rna_and_protein_coassay_is_classified_generically():
+    profile = _profile("single-cell RNA and antibody-derived tag profiling of tumor-infiltrating cells")
+    assert set(profile.omics_layers) == {OmicsLayer.TRANSCRIPTOME, OmicsLayer.PROTEIN}
+    assert OmicsLayer.CHROMATIN_ACCESSIBILITY not in profile.omics_layers
+
+
+def test_rna_only_text_is_classified_instead_of_returning_nothing():
+    profile = _profile("single-cell RNA-seq atlas of human bone marrow")
+    assert profile.omics_layers == [OmicsLayer.TRANSCRIPTOME]
 
 
 def test_corpus_query_planner_covers_four_families_across_three_sources():
@@ -70,16 +101,16 @@ def test_corpus_query_planner_covers_four_families_across_three_sources():
 def test_pairing_gate_requires_verified_relationship_for_multiome_only_request():
     requirement = ResearchRequirement(
         question="RNA ATAC multiome",
-        modalities=[Modality.MULTIOME_RNA_ATAC],
-        acceptable_modalities=[Modality.MULTIOME_RNA_ATAC],
+        required_omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
+        pairing_requirement=PairingRequirement(
+            acceptable_levels=[PairingLevel.SAME_CELL, PairingLevel.SAME_NUCLEUS]
+        ),
     )
     verified = DatasetCandidate(
         candidate_id="verified",
         title="10x multiome",
-        modalities=[Modality.MULTIOME_RNA_ATAC],
         assay_profiles=[AssayProfile(
             label="10x",
-            modalities=[Modality.MULTIOME_RNA_ATAC],
             omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
             pairing_level=PairingLevel.SAME_NUCLEUS,
             rationale="named technology",

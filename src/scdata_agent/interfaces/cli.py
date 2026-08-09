@@ -39,7 +39,7 @@ from scdata_agent.domain.manifest import (
 from scdata_agent.domain.models import DataRole
 from scdata_agent.domain.requirements import QueryPlanner
 from scdata_agent.domain.transfer import TransferPlanner
-from scdata_agent.infrastructure.llm.stepfun import StepFunChatClient, StepFunSettings
+from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
 from scdata_agent.infrastructure.manifest_reader import read_manifest
 from scdata_agent.infrastructure.persistence.download_store import DownloadStateStore
 from scdata_agent.infrastructure.persistence.evidence_ledger import EvidenceLedger
@@ -384,7 +384,21 @@ def agent_run(
     ] = 20,
     use_llm: Annotated[
         bool,
-        typer.Option("--llm/--no-llm", help="Use configured model routing."),
+        typer.Option(
+            "--llm/--no-llm",
+            help=(
+                "LLM reasoning (research goal interpretation, search planning, "
+                "GEO/paper/metadata understanding, PairUnit resolution, evidence "
+                "synthesis) is this agent's core dependency, not an optional "
+                "enhancement -- leave this at --llm for any real run. Without a "
+                "configured model, --llm now fails fast rather than silently "
+                "falling back to a deterministic-only workflow. --no-llm exists "
+                "for tests and offline debugging only; it downgrades every "
+                "semantic step (including PairUnit grouping, which then keeps "
+                "each study's assets in one unresolved, provisional unit) and "
+                "must never be used to produce a corpus-admission decision."
+            ),
+        ),
     ] = True,
     data_root: Annotated[
         Path, typer.Option("--data-root", help="Raw and curated data root.")
@@ -521,20 +535,26 @@ def serve(
 
 @app.command("llm-check")
 def llm_check() -> None:
-    """Verify StepFun configuration without sending a billable request."""
-    settings = StepFunSettings.from_environment()
+    """Verify the configured model provider without sending a billable request."""
+    import os
+
+    from scdata_agent.infrastructure.llm.stepfun import load_local_env
+
+    load_local_env()
+    provider = os.getenv("SCDATA_AGENT_MODEL_PROVIDER", "stepfun").lower()
+    settings = ModelRouter.from_environment().client(ReasoningProfile.PLANNER).settings
+    effort = getattr(settings, "reasoning_effort", None)
     console.print(
-        "StepFun configuration loaded: "
-        f"model={settings.model}, base_url={settings.base_url}, "
-        f"reasoning_effort={settings.reasoning_effort}"
+        f"Provider '{provider}' configuration loaded: "
+        f"model={settings.model}, base_url={settings.base_url}"
+        + (f", reasoning_effort={effort}" if effort else "")
     )
 
 
 @app.command("llm-ping")
 def llm_ping() -> None:
-    """Send one small billable request to verify the StepFun connection."""
-    settings = StepFunSettings.from_environment()
-    client = StepFunChatClient(settings)
+    """Send one small billable request to verify the configured provider connection."""
+    client = ModelRouter.from_environment().client(ReasoningProfile.PLANNER)
     reply = asyncio.run(
         client.complete(
             [{"role": "user", "content": "Reply with exactly: configured"}],
@@ -552,7 +572,14 @@ def compile(
     ] = False,
     use_llm: Annotated[
         bool,
-        typer.Option("--llm/--no-llm", help="Use configured StepFun semantic parsing."),
+        typer.Option(
+            "--llm/--no-llm",
+            help=(
+                "Use configured LLM planning (fails fast without a configured "
+                "model). --no-llm is for tests/offline debugging only, not a "
+                "supported way to compile a real research contract."
+            ),
+        ),
     ] = True,
 ) -> None:
     """Understand a research question and compile its executable discovery contract."""
@@ -636,7 +663,15 @@ def discover(
     ] = None,
     use_llm: Annotated[
         bool,
-        typer.Option("--llm/--no-llm", help="Use configured StepFun semantic parsing."),
+        typer.Option(
+            "--llm/--no-llm",
+            help=(
+                "Use configured LLM requirement compilation (fails fast without "
+                "a configured model). This legacy command is superseded by "
+                "agent-run's full production graph; --no-llm is for tests/"
+                "offline debugging only."
+            ),
+        ),
     ] = True,
 ) -> None:
     """Run Europe PMC + GEO + SRA discovery and persist evidence."""
@@ -660,16 +695,19 @@ def discover(
     table.add_column("Candidate")
     table.add_column("Title", overflow="fold")
     table.add_column("Identifiers")
-    table.add_column("Modalities")
+    table.add_column("Layers")
     table.add_column("Decision")
     for candidate in result.candidates:
         report = reports[candidate.candidate_id]
+        observed_layers = sorted(
+            {layer.value for profile in candidate.assay_profiles for layer in profile.omics_layers}
+        )
         table.add_row(
             candidate.candidate_id,
             candidate.title,
             ", ".join(identifier.value for identifier in candidate.identifiers)
             or "—",
-            ", ".join(modality.value for modality in candidate.modalities) or "unknown",
+            ", ".join(observed_layers) or "unknown",
             report.decision.value,
         )
     console.print(table)
@@ -842,10 +880,11 @@ def corpus_discover(
             question, max_results=max_results_per_query
         )
     )
-    modality_counts = Counter(
-        modality.value
+    layer_counts = Counter(
+        layer.value
         for candidate in result.candidates
-        for modality in candidate.modalities
+        for profile in candidate.assay_profiles
+        for layer in profile.omics_layers
     )
     pairing_counts = Counter(
         profile.pairing_level.value
@@ -863,7 +902,7 @@ def corpus_discover(
         "query_count": len(result.query_plan.queries),
         "source_record_count": len(result.source_records),
         "candidate_count": len(result.candidates),
-        "modality_counts": dict(modality_counts),
+        "layer_counts": dict(layer_counts),
         "pairing_level_counts": dict(pairing_counts),
         "technology_counts": dict(technology_counts),
         "errors": result.errors,

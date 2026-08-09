@@ -80,9 +80,6 @@ class EuropePMCAdapter:
             else None
         )
         assay_profiles = infer_assay_profiles((title, abstract))
-        modalities = list(dict.fromkeys(
-            modality for profile in assay_profiles for modality in profile.modalities
-        ))
         raw_json = json.dumps(item, sort_keys=True, ensure_ascii=False)
         snapshot_hash = f"sha256:{hashlib.sha256(raw_json.encode()).hexdigest()}"
         evidence = [
@@ -111,7 +108,6 @@ class EuropePMCAdapter:
             source_url=source_url,
             identifiers=identifiers,
             publication_identifiers=publication_identifiers,
-            modalities=modalities,
             assay_profiles=assay_profiles,
             access_level=AccessLevel.PUBLIC_DECLARED,
             raw_metadata=item,
