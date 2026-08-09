@@ -61,9 +61,13 @@ BUNDLE_SCHEMAS: tuple[BundleSchema, ...] = (
         required_role_groups=[
             _ACCESSIBILITY,
             [DataRole.RNA_MATRIX, DataRole.STANDARD_OBJECT],
-            # Same-cell assays link modalities by construction; an explicit map
-            # or a joint object both count as evidence of that linkage.
-            [DataRole.BARCODE_LINKAGE, DataRole.CELL_METADATA, DataRole.STANDARD_OBJECT],
+            # Same as _CELL_AXIS's own reasoning: the RNA/peak matrix already
+            # carries its own barcode axis, and a standard 10x Multiome kit
+            # links GEX and ATAC barcodes through a fixed, kit-published
+            # translation whitelist -- not a per-sample fact this bundle would
+            # need to supply evidence for. An explicit barcode map or a joint
+            # object is still accepted when present, just no longer required.
+            _CELL_AXIS,
         ],
         preferred_roles=[
             DataRole.FRAGMENT_INDEX, DataRole.PEAKS,
@@ -83,7 +87,9 @@ BUNDLE_SCHEMAS: tuple[BundleSchema, ...] = (
             # The third layer is the point of a trimodal assay: without it the
             # bundle is a two-layer multiome mislabelled as trimodal.
             [DataRole.PROTEIN_MATRIX, DataRole.STANDARD_OBJECT],
-            [DataRole.BARCODE_LINKAGE, DataRole.CELL_METADATA, DataRole.STANDARD_OBJECT],
+            # See multiome_same_cell's identical group above for why RNA/peak
+            # matrices count here too.
+            _CELL_AXIS,
         ],
         preferred_roles=[
             DataRole.FRAGMENT_INDEX, DataRole.PEAKS,

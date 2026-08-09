@@ -44,6 +44,22 @@ def test_a_joint_object_satisfies_matrix_and_cell_axis_at_once():
     assert _schema("multiome_same_cell").is_satisfied_by({DataRole.STANDARD_OBJECT})
 
 
+def test_multiome_same_cell_accepts_a_native_10x_package_with_no_separate_barcode_file():
+    """A raw/filtered_feature_bc_matrix.h5 carries its own barcode axis, and a
+    10x Multiome kit's GEX<->ATAC barcode correspondence is a fixed,
+    kit-published translation whitelist, not a per-sample fact the bundle
+    needs to supply evidence for. Requiring a standalone barcode-linkage file
+    here blocked every ordinary 10x Multiome deposition (fragments.tsv.gz +
+    filtered_feature_bc_matrix.h5, no extra sidecar) from ever satisfying this
+    schema -- confirmed against a real live-discovered GEO series (liver
+    snMultiome) whose eight wells were verified same_cell and had every
+    required file, and still could not clear this schema before this fix."""
+    schema = _schema("multiome_same_cell")
+    assert schema.is_satisfied_by(
+        {DataRole.FRAGMENTS, DataRole.FRAGMENT_INDEX, DataRole.RNA_MATRIX}
+    )
+
+
 def test_unmet_groups_name_what_is_actually_missing():
     unmet = _schema("multiome_same_cell").unmet_groups(
         {DataRole.FRAGMENTS, DataRole.CELL_METADATA}
