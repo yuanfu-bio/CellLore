@@ -116,7 +116,10 @@ class LLMQueryPlanner:
             # regardless of whether this particular call succeeded. A
             # transient failure here should narrow recall, not abort the run.
             return None
-        terms = _sanitize_terms(draft.terms)
+        terms = _sanitize_terms(
+            draft.terms,
+            forbidden_terms=profile.search_hints.forbidden_query_terms if profile else (),
+        )
         if not terms:
             return None
         return " OR ".join(f'"{term}"' for term in terms)
@@ -149,14 +152,19 @@ def configured_query_planner(use_llm: bool = True) -> QueryPlanner | LLMQueryPla
     return LLMQueryPlanner(client)
 
 
-def _sanitize_terms(terms: list[str]) -> list[str]:
+def _sanitize_terms(
+    terms: list[str], *, forbidden_terms: tuple[str, ...] = ()
+) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
+    forbidden = {term.casefold().strip() for term in forbidden_terms}
     for term in terms:
         candidate = re.sub(r"\s+", " ", _CONTROL_OR_QUOTE.sub(" ", str(term))).strip()
         if not candidate or len(candidate) > _MAX_TERM_LENGTH:
             continue
         key = candidate.casefold()
+        if key in forbidden:
+            continue
         if key in seen:
             continue
         seen.add(key)

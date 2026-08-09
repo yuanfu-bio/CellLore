@@ -447,7 +447,28 @@ async def _structured_call[T: BaseModel](
             temperature=0.0,
             max_tokens=max_tokens,
         )
-    return model.model_validate(_json_object(response))
+    return model.model_validate(_normalize_model_enums(_json_object(response)))
+
+
+def _normalize_model_enums(value: Any) -> Any:
+    """Accept common planning-language variants at the LLM boundary.
+
+    ``planned`` describes a partially supported capability in ordinary prose;
+    the contract intentionally represents that state as ``partial``. Keeping
+    this translation at the boundary preserves strict internal enums without
+    turning a harmless model vocabulary variant into a failed research run.
+    """
+    if isinstance(value, dict):
+        return {
+            key: (
+                "partial" if key == "execution_status" and item == "planned"
+                else _normalize_model_enums(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_normalize_model_enums(item) for item in value]
+    return value
 
 
 def _json_object(response: str) -> dict[str, Any]:
@@ -893,8 +914,8 @@ def _compile_contracts(
                 # combination alias covers yet -- kept for recall rather than
                 # discarded, so a niche assay can still widen the search
                 # without a code change.
-                "supplementary_search_terms": _safe_terms(
-                    [*baseline.supplementary_search_terms, *unclassified_terms]
+                "supplementary_search_terms": _profile_safe_search_terms(
+                    [*baseline.supplementary_search_terms, *unclassified_terms], profile
                 ),
                 "unresolved_constraints": list(
                     dict.fromkeys(
@@ -908,6 +929,16 @@ def _compile_contracts(
             }
         )
     ]
+
+
+def _profile_safe_search_terms(
+    values: list[str], profile: CurationProfile | None
+) -> list[str]:
+    """Keep novel assay names, never a profile's declared single-layer terms."""
+    forbidden = {
+        item.casefold() for item in profile.search_hints.forbidden_query_terms
+    } if profile else set()
+    return _safe_terms([item for item in values if item.casefold().strip() not in forbidden])
 
 
 def _population_query_term(population: str | None, max_length: int = 80) -> str | None:

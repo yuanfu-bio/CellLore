@@ -88,12 +88,12 @@ class StepFunRequirementCompiler:
                     "planner_diagnostics": [*diagnostics, _diagnostic("planner:json_fallback_failed", error)],
                 })
 
-        compiled = _merge_requirement_draft(baseline, draft, self.client, diagnostics)
+        compiled = _merge_requirement_draft(baseline, draft, self.client, diagnostics, profile)
         if self.critic_client is None:
             return compiled
         try:
             critique = RequirementCritique.model_validate(_json_object(await self.critic_client.complete(_critic_messages(question, compiled), temperature=0.0, max_tokens=1_400)))
-            revised = _merge_requirement_draft(baseline, critique.revised_draft, self.client, [*compiled.planner_diagnostics, "critic:applied"]) if critique.revised_draft else compiled
+            revised = _merge_requirement_draft(baseline, critique.revised_draft, self.client, [*compiled.planner_diagnostics, "critic:applied"], profile) if critique.revised_draft else compiled
             return revised.model_copy(update={
                 "planner_diagnostics": [*revised.planner_diagnostics, *(f"critic:missing:{item}" for item in critique.missing_constraints), *(f"critic:conflict:{item}" for item in critique.conflicts)],
             })
@@ -127,7 +127,13 @@ def _json_object(response: str) -> dict[str, object]:
     return decoded
 
 
-def _merge_requirement_draft(baseline: ResearchRequirement, draft: LLMRequirementDraft | None, client: ChatCompletionClient, diagnostics: list[str]) -> ResearchRequirement:
+def _merge_requirement_draft(
+    baseline: ResearchRequirement,
+    draft: LLMRequirementDraft | None,
+    client: ChatCompletionClient,
+    diagnostics: list[str],
+    profile: CurationProfile | None = None,
+) -> ResearchRequirement:
     if draft is None:
         return baseline
     required_omics_layers = _unique([*baseline.required_omics_layers, *draft.omics_layers])
@@ -159,11 +165,20 @@ def _merge_requirement_draft(baseline: ResearchRequirement, draft: LLMRequiremen
         # The LLM's own free-text search terms extend recall for technologies
         # the alias tables cannot yet name, without waiting on an alias-table
         # update; QueryPlanner ORs a bounded number of these into the query.
-        "supplementary_search_terms": _safe_terms(
-            [*baseline.supplementary_search_terms, *draft.search_terms]
+        "supplementary_search_terms": _profile_safe_search_terms(
+            [*baseline.supplementary_search_terms, *draft.search_terms], profile
         ),
         "compiler": f"stepfun_structured_v2:{model}", "compiler_warnings": [], "planner_diagnostics": diagnostics,
     })
+
+
+def _profile_safe_search_terms(
+    values: list[str], profile: CurationProfile | None
+) -> list[str]:
+    forbidden = {
+        item.casefold() for item in profile.search_hints.forbidden_query_terms
+    } if profile else set()
+    return _safe_terms([item for item in values if item.casefold().strip() not in forbidden])
 
 
 def _merge_evaluation(base: EvaluationPolicy, draft: EvaluationPolicy) -> EvaluationPolicy:

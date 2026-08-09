@@ -118,6 +118,9 @@ class SearchHints(StrictModel):
     layer_aliases: dict[OmicsLayer, tuple[str, ...]] = Field(default_factory=dict)
     technology_seeds: tuple[str, ...] = Field(default_factory=tuple)
     pairing_phrase_seeds: tuple[str, ...] = Field(default_factory=tuple)
+    # Terms that name only one layer and would broaden a relational profile
+    # into unrelated single-assay records when OR-ed into a repository query.
+    forbidden_query_terms: tuple[str, ...] = Field(default_factory=tuple)
 
 
 class CurationProfile(StrictModel):

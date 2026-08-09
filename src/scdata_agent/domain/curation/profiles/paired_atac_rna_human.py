@@ -199,6 +199,11 @@ PAIRED_ATAC_RNA_HUMAN = CurationProfile(
         layer_aliases=LAYER_ALIASES,
         technology_seeds=_rna_atac_technology_seeds,
         pairing_phrase_seeds=SAME_CELL_PAIRING_ALIASES,
+        forbidden_query_terms=(
+            "atac", "atac-seq", "scatac-seq", "snatac-seq",
+            "rna", "rna-seq", "scrna-seq", "snrna-seq",
+            "gene expression", "transcriptome", "chromatin accessibility",
+        ),
     ),
     manifest_dialect=PAIRED_MULTIOME_ZH_V1,
     required_data_roles=_required_roles,

@@ -12,7 +12,7 @@ from scdata_agent.application.discovery import default_workflow
 from scdata_agent.application.resource_pipeline import (
     build_discovery_pointer_batch,
 )
-from scdata_agent.domain.models import QuerySpec
+from scdata_agent.domain.models import DatasetCandidate, QuerySpec, ResearchRequirement
 from scdata_agent.domain.resolution import merge_source_records
 from scdata_agent.infrastructure.llm.agent_runtime import run_bounded_agent
 from scdata_agent.infrastructure.llm.query_planner import configured_query_planner
@@ -64,6 +64,32 @@ def _coverage_gaps(requirement, candidates: list[dict]) -> dict:
     return {"gaps": gaps, "candidate_count": len(candidates)}
 
 
+def _matches_required_organisms(
+    candidate: DatasetCandidate, requirement: ResearchRequirement
+) -> bool:
+    """Apply typed organism constraints to returned records, not just queries.
+
+    Repository query syntax is recall-oriented and can return cross-species or
+    mixed-species records. A candidate whose reported organisms include an
+    organism outside the requested set is out of scope; an unknown organism is
+    retained for later evidence review rather than guessed human.
+    """
+    if not requirement.organisms or not candidate.organisms:
+        return True
+    expected = {value.casefold() for value in requirement.organisms}
+    observed = {value.casefold() for value in candidate.organisms}
+    return observed <= expected
+
+
+def _apply_required_candidate_filters(
+    requirement: ResearchRequirement, candidates: list[DatasetCandidate]
+) -> list[DatasetCandidate]:
+    return [
+        candidate for candidate in candidates
+        if _matches_required_organisms(candidate, requirement)
+    ]
+
+
 class ResourceDiscoveryAgent:
     name = AgentName.RESOURCE_DISCOVERY
 
@@ -71,6 +97,9 @@ class ResourceDiscoveryAgent:
         if context.requirement is None:
             raise RuntimeError("Research requirement is required before discovery.")
         workflow = default_workflow(context.database_path, use_llm=False)
+        if context.policy.get("sources") == ["geo"]:
+            workflow.adapters = {name: adapter for name, adapter in workflow.adapters.items()
+                                 if name == "ncbi_geo"}
         workflow.compiler = FixedRequirementCompiler(context.requirement)
         # Round-0 query authoring is a core dependency here too, same as
         # requirement compilation and research planning -- see
@@ -78,11 +107,18 @@ class ResourceDiscoveryAgent:
         # in domain.requirements are not good enough on their own.
         workflow.planner = configured_query_planner(context.policy.get("use_llm", True))
         context.discovery = await workflow.run(context.question, max_results=context.policy.get("max_results", 20))
+        context.discovery = context.discovery.model_copy(update={
+            "candidates": _apply_required_candidate_filters(
+                context.requirement, context.discovery.candidates
+            ),
+        })
         extra_records = []
         note, trajectory = await self._review_results(context, workflow, extra_records)
         if extra_records:
             records = [*context.discovery.source_records, *extra_records]
-            candidates = merge_source_records(records)
+            candidates = _apply_required_candidate_filters(
+                context.requirement, merge_source_records(records)
+            )
             context.discovery = context.discovery.model_copy(update={
                 "source_records": records,
                 "candidates": candidates,

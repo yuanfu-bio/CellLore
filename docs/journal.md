@@ -2,6 +2,10 @@
 
 ## Current architecture
 
+- Paired-profile retrieval rejects profile-declared single-layer query terms (for example, bare `ATAC`/`RNA`) and deterministically excludes returned records that report organisms outside the requirement before GSM/LLM curation.
+
+- The current MVP delivery target is GEO-only `paired_atac_rna_human`: natural-language task/profile selection through GSE/GSM/file curation, PairUnits, evidence/audit, and a downloadable five-sheet catalog. A discovered study with no resolved PairUnit is retained as `HOLD` with an actionable audit record rather than omitted.
+
 - The system advances independent semantic Bundles through evidence-linked, remote-inventoried, preflight, approved, transferred, materialized, QC, and governed states.
 - Discovery publishes explicit resource pointers and starts direct Asset Scout while Evidence Curator performs non-blocking metadata review. Evidence pointer deltas trigger an enriched scout pass; reconciled inventory is the only Preflight input.
 - Evidence escalation joins direct inventory with metadata review and fetches PMC open full text only for unresolved hard fields; paywall or authentication bypass is forbidden.
@@ -103,6 +107,8 @@
   assertion naming records that must never pass the modality gate. It exists
   because `deposition_precision` falls when a wrongly-admitted record is
   correctly excluded, so a rate cannot tell a fix from a regression.
+
+- The curation MVP accepts an explicit registered `profile_id` or Auto selection and constrains its current run policy to GEO. A run-level catalog endpoint exposes `01_Studies` through `05_Policy` plus an XLSX export; catalog export also reads legacy pre-`OmicsLayer` artifacts by dropping only retired modality fields.
 
 ## Next
 

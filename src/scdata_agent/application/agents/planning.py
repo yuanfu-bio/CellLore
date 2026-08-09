@@ -16,6 +16,7 @@ class ResearchPlannerAgent:
         planner = configured_research_planner(
             context.policy.get("use_llm", True),
             mode=context.policy.get("planner_mode"),
+            profile_id=context.policy.get("profile_id"),
         )
 
         def _persist_llm_event(event: dict[str, Any]) -> None:

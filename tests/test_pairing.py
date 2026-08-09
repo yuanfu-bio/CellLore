@@ -578,6 +578,12 @@ class TestEvidenceCompletenessGatesAcquisition:
         assert audit_tasks[0]["blocking_category"] == "has_pair_relationship"
         assert audit_tasks[0]["category_family"] == "pairing"
         assert audit_tasks[0]["subject_id"] == "pair_unit_1"
+        # A blank audit_method/steps/pass_criteria looks like a resolved
+        # audit row with nothing left to do; a curator reading 04_Audit_Hold
+        # needs an actual checklist, not silence.
+        assert audit_tasks[0]["audit_method"]
+        assert audit_tasks[0]["audit_steps"]
+        assert audit_tasks[0]["pass_criteria"]
 
     @pytest.mark.asyncio
     async def test_candidate_missing_an_assay_profile_entirely_needs_evidence(self, tmp_path):

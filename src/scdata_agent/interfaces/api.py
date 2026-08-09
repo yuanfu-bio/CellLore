@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
@@ -16,7 +17,12 @@ from pydantic import BaseModel, Field
 
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
 from scdata_agent.application.collaboration import CollaborationLedger
+from scdata_agent.application.curation_catalog import (
+    build_curation_catalog,
+    write_curation_catalog_xlsx,
+)
 from scdata_agent.application.orchestration_v2 import workflow_topology
+from scdata_agent.domain.curation.profiles import PROFILES, profile_by_id
 
 _STATUS_COLOR = {
     "queued": "gray", "running": "blue", "waiting_for_decision": "amber",
@@ -32,6 +38,8 @@ class CreateRunRequest(BaseModel):
     question: str = Field(min_length=3)
     max_results: int = Field(default=20, ge=1, le=100)
     use_llm: bool = True
+    profile_id: str | None = None
+    sources: list[Literal["geo"]] = Field(default_factory=lambda: ["geo"])
     data_root: str = "data"
     max_download_bytes: int | None = Field(default=None, ge=1)
     evaluation_identifiers: list[str] = Field(default_factory=list)
@@ -80,9 +88,16 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
 
     @app.post("/runs", status_code=202)
     async def create_run(request: CreateRunRequest) -> dict[str, Any]:
+        if request.profile_id is not None:
+            try:
+                profile_by_id(request.profile_id)
+            except KeyError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
         run = ledger.create_run(request.question, {
             "max_results": request.max_results,
             "use_llm": request.use_llm,
+            "profile_id": request.profile_id,
+            "sources": request.sources,
             "data_root": request.data_root,
             "max_download_bytes": request.max_download_bytes,
             "evaluation_identifiers": request.evaluation_identifiers,
@@ -102,6 +117,11 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
         task = asyncio.create_task(supervisor.execute(run.run_id), name=f"scdata-agent:{run.run_id}")
         app.state.background_tasks[run.run_id] = task
         return run.model_dump(mode="json")
+
+    @app.get("/curation-profiles")
+    async def curation_profiles() -> list[dict[str, str]]:
+        return [{"profile_id": profile.profile_id, "label": profile.label,
+                 "scientific_objective": profile.scientific_objective} for profile in PROFILES]
 
     @app.get("/runs")
     async def list_runs() -> list[dict[str, Any]]:
@@ -161,6 +181,36 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             return _run_payload(ledger, run_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.get("/runs/{run_id}/curation-catalog")
+    async def curation_catalog(run_id: str) -> dict[str, Any]:
+        try:
+            ledger.get_run(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        catalog = build_curation_catalog(run_id, ledger.list_artifacts(run_id))
+        return {
+            "studies": catalog.studies,
+            "pair_units": catalog.pair_units,
+            "files": catalog.files,
+            "audit_hold": catalog.audit_hold,
+            "policy": catalog.policy,
+        }
+
+    @app.get("/runs/{run_id}/curation-catalog.xlsx")
+    async def curation_catalog_xlsx(run_id: str) -> FileResponse:
+        try:
+            ledger.get_run(run_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        catalog = build_curation_catalog(run_id, ledger.list_artifacts(run_id))
+        out_path = Path(tempfile.gettempdir()) / f"curation_catalog_{run_id}.xlsx"
+        write_curation_catalog_xlsx(catalog, str(out_path))
+        return FileResponse(
+            out_path,
+            filename=f"curation_catalog_{run_id}.xlsx",
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     @app.get("/runs/{run_id}/events")
     async def events(run_id: str, after: int = 0) -> StreamingResponse:

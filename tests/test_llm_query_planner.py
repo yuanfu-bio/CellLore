@@ -108,6 +108,14 @@ class TestLLMQueryPlanner:
         )
 
     @pytest.mark.asyncio
+    async def test_profile_rejects_single_layer_llm_query_terms(self):
+        client = FakeClient(json.dumps({"terms": ["ATAC", "10x Multiome"]}))
+        plan = await LLMQueryPlanner(client).plan(_requirement(), max_results=15)
+        geo_query = next(q.query for q in plan.queries if q.source == "ncbi_geo")
+        assert '"10x Multiome"' in geo_query
+        assert '"ATAC"' not in geo_query
+
+    @pytest.mark.asyncio
     async def test_unresolvable_profile_id_does_not_crash(self):
         client = FakeClient(json.dumps({"terms": ["multiome"]}))
         requirement = _requirement(profile_id="does_not_exist")

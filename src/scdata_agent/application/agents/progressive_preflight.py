@@ -59,6 +59,123 @@ def _category_family(blocking_category: str) -> AuditTaskCategoryFamily:
     return AuditTaskCategoryFamily.OTHER
 
 
+# (audit_method, audit_steps, pass_criteria) per blocking_category prefix --
+# grounded in what this codebase already knows how to check (the evidence
+# tiers PairingVerifier itself runs, the role-inference machinery, the
+# licence-policy precedence), not a generic template. A curation-catalog
+# export (04_Audit_Hold) reads these three fields directly, so leaving them
+# blank on every AuditTask -- which is what happened before this table
+# existed -- meant that sheet had a blocking reason but no guidance on how to
+# actually resolve it.
+_AUDIT_GUIDANCE: dict[str, tuple[str, str, str]] = {
+    "has_pair_relationship": (
+        "Read this pair unit's own GSM sample text for a named co-assay "
+        "technology or an explicit same-cell/same-nucleus statement; never "
+        "infer from GSM accession adjacency.",
+        "1) Open every member GSM's GEO record. 2) Check for a named "
+        "co-assay technology (10x Multiome, SNARE-seq, ...) or explicit "
+        "same-cell/same-nucleus wording in that sample's own text. 3) If "
+        "neither is stated, a post-download barcode-overlap check is the "
+        "only remaining path to a claim.",
+        "A repository_reported has_pair_relationship claim at same_cell or "
+        "same_nucleus is recorded for this pair unit.",
+    ),
+    "has_omics_layer": (
+        "Confirm which omics layers this candidate's own text (series "
+        "title/abstract, per-GSM sample titles) actually declares.",
+        "1) Re-read the study/series text for the missing layer's "
+        "technology terms. 2) Check per-GSM sample titles for a layer this "
+        "candidate was never scored as declaring.",
+        "A has_omics_layer claim for the missing layer is recorded, sourced "
+        "from the study's own text.",
+    ),
+    "resolved_assembly": (
+        "Confirm the genome build every required file was aligned/called "
+        "against.",
+        "1) Check each processed file's own header or the study's methods "
+        "text for a genome build. 2) If files disagree, treat the bundle as "
+        "assembly-ambiguous rather than picking one.",
+        "A single, evidence-backed genome build is recorded for every "
+        "required file in the bundle.",
+    ),
+    "bundle:missing_roles": (
+        "Identify which required file role has no matching asset in this "
+        "bundle's inventory.",
+        "1) List this bundle's observed roles against its schema's required "
+        "role groups. 2) Search the candidate's remaining supplementary "
+        "files or archives for a file matching the missing role. 3) If "
+        "genuinely absent, this bundle cannot satisfy the schema.",
+        "Every required role group has at least one matching asset.",
+    ),
+    "archive:uninspected": (
+        "Open the unopened archive and enumerate its members before "
+        "judging bundle completeness -- an archive's contents are unknown, "
+        "not absent.",
+        "1) Download or remotely list the archive's table of contents. "
+        "2) Match member file names against the missing roles via the same "
+        "role-inference rules used elsewhere. 3) Re-judge the bundle on the "
+        "real contents.",
+        "The archive's members are enumerated and role-inferred; the "
+        "bundle is re-judged on real contents, not an unopened container.",
+    ),
+    "access:": (
+        "Confirm public accessibility of the recorded URLs.",
+        "1) Re-probe each asset's declared URL. 2) Check the repository "
+        "page directly for an access restriction or embargo notice.",
+        "All required assets resolve with a public, unauthenticated "
+        "response.",
+    ),
+    "modality:": (
+        "Re-check whether this candidate actually declares the omics "
+        "layers the active profile requires.",
+        "1) Re-read the candidate's own declared assay profiles. 2) Confirm "
+        "the mismatch is real and not an artifact of narrowing by the "
+        "wrong requirement.",
+        "The candidate's declared layers are confirmed to match or "
+        "genuinely not match what the profile requires.",
+    ),
+    "license:": (
+        "Read the record's own declared licence, or confirm every archive "
+        "serving its files has a registered policy covering redistribution.",
+        "1) Check the repository record for an explicit licence field. "
+        "2) If absent, confirm every serving archive's terms are covered by "
+        "a registered licensing policy (domain.licensing).",
+        "Every asset's licence basis is approved or repository_policy, "
+        "never restricted or unknown.",
+    ),
+    "profile:out_of_scope": (
+        "Confirm this bundle's applicable schemas genuinely fall outside "
+        "the active profile's bundle_schemas.",
+        "1) List the bundle's applicable_schema_ids. 2) Compare against the "
+        "resolved profile's own bundle_schemas. 3) If they should overlap, "
+        "the layer/role inference that fed bundle_shape_for is what needs "
+        "fixing, not this exclusion.",
+        "Either the bundle stays excluded as genuinely out of scope, or the "
+        "upstream schema-applicability computation is corrected.",
+    ),
+    "evidence:unresolved": (
+        "Resolve the specific evidence claim(s) still flagged as unresolved "
+        "for this bundle.",
+        "1) Read the preflight report's rationale for which evidence field "
+        "is unresolved. 2) Re-run the escalation step that produces it, or "
+        "source it manually from the record.",
+        "No evidence field required for this decision remains unresolved.",
+    ),
+}
+
+
+def _audit_guidance(blocking_category: str) -> tuple[str, str, str]:
+    for prefix, guidance in _AUDIT_GUIDANCE.items():
+        if blocking_category.startswith(prefix):
+            return guidance
+    return (
+        "Review the blocking reason directly; no standard checklist is "
+        "registered for this category yet.",
+        "",
+        "",
+    )
+
+
 class ProgressivePreflightAssessmentAgent:
     name = AgentName.PREFLIGHT_ASSESSMENT
 
@@ -495,6 +612,7 @@ class ProgressivePreflightAssessmentAgent:
                         "from this profile's corpus rather than evaluated against its "
                         "required_evidence."
                     )
+                audit_method, audit_steps, pass_criteria = _audit_guidance(blocking_category)
                 audit_task = AuditTask(
                     task_id=stable_id("audit_task", f"{bundle.bundle_id}:{context.run_id}"),
                     run_id=context.run_id,
@@ -503,6 +621,9 @@ class ProgressivePreflightAssessmentAgent:
                     queue_action=AuditQueueAction.EXCLUDED,
                     blocking_category=blocking_category,
                     category_family=_category_family(blocking_category),
+                    audit_method=audit_method,
+                    audit_steps=audit_steps,
+                    pass_criteria=pass_criteria,
                     rationale=rationale,
                 )
             elif decision == BundleStatus.NEEDS_EVIDENCE:
@@ -515,6 +636,7 @@ class ProgressivePreflightAssessmentAgent:
                 else:
                     blocking_category = "evidence:unresolved"
                     queue_action = AuditQueueAction.VERIFY_THEN_ARCHIVE
+                audit_method, audit_steps, pass_criteria = _audit_guidance(blocking_category)
                 audit_task = AuditTask(
                     task_id=stable_id("audit_task", f"{bundle.bundle_id}:{context.run_id}"),
                     run_id=context.run_id,
@@ -523,6 +645,9 @@ class ProgressivePreflightAssessmentAgent:
                     queue_action=queue_action,
                     blocking_category=blocking_category,
                     category_family=_category_family(blocking_category),
+                    audit_method=audit_method,
+                    audit_steps=audit_steps,
+                    pass_criteria=pass_criteria,
                     rationale=(
                         "; ".join(item.predicate for item in evidence_result.missing)
                         if evidence_result is not None and evidence_result.missing

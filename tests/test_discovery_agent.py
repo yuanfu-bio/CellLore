@@ -14,11 +14,13 @@ import pytest
 from scdata_agent.application.agents.discovery import (
     MAX_SUPPLEMENTARY_SEARCHES,
     ResourceDiscoveryAgent,
+    _apply_required_candidate_filters,
     _coverage_gaps,
 )
 from scdata_agent.application.agents.shared import AgentContext
 from scdata_agent.application.collaboration import CollaborationLedger
 from scdata_agent.domain.models import (
+    DatasetCandidate,
     DiscoveryRunResult,
     OmicsLayer,
     PairingLevel,
@@ -100,3 +102,16 @@ async def test_review_results_short_circuits_without_use_llm(tmp_path):
     )
     assert note is None
     assert trajectory == []
+
+def test_required_organism_filter_rejects_cross_species_candidates():
+    requirement = ResearchRequirement(question="human multiome", organisms=["Homo sapiens"])
+    human = DatasetCandidate(candidate_id="human", title="Human", organisms=["Homo sapiens"])
+    mixed = DatasetCandidate(
+        candidate_id="mixed", title="Human and mouse", organisms=["Homo sapiens", "Mus musculus"]
+    )
+    mouse = DatasetCandidate(candidate_id="mouse", title="Mouse", organisms=["Mus musculus"])
+    unknown = DatasetCandidate(candidate_id="unknown", title="Organism not reported")
+
+    filtered = _apply_required_candidate_filters(requirement, [human, mixed, mouse, unknown])
+
+    assert [candidate.candidate_id for candidate in filtered] == ["human", "unknown"]
