@@ -39,6 +39,39 @@ class OpenAICompatibleSettings(BaseModel):
     reasoning_effort: str | None = None
 
 
+DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
+
+
+def _http_timeout_seconds() -> float:
+    """Per-request HTTP timeout for a single LLM call.
+
+    The deep research planner budgets up to ``SCDATA_AGENT_PLANNER_TIMEOUT_
+    SECONDS`` (600s by default) across 4 sequential real calls, one of which
+    (study_design) asks for up to 16,000 output tokens -- comfortably over a
+    minute of generation on its own under real load. A flat, much shorter
+    per-request timeout here fires first and is indistinguishable from the
+    provider being genuinely unreachable, which previously made a live
+    ReadTimeout on a single call silently degrade the whole plan (see
+    MultiStageResearchPlanner.plan). Default high enough to not be the
+    practical bottleneck within that budget; still overridable per
+    deployment.
+    """
+    return float(os.getenv("SCDATA_AGENT_LLM_HTTP_TIMEOUT_SECONDS", "240.0"))
+
+
+def _deepseek_settings(profile: ReasoningProfile) -> OpenAICompatibleSettings:
+    key = os.getenv("DEEPSEEK_API_KEY")
+    if not key:
+        raise RuntimeError("DEEPSEEK_API_KEY is not configured. Copy .env.example to .env and add a key.")
+    model = _profile_value(profile, os.getenv("DEEPSEEK_MODEL", DEEPSEEK_DEFAULT_MODEL), "MODEL")
+    return OpenAICompatibleSettings(
+        api_key=key,
+        base_url=os.getenv("DEEPSEEK_BASE_URL", DEEPSEEK_DEFAULT_BASE_URL).rstrip("/"),
+        model=model,
+    )
+
+
 class OpenAICompatibleClient:
     def __init__(self, settings: OpenAICompatibleSettings, client: httpx.AsyncClient | None = None) -> None:
         self.settings = settings
@@ -46,7 +79,7 @@ class OpenAICompatibleClient:
 
     async def complete(self, messages: list[dict[str, Any]], *, temperature: float = 0.1, max_tokens: int = 2_000) -> str:
         owns_client = self._client is None
-        client = self._client or httpx.AsyncClient(timeout=60.0)
+        client = self._client or httpx.AsyncClient(timeout=_http_timeout_seconds())
         payload: dict[str, Any] = {"model": self.settings.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
         if self.settings.reasoning_effort:
             payload["reasoning_effort"] = self.settings.reasoning_effort
@@ -97,7 +130,7 @@ class AnthropicClient:
         system = "\n".join(str(item["content"]) for item in messages if item.get("role") == "system")
         turns = [{"role": item["role"], "content": item["content"]} for item in messages if item.get("role") != "system"]
         owns_client = self._client is None
-        client = self._client or httpx.AsyncClient(timeout=60.0)
+        client = self._client or httpx.AsyncClient(timeout=_http_timeout_seconds())
         started = time.perf_counter()
         try:
             response = await client.post(f"{self.settings.base_url.rstrip('/')}/messages", headers={"x-api-key": self.settings.api_key, "anthropic-version": "2023-06-01"}, json={"model": self.settings.model, "system": system, "messages": turns, "temperature": temperature, "max_tokens": max_tokens})
@@ -149,6 +182,9 @@ class ModelRouter:
                 raise RuntimeError("ANTHROPIC_API_KEY and ANTHROPIC_MODEL are required.")
             return ChatAnthropic(model=model, api_key=key, base_url=os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"), temperature=0.0)
         from langchain_openai import ChatOpenAI
+        if provider == "deepseek":
+            settings = _deepseek_settings(profile)
+            return ChatOpenAI(model=settings.model, api_key=settings.api_key, base_url=settings.base_url, temperature=0.0)
         if provider in {"openai_compatible", "openai", "openrouter", "ollama"}:
             key = os.getenv("SCDATA_AGENT_MODEL_API_KEY")
             base_url = os.getenv("SCDATA_AGENT_MODEL_BASE_URL")
@@ -173,6 +209,8 @@ class ModelRouter:
                 if not key or not model:
                     raise RuntimeError("ANTHROPIC_API_KEY and ANTHROPIC_MODEL are required.")
                 clients[profile] = AnthropicClient(AnthropicSettings(api_key=key, model=model, base_url=os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1")))
+            elif provider == "deepseek":
+                clients[profile] = OpenAICompatibleClient(_deepseek_settings(profile))
             elif provider in {"openai_compatible", "openai", "openrouter", "ollama"}:
                 key, base_url = os.getenv("SCDATA_AGENT_MODEL_API_KEY"), os.getenv("SCDATA_AGENT_MODEL_BASE_URL")
                 model = _profile_value(profile, os.getenv("SCDATA_AGENT_MODEL"), "MODEL")

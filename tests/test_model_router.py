@@ -33,6 +33,50 @@ def test_profile_model_override(monkeypatch):
     assert router.client(ReasoningProfile.REVIEW).settings.model == "default-model"
 
 
+def test_deepseek_provider_uses_documented_defaults(monkeypatch, tmp_path):
+    from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+
+    # chdir away from the repo's real .env, which may itself configure DeepSeek.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
+
+    router = ModelRouter.from_environment()
+    settings = router.client(ReasoningProfile.PLANNER).settings
+    assert settings.model == "deepseek-chat"
+    assert settings.base_url == "https://api.deepseek.com"
+    assert settings.api_key == "test-key"
+
+
+def test_deepseek_provider_honours_overrides(monkeypatch):
+    from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+
+    monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-reasoner")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://example.test/v1/")
+    monkeypatch.setenv("SCDATA_AGENT_MODEL_PLANNER", "planner-override")
+
+    router = ModelRouter.from_environment()
+    assert router.client(ReasoningProfile.PLANNER).settings.model == "planner-override"
+    assert router.client(ReasoningProfile.REVIEW).settings.model == "deepseek-reasoner"
+    assert router.client(ReasoningProfile.REVIEW).settings.base_url == "https://example.test/v1"
+
+
+def test_deepseek_provider_requires_api_key(monkeypatch, tmp_path):
+    from scdata_agent.infrastructure.llm.router import ModelRouter
+
+    # chdir away from the repo's real .env, which may itself set DEEPSEEK_API_KEY.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "deepseek")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
+        ModelRouter.from_environment()
+
+
 def test_stepfun_planner_uses_low_effort_by_default(monkeypatch):
     from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
 

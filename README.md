@@ -290,8 +290,9 @@ Model routing is provider-neutral; StepFun is the default.
 
 | Variable | Purpose |
 |---|---|
-| `SCDATA_AGENT_MODEL_PROVIDER` | `stepfun` (default), `openai_compatible`, `openai`, `openrouter`, `ollama`, `anthropic` |
+| `SCDATA_AGENT_MODEL_PROVIDER` | `stepfun` (default), `deepseek`, `openai_compatible`, `openai`, `openrouter`, `ollama`, `anthropic` |
 | `STEPFUN_API_KEY` / `STEPFUN_MODEL` | default provider credentials |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` / `DEEPSEEK_BASE_URL` | DeepSeek credentials (`SCDATA_AGENT_MODEL_PROVIDER=deepseek`); model defaults to `deepseek-chat`, base URL to `https://api.deepseek.com` |
 | `SCDATA_AGENT_MODEL_{PLANNER,DISCOVERY,REVIEW,CHAT}` | per-role model overrides |
 | `SCDATA_AGENT_REASONING_EFFORT[_ROLE]` | per-role reasoning effort |
 | `NCBI_EMAIL` / `NCBI_API_KEY` | NCBI E-utilities etiquette and rate limits |
