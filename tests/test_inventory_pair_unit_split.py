@@ -69,7 +69,7 @@ def _sample(gsm, title, supplementary_files):
     )
 
 
-async def _run(tmp_path, candidate, assets, samples, resolver, verifier):
+async def _run(tmp_path, candidate, assets, samples, resolver, verifier, policy=None):
     requirement = ResearchRequirement(question="paired multiome")
     discovery = DiscoveryRunResult(
         run_id="run_1", requirement=requirement,
@@ -79,7 +79,11 @@ async def _run(tmp_path, candidate, assets, samples, resolver, verifier):
     database = tmp_path / "reconcile.sqlite"
     context = AgentContext(
         run_id="run_1", question=requirement.question, database_path=str(database),
-        ledger=CollaborationLedger(database), policy={"use_llm": False},
+        ledger=CollaborationLedger(database),
+        # Tests must never touch the network (CONTRIBUTING.md); the probe's
+        # own HTTP behavior is exercised offline in
+        # test_geo_sample_probe_upgrades_declared_assets_to_verified below.
+        policy={"use_llm": False, "remote_probe_enabled": False, **(policy or {})},
         requirement=requirement, discovery=discovery,
     )
     context.artifacts.append(artifact(
@@ -403,3 +407,78 @@ async def test_genome_build_stated_in_series_text_reaches_gsm_derived_assets(tmp
         if item["file_name"] == "GSM1_filtered_feature_bc_matrix.h5"
     )
     assert asset["genome_build"] == "GRCh38"
+
+
+class _FakeProbe:
+    """Marks every direct location OBSERVED/PUBLIC_VERIFIED, offline.
+
+    Mirrors test_manifest_ingestion.py's ``_FakeProbe``: it proves
+    InventoryReconcileAgent wires the probe (and only probes GSM-derived
+    assets, not ones already resolved by another route) without asserting
+    anything about RemoteAvailabilityProbe's own HTTP behavior.
+    """
+
+    instances: list["_FakeProbe"] = []
+
+    def __init__(self, **kwargs) -> None:
+        self.seen_assets: list[DataAsset] | None = None
+        _FakeProbe.instances.append(self)
+
+    async def probe_assets(self, assets):
+        self.seen_assets = list(assets)
+        upgraded = []
+        for asset in assets:
+            location = asset.locations[0].model_copy(update={
+                "availability": AssetAvailability.OBSERVED,
+                "access_level": AccessLevel.PUBLIC_VERIFIED,
+                "size_bytes": 1024,
+            })
+            upgraded.append(asset.model_copy(update={"locations": [location]}))
+        return upgraded, []
+
+
+@pytest.mark.asyncio
+async def test_geo_sample_probe_upgrades_declared_assets_to_verified(tmp_path, monkeypatch):
+    """GSM-derived assets are built here, not by ProgressiveAssetScoutAgent,
+    so without probing them they stay PUBLIC_DECLARED forever and the bundle
+    never clears acquisition's access:declared_only gate no matter how solid
+    the pairing evidence is. A pre-resolved asset (already probed upstream,
+    on another route) must not be re-probed."""
+    _FakeProbe.instances.clear()
+    monkeypatch.setattr(
+        "scdata_agent.application.agents.inventory_reconcile.RemoteAvailabilityProbe",
+        _FakeProbe,
+    )
+    candidate = DatasetCandidate(
+        candidate_id="cand_1", title="10x Multiome, one donor",
+        assay_profiles=[AssayProfile(
+            label="10x_multiome_rna_atac",
+            omics_layers=[OmicsLayer.CHROMATIN_ACCESSIBILITY, OmicsLayer.TRANSCRIPTOME],
+            pairing_level=PairingLevel.SAME_NUCLEUS,
+            inferred_from=ProfileBasis.NAMED_TECHNOLOGY,
+            rationale="Named co-assay technology was observed.",
+        )],
+    )
+    pre_resolved = _asset("asset_pre", "cand_1", DataRole.RNA_MATRIX, "GSM1_pre_resolved.h5")
+    samples = [
+        _sample("GSM1", "Donor 1", [
+            "ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM1nnn/GSM1/suppl/GSM1_pre_resolved.h5",
+            "ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM1nnn/GSM1/suppl/GSM1_atac_fragments.tsv.gz",
+        ]),
+    ]
+    payload = await _run(
+        tmp_path, candidate, assets=[pre_resolved], samples=samples,
+        resolver=PairUnitResolver(client=None), verifier=PairingVerifier(client=None),
+        policy={"remote_probe_enabled": True},
+    )
+
+    probe = _FakeProbe.instances[0]
+    assert {item.file_name for item in probe.seen_assets} == {"GSM1_atac_fragments.tsv.gz"}
+
+    by_name = {item["file_name"]: item for item in payload["assets"]}
+    assert by_name["GSM1_atac_fragments.tsv.gz"]["locations"][0]["availability"] == "observed"
+    assert by_name["GSM1_atac_fragments.tsv.gz"]["locations"][0]["access_level"] == "public_verified"
+    assert by_name["GSM1_pre_resolved.h5"]["locations"][0]["availability"] == "observed"
+
+    summary = payload["bundle_summaries"][0]
+    assert summary["access_status"] == "verified"

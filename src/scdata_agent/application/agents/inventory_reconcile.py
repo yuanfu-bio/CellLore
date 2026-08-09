@@ -43,6 +43,7 @@ from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import (
     BundleStatus,
     EvidenceClaim,
+    RemoteAssetObservation,
     SemanticBundle,
 )
 from scdata_agent.domain.models import (
@@ -58,6 +59,7 @@ from scdata_agent.domain.models import (
 )
 from scdata_agent.domain.pair_units import ProposedPairUnit
 from scdata_agent.domain.resource_pipeline import AssetInventoryDelta
+from scdata_agent.infrastructure.remote_probe import RemoteAvailabilityProbe
 from scdata_agent.infrastructure.sources.common import infer_genome_build
 
 
@@ -134,6 +136,19 @@ class InventoryReconcileAgent:
             )
             if (candidate_id, asset.file_name) not in already_resolved
         ]
+        # These assets are built here, not by ProgressiveAssetScoutAgent, so
+        # unlike delta_assets they have never had a chance to earn
+        # PUBLIC_VERIFIED/OBSERVED status. Left as PUBLIC_DECLARED, every
+        # bundle built from them stays stuck at acquisition's manual_review
+        # tier (access:declared_only) regardless of how strong the pairing
+        # evidence is. Probing here -- our own HEAD/Range check, not the
+        # depositor's claim -- is what lets a fully-verified bundle actually
+        # reach "recommended".
+        geo_probe_observations: list[RemoteAssetObservation] = []
+        if bool(context.policy.get("remote_probe_enabled", True)):
+            geo_sample_assets, geo_probe_observations = await self._probe(
+                context, geo_sample_assets
+            )
 
         assets = self._merge_assets([*delta_assets, *geo_sample_assets])
         observations = list(
@@ -141,6 +156,12 @@ class InventoryReconcileAgent:
                 item.observation_id: item
                 for delta in deltas
                 for item in delta.observations
+            }.values()
+        )
+        observations = list(
+            {
+                item.observation_id: item
+                for item in [*observations, *geo_probe_observations]
             }.values()
         )
         pointers = merge_pointers(
@@ -375,6 +396,26 @@ class InventoryReconcileAgent:
     # ingestion produces the identical summary rather than a parallel one.
     _summarize = staticmethod(summarize_bundle)
     _file_type = staticmethod(asset_file_type)
+
+    async def _probe(
+        self, context: AgentContext, assets: list[DataAsset]
+    ) -> tuple[list[DataAsset], list[RemoteAssetObservation]]:
+        probe = RemoteAvailabilityProbe(
+            concurrency=int(context.policy.get("remote_probe_concurrency", 8)),
+            timeout_seconds=float(
+                context.policy.get("remote_probe_timeout_seconds", 10.0)
+            ),
+            max_attempts=int(context.policy.get("remote_probe_max_attempts", 2)),
+        )
+        probeable = [
+            item
+            for item in assets
+            if item.locations and item.locations[0].protocol != TransferProtocol.MANUAL
+        ]
+        probed, probe_observations = await probe.probe_assets(probeable)
+        probed_by_id = {item.asset_id: item for item in probed}
+        merged_assets = [probed_by_id.get(item.asset_id, item) for item in assets]
+        return merged_assets, probe_observations
 
     @staticmethod
     def _merge_assets(assets: list[DataAsset]) -> list[DataAsset]:
