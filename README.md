@@ -217,21 +217,43 @@ reference.
 ### Accessing the web UI remotely
 
 `scdata-agent serve` binds to `127.0.0.1` on the machine it runs on, so on a
-remote or shared host you need to forward the port to reach it from your own
-browser:
+remote or shared host you must forward the port before it opens in your own
+browser.
 
-- **VS Code / Cursor Remote-SSH**: open the *Ports* panel and forward the
-  port `scdata-agent serve` is listening on (default `8000`). If you're also
-  running the frontend in dev mode (`cd frontend && npm run dev`), forward
-  Vite's port too (default `5173`). These editors usually auto-detect a
-  listening port and offer to forward it.
-- **Plain SSH**: `ssh -L 8000:127.0.0.1:8000 user@remote-host` (add
-  `-L 5173:127.0.0.1:5173` if the Vite dev server is also running), then open
-  `http://127.0.0.1:8000` in your local browser.
-- **Shared machines**: check the port is free before relying on it —
-  `ss -ltn | grep :8000` — another user's `scdata-agent serve` process may
-  already be bound to it. Pass a different `--port` if so, and forward that
-  port instead.
+**On a shared machine, first confirm the port is actually free** — another
+user's `scdata-agent serve` may already be bound to it:
+
+```bash
+ss -ltn | grep :8000
+```
+
+If it's taken, start yours on a different port instead: `scdata-agent serve
+--port 8001 ...`.
+
+**Forwarding via VS Code / Cursor Remote-SSH** (the common case for this
+repo):
+
+1. Start the server first (`scdata-agent serve --database var/scdata_agent.sqlite --port 8001`).
+2. Open the **Ports** tab at the bottom of the editor, next to *Terminal* and
+   *Output*. If it isn't visible, run **View → Open View... → Ports**, or
+   `Ctrl/Cmd+Shift+P` → *Forward a Port*. VS Code often auto-detects the new
+   listening port and pops up a notification offering to forward it —
+   accepting that does the same thing as the manual steps below.
+3. Click **Forward a Port**, type `8001` (or whichever port you used), press
+   Enter.
+4. The new row shows a **Local Address** such as `http://127.0.0.1:8001` —
+   click it (or the globe icon) to open the page in your local browser.
+5. Running the frontend in dev mode too (`cd frontend && npm run dev`)?
+   Forward Vite's port (default `5173`) the same way.
+
+**Forwarding via plain SSH** (no editor, terminal-only access):
+
+```bash
+ssh -L 8001:127.0.0.1:8001 user@remote-host
+```
+
+Add `-L 5173:127.0.0.1:5173` too if the Vite dev server is also running, then
+open `http://127.0.0.1:8001` in your local browser.
 
 ## Data source coverage
 
