@@ -14,7 +14,10 @@ from scdata_agent.application.collaboration import (
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.application.orchestration_v2 import MultiAgentSupervisor
+from scdata_agent.application.orchestration_v2 import (
+    MultiAgentSupervisor,
+    workflow_topology,
+)
 from scdata_agent.application.resource_pipeline import merge_pointers
 from scdata_agent.domain.lifecycle import PointerStatus, ResourcePointer
 from scdata_agent.domain.models import (
@@ -87,6 +90,17 @@ def test_studio_graph_exposes_both_asset_scout_inputs(tmp_path):
     assert ("inventory_reconcile", "early_lineage") in edges
     assert ("preflight_assessment", "acquisition_strategy") in edges
     assert ("early_lineage", "acquisition_strategy") in edges
+
+
+def test_control_room_topology_includes_geo_sample_metadata_step():
+    topology = workflow_topology()
+    node_ids = {item["id"] for item in topology["nodes"]}
+    edges = {(item["source"], item["target"]) for item in topology["edges"]}
+
+    assert "geo_sample_metadata" in node_ids
+    assert ("asset_scout_enriched", "geo_sample_metadata") in edges
+    assert ("geo_sample_metadata", "inventory_reconcile") in edges
+    assert ("asset_scout_enriched", "inventory_reconcile") not in edges
 
 
 def test_pointer_merge_preserves_provenance_and_blocks_conflicts():
@@ -370,4 +384,3 @@ async def test_a_multiome_candidate_still_owes_pairing_evidence(tmp_path):
     )
 
     assert "multiome_pairing" in report.candidates[0].unresolved_fields
-
