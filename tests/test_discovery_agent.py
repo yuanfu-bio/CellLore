@@ -115,3 +115,29 @@ def test_required_organism_filter_rejects_cross_species_candidates():
     filtered = _apply_required_candidate_filters(requirement, [human, mixed, mouse, unknown])
 
     assert [candidate.candidate_id for candidate in filtered] == ["human", "unknown"]
+
+
+def test_paired_profile_filters_an_explicit_single_layer_series():
+    requirement = ResearchRequirement(
+        question="human paired multiome",
+        required_omics_layers=[
+            OmicsLayer.CHROMATIN_ACCESSIBILITY,
+            OmicsLayer.TRANSCRIPTOME,
+        ],
+        pairing_requirement=PairingRequirement(
+            acceptable_levels=[PairingLevel.SAME_CELL, PairingLevel.SAME_NUCLEUS]
+        ),
+    )
+    atac_only = DatasetCandidate(
+        candidate_id="atac_only",
+        title="snATAC-seq from psoas muscle (ENCSR916EDP)",
+    )
+    multiome = DatasetCandidate(
+        candidate_id="multiome",
+        title="10x Multiome RNA and ATAC from psoas muscle",
+    )
+    unknown = DatasetCandidate(candidate_id="unknown", title="Psoas muscle profiling")
+
+    filtered = _apply_required_candidate_filters(requirement, [atac_only, multiome, unknown])
+
+    assert [candidate.candidate_id for candidate in filtered] == ["multiome", "unknown"]

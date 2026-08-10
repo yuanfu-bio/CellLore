@@ -23,6 +23,7 @@ from scdata_agent.domain.models import (
     DatasetCandidate,
     EvidenceClass,
     GateStatus,
+    OmicsLayer,
     PairingLevel,
     ResearchRequirement,
     best_pairing_level,
@@ -186,7 +187,9 @@ def bundle_shape_for(
 
 
 def omics_layer_claims(
-    candidate: DatasetCandidate, requirement: ResearchRequirement | None = None
+    candidate: DatasetCandidate,
+    requirement: ResearchRequirement | None = None,
+    assets: list[DataAsset] | None = None,
 ) -> list[EvidenceClaim]:
     """One ``has_omics_layer:<layer>`` claim per distinct layer this
     candidate's AssayProfiles declare.
@@ -197,10 +200,13 @@ def omics_layer_claims(
     the same evidence-class rank, so collapsing to one is not a
     floor-weakening simplification.
 
-    Narrowed by ``requirement.required_omics_layers`` the same way
-    ``candidate_layers`` narrows (only narrows, never adds a layer the
-    candidate never claimed) -- callers on the discovery path pass the same
-    requirement `bundle_shape_for` already uses.
+    A repository's own supplementary-file manifest is also legitimate
+    acquisition-stage evidence when its listed asset roles structurally
+    identify a layer.  This closes the common GEO case where a sample's
+    supplementary files are an unambiguous native multiome package but the
+    series prose never spells out both layer names.  It does not use a model
+    guess: the claim points to the repository-listed assets and remains
+    subject to the independent same-cell pairing and bundle-schema gates.
 
     Discovery-path only. Manifest-ingested candidates declare
     ``assay_profiles=[]`` by design (see manifest_ingestion.py), so this
@@ -209,10 +215,29 @@ def omics_layer_claims(
     failure to fix.
     """
     layers = candidate_layers(candidate, requirement)
+    manifest_layers: set[OmicsLayer] = set()
+    manifest_asset_ids: dict[OmicsLayer, list[str]] = {}
+    for asset in assets or []:
+        layer = (
+            OmicsLayer.TRANSCRIPTOME
+            if asset.role == DataRole.RNA_MATRIX
+            else OmicsLayer.CHROMATIN_ACCESSIBILITY
+            if asset.role in {DataRole.PEAK_MATRIX, DataRole.FRAGMENTS}
+            else None
+        )
+        if layer is not None:
+            manifest_layers.add(layer)
+            manifest_asset_ids.setdefault(layer, []).append(asset.asset_id)
+    if requirement is not None:
+        manifest_layers &= set(requirement.required_omics_layers)
+    layers |= manifest_layers
     claims: list[EvidenceClaim] = []
     for layer in sorted(layers, key=str):
         profiles = [item for item in candidate.assay_profiles if layer in item.omics_layers]
-        if not profiles:
+        evidence_ids = list(
+            dict.fromkeys(eid for item in profiles for eid in item.evidence_ids)
+        )
+        if not profiles and layer not in manifest_layers:
             continue
         claims.append(
             EvidenceClaim(
@@ -223,14 +248,14 @@ def omics_layer_claims(
                 predicate=f"has_omics_layer:{layer.value}",
                 object_id=layer.value,
                 value=True,
-                evidence_ids=list(
-                    dict.fromkeys(eid for item in profiles for eid in item.evidence_ids)
-                ),
+                evidence_ids=evidence_ids or manifest_asset_ids.get(layer, []),
                 evidence_class=EvidenceClass.REPOSITORY_REPORTED,
-                confidence=max(item.confidence for item in profiles),
+                confidence=max((item.confidence for item in profiles), default=1.0),
                 rationale=(
                     f"The {layer.value} layer was observed in repository/article "
                     "assay-profile inference."
+                    if profiles
+                    else f"Repository-listed assets structurally identify the {layer.value} layer."
                 ),
             )
         )
@@ -510,4 +535,3 @@ def pointer_batches(
             ),
         )
     ]
-

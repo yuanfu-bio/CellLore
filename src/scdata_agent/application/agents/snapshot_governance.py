@@ -44,6 +44,9 @@ class SnapshotCorpusGovernanceAgent:
         inventory_artifact = latest_artifact(
             context.artifacts, ArtifactKind.ASSET_INVENTORY.value
         )
+        transfer_artifact = latest_artifact(
+            context.artifacts, ArtifactKind.TRANSFER_RECEIPTS.value
+        )
         preflight = {
             item.bundle_id: item
             for item in (
@@ -90,8 +93,15 @@ class SnapshotCorpusGovernanceAgent:
             )
             for bundle_id in family.bundle_ids
         }
+        # A normal graph invocation has transfer receipts.  Their selected
+        # bundle IDs are the user-approved scope for governance; preflight
+        # contains every candidate considered at the earlier approval gate.
+        # Without receipts, retain the standalone audit behaviour used by
+        # callers that deliberately assess a preflight report in isolation.
         all_bundle_ids = sorted(
-            set(preflight) | set(manifests) | set(quality)
+            set(transfer_artifact.payload.get("selected_bundle_ids", []))
+            if transfer_artifact is not None
+            else set(preflight) | set(manifests) | set(quality)
         )
         # Phase 5B: CORPUS_READY evidence completeness, the same formula
         # Phase 5A wired into preflight's ACQUISITION gate, now re-evaluated

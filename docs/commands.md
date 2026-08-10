@@ -130,6 +130,15 @@ mamba run -n scdata-agent scdata-agent agent-run 'research question' \
   --strict-license --database var/scdata_agent.sqlite
 ```
 
+For exploratory acquisition of publicly accessible data, retain a missing or
+unresolved per-record licence in the audit trail without holding it out of the
+recommendation tier. Restricted licences remain excluded:
+
+```bash
+mamba run -n scdata-agent scdata-agent agent-run 'research question' \
+  --allow-unknown-license --database var/scdata_agent.sqlite
+```
+
 `agent-run` defaults to the planner's `deep` mode (four sequential LLM calls,
 ~600s budget) so the model actually completes its analysis instead of racing
 two calls against a 30s budget each and degrading to a generic template.
@@ -148,6 +157,8 @@ mamba run -n scdata-agent scdata-agent resume CHECKPOINT_ID \
   --option plan_only --database var/scdata_agent.sqlite
 mamba run -n scdata-agent scdata-agent resume CHECKPOINT_ID \
   --option recommended --database var/scdata_agent.sqlite
+mamba run -n scdata-agent scdata-agent resume CHECKPOINT_ID \
+  --bundle-id BUNDLE_ID --database var/scdata_agent.sqlite
 mamba run -n scdata-agent scdata-agent resume CHECKPOINT_ID \
   --option all_with_unknown_size --database var/scdata_agent.sqlite
 ```

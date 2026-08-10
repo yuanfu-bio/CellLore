@@ -197,7 +197,9 @@ class InventoryReconcileAgent:
             # Candidate-scoped (not per-unit): AssayProfile text doesn't
             # distinguish per-pair-unit, so every pair-unit of this candidate
             # shares the same declared-layer evidence.
-            layer_claims.extend(omics_layer_claims(candidate, context.requirement))
+            layer_claims.extend(
+                omics_layer_claims(candidate, context.requirement, candidate_assets)
+            )
             samples = samples_by_candidate.get(candidate.candidate_id, [])
             units = await resolver.resolve(candidate, samples, candidate_assets)
             proposed_units.extend(units)

@@ -84,7 +84,11 @@ def require_download_approved(ledger: CollaborationLedger, run_id: str) -> dict[
             "repair only retries what was already approved for transfer."
         )
     resolution = checkpoints[-1].resolution or {}
-    if resolution.get("option") not in {"recommended", "all_with_unknown_size"}:
+    if resolution.get("option") not in {
+        "recommended",
+        "selected_recommended",
+        "all_with_unknown_size",
+    }:
         raise RepairNotAuthorized(
             f"download_selection was resolved with option={resolution.get('option')!r}, "
             "not a download option; nothing was approved for transfer."

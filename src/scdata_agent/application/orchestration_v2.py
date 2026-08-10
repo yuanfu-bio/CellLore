@@ -245,6 +245,9 @@ class MultiAgentSupervisor:
     async def resume_checkpoint(
         self, checkpoint_id: str, resolution: dict[str, Any]
     ) -> DecisionCheckpoint:
+        checkpoint = self.ledger.get_checkpoint(checkpoint_id)
+        if checkpoint.kind == "download_selection":
+            self._validate_download_resolution(checkpoint, resolution)
         checkpoint = self.ledger.resolve_checkpoint(checkpoint_id, resolution)
         self.ledger.add_event(
             checkpoint.run_id,
@@ -594,9 +597,37 @@ class MultiAgentSupervisor:
         option = state.get("resolution", {}).get("option")
         return (
             "transfer"
-            if option in {"recommended", "all_with_unknown_size"}
+            if option in {"recommended", "selected_recommended", "all_with_unknown_size"}
             else "stop"
         )
+
+    def _validate_download_resolution(
+        self, checkpoint: DecisionCheckpoint, resolution: dict[str, Any]
+    ) -> None:
+        """Allow a bounded approval without letting a client widen the plan."""
+        if resolution.get("option") != "selected_recommended":
+            return
+        selected = resolution.get("bundle_ids")
+        if not isinstance(selected, list) or not selected or not all(
+            isinstance(item, str) for item in selected
+        ):
+            raise ValueError(
+                "selected_recommended requires a non-empty bundle_ids list."
+            )
+        recommended = next(
+            (
+                set(item.get("bundle_ids", []))
+                for item in checkpoint.options
+                if item.get("id") == "recommended"
+            ),
+            set(),
+        )
+        unknown = set(selected) - recommended
+        if unknown:
+            raise ValueError(
+                "selected_recommended may approve only checkpoint-recommended bundles: "
+                + ", ".join(sorted(unknown))
+            )
 
     async def _corpus_approval(
         self, state: SupervisorState

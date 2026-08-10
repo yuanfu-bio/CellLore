@@ -49,6 +49,10 @@ class CreateRunRequest(BaseModel):
     # When false, an archive's published terms of use stand in for a missing
     # per-record licence, and the basis is recorded on the preflight report.
     strict_license: bool = False
+    # A permissive acquisition policy: public access remains mandatory, while
+    # an unresolved per-record licence is recorded rather than blocking a
+    # recommendation. Restricted licences remain hard blockers.
+    allow_unknown_license: bool = False
     # Per-repository cap on files enumerated for one dataset. Exceeding it
     # marks the bundle inventory:truncated rather than silently under-reporting.
     max_assets: int = Field(default=500, ge=1, le=100_000)
@@ -107,6 +111,7 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             "max_fulltexts": request.max_fulltexts,
             "approved_license_ids": request.approved_license_ids,
             "strict_license": request.strict_license,
+            "allow_unknown_license": request.allow_unknown_license,
             "max_assets": request.max_assets,
             "planner_mode": request.planner_mode,
             "remote_probe_enabled": request.remote_probe_enabled,

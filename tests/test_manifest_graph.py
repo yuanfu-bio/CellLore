@@ -20,6 +20,7 @@ import pytest
 from scdata_agent.application.collaboration import (
     ArtifactKind,
     CollaborationLedger,
+    DecisionCheckpoint,
     RunStatus,
 )
 from scdata_agent.application.manifest_ingestion import ingest_manifest
@@ -117,7 +118,7 @@ def _write_fake_bytes(path: Path, role: DataRole) -> None:
 
 
 @pytest.mark.asyncio
-async def test_manifest_run_admits_both_pair_units_through_both_gates(
+async def test_manifest_run_admits_an_explicit_recommended_subset_through_both_gates(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
@@ -167,7 +168,14 @@ async def test_manifest_run_admits_both_pair_units_through_both_gates(
         for item in ledger.list_artifacts(run.run_id)
     )
 
-    await supervisor.resume_checkpoint(download.checkpoint_id, {"option": "recommended"})
+    recommended_ids = next(
+        option["bundle_ids"] for option in download.options if option["id"] == "recommended"
+    )
+    selected_id = recommended_ids[0]
+    await supervisor.resume_checkpoint(
+        download.checkpoint_id,
+        {"option": "selected_recommended", "bundle_ids": [selected_id]},
+    )
     kinds = {item.kind for item in ledger.list_artifacts(run.run_id)}
     assert ArtifactKind.TRANSFER_RECEIPTS in kinds
     assert ArtifactKind.MATERIALIZATION_MANIFEST in kinds
@@ -186,6 +194,29 @@ async def test_manifest_run_admits_both_pair_units_through_both_gates(
     )
     admitted = snapshots[-1]["payload"]["admitted_bundle_ids"]
     assert admitted
-    # This is the C3 pin: both pair units are admitted, not one representative
-    # with the other silently pushed into manual_review.
-    assert len(admitted) == 2
+    assert admitted == [selected_id]
+    assert [item["bundle_id"] for item in snapshots[-1]["payload"]["decisions"]] == [selected_id]
+
+
+@pytest.mark.asyncio
+async def test_subset_approval_rejects_a_bundle_outside_the_recommendation(tmp_path) -> None:
+    ledger = CollaborationLedger(tmp_path / "system.sqlite")
+    run = ledger.create_run("test", {})
+    checkpoint = ledger.add_checkpoint(
+        DecisionCheckpoint(
+            checkpoint_id="download",
+            run_id=run.run_id,
+            kind="download_selection",
+            title="Approve",
+            recommendation="",
+            options=[
+                {"id": "recommended", "label": "Recommended", "bundle_ids": ["bundle_ok"]}
+            ],
+        )
+    )
+    supervisor = ManifestRunSupervisor(ledger, str(tmp_path / "system.sqlite"))
+    with pytest.raises(ValueError, match="bundle_not_recommended"):
+        await supervisor.resume_checkpoint(
+            checkpoint.checkpoint_id,
+            {"option": "selected_recommended", "bundle_ids": ["bundle_not_recommended"]},
+        )

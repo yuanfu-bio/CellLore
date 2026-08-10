@@ -81,12 +81,41 @@ def _matches_required_organisms(
     return observed <= expected
 
 
+def _is_explicit_single_layer_series(
+    candidate: DatasetCandidate, requirement: ResearchRequirement
+) -> bool:
+    """Recognize a series title that is explicitly one side of a co-assay.
+
+    GEO mirrors some ENCODE multiome experiments as separate ATAC and RNA
+    series.  Until cross-series pairing is implemented, an ATAC-only (or
+    RNA-only) series cannot yield a physical paired bundle and only pollutes a
+    paired-corpus candidate queue.  This is intentionally title-only and
+    conservative: unknown titles and titles that name multiome or both layers
+    remain available for later inventory-based assessment.
+    """
+    if requirement.pairing_requirement is None:
+        return False
+    required = set(requirement.required_omics_layers)
+    if not {
+        "chromatin_accessibility",
+        "transcriptome",
+    } <= {item.value for item in required}:
+        return False
+    title = candidate.title.casefold()
+    if any(term in title for term in ("multiome", "multi-ome", "rna+atac", "atac+rna")):
+        return False
+    atac = any(term in title for term in ("snatac", "scatac", "atac-seq", "atac seq"))
+    rna = any(term in title for term in ("snrna", "scrna", "rna-seq", "rna seq", "gene expression"))
+    return atac != rna
+
+
 def _apply_required_candidate_filters(
     requirement: ResearchRequirement, candidates: list[DatasetCandidate]
 ) -> list[DatasetCandidate]:
     return [
         candidate for candidate in candidates
         if _matches_required_organisms(candidate, requirement)
+        and not _is_explicit_single_layer_series(candidate, requirement)
     ]
 
 

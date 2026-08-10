@@ -183,3 +183,21 @@ async def test_unknown_license_alone_holds_back_an_otherwise_ready_bundle(tmp_pa
     approved = await plan_with(LicenseStatus.APPROVED)
     assert approved["recommended_bundle_ids"] == ["bundle_a"]
     assert approved["bundles"][0]["risks"] == []
+
+    permissive_context = context(tmp_path, candidates)
+    permissive_context.policy["allow_unknown_license"] = True
+    report = PreflightBundleReport(
+        report_id="report_a", bundle_id="bundle_a", candidate_id="a",
+        dimensions={}, license_status=LicenseStatus.UNKNOWN, expected_bytes=10,
+        access_status=summary.access_status.value,
+        decision=BundleStatus.PREFLIGHT_READY,
+    )
+    permissive_context.artifacts.extend([
+        artifact("run_1", ArtifactKind.ASSET_INVENTORY, AgentName.ASSET_SCOUT,
+                 {"assets": [], "bundles": [bundle.model_dump(mode="json")],
+                  "bundle_summaries": [summary.model_dump(mode="json")]}),
+        artifact("run_1", ArtifactKind.PREFLIGHT_REPORT, AgentName.PREFLIGHT_ASSESSMENT,
+                 {"reports": [report.model_dump(mode="json")]}),
+    ])
+    permissive = (await AcquisitionStrategistAgent().run(permissive_context))[0].payload
+    assert permissive["recommended_bundle_ids"] == ["bundle_a"]

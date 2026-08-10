@@ -444,6 +444,17 @@ def agent_run(
             ),
         ),
     ] = False,
+    allow_unknown_license: Annotated[
+        bool,
+        typer.Option(
+            "--allow-unknown-license/--require-known-license",
+            help=(
+                "Allow publicly accessible bundles with no resolved per-record "
+                "license into the recommendation tier, while retaining the license "
+                "status and source basis in the audit trail."
+            ),
+        ),
+    ] = False,
     planner_mode: Annotated[
         str,
         typer.Option(
@@ -476,6 +487,7 @@ def agent_run(
             "remote_probe_enabled": remote_probe,
             "approved_license_ids": approved_license_id or [],
             "strict_license": strict_license,
+            "allow_unknown_license": allow_unknown_license,
             "max_assets": max_assets,
             "planner_mode": planner_mode,
         },
@@ -494,6 +506,13 @@ def agent_run(
 def resume(
     checkpoint_id: Annotated[str, typer.Argument(help="Open decision checkpoint ID.")],
     option: Annotated[str, typer.Option("--option", help="Selected option ID.")] = "plan_only",
+    bundle_id: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--bundle-id",
+            help="Approve only these recommended bundle IDs; repeatable.",
+        ),
+    ] = None,
     database: Annotated[Path, typer.Option("--database", "-d")] = Path("var/scdata_agent.sqlite"),
     trace_mode: Annotated[str, typer.Option("--trace-mode")] = "local",
 ) -> None:
@@ -501,7 +520,13 @@ def resume(
     ledger = CollaborationLedger(database)
     run_id = ledger.get_checkpoint(checkpoint_id).run_id
     supervisor = supervisor_for_run(ledger, str(database), run_id, trace_mode=trace_mode)
-    checkpoint = asyncio.run(supervisor.resume_checkpoint(checkpoint_id, {"option": option}))
+    if bundle_id:
+        if option != "plan_only":
+            raise typer.BadParameter("--bundle-id cannot be combined with --option.")
+        resolution = {"option": "selected_recommended", "bundle_ids": bundle_id}
+    else:
+        resolution = {"option": option}
+    checkpoint = asyncio.run(supervisor.resume_checkpoint(checkpoint_id, resolution))
     console.print_json(checkpoint.model_dump_json())
 
 

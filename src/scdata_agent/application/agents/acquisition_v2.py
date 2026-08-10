@@ -111,7 +111,10 @@ class AcquisitionStrategistAgent:
             # An archive-policy licence is a sufficient basis to recommend; it
             # is surfaced in `reasons` so the decision stays auditable rather
             # than being folded into "approved".
-            if report is None or report.license_status == LicenseStatus.UNKNOWN:
+            if (
+                (report is None or report.license_status == LicenseStatus.UNKNOWN)
+                and not context.policy.get("allow_unknown_license", False)
+            ):
                 manual_reasons.append("license:unknown")
             if bundle.bundle_id != representative:
                 manual_reasons.append("lineage:non_representative")

@@ -55,6 +55,13 @@ class TransferExecutionAgent:
         selected_ids: set[str] = set()
         if resolution.get("option") == "recommended":
             selected_ids = set(plan.recommended_bundle_ids) & ready_ids
+        elif resolution.get("option") == "selected_recommended":
+            # The supervisor validates this against the checkpoint before resuming.
+            selected_ids = (
+                set(resolution.get("bundle_ids", []))
+                & set(plan.recommended_bundle_ids)
+                & ready_ids
+            )
         elif resolution.get("option") == "all_with_unknown_size":
             selected_ids = (
                 set(plan.recommended_bundle_ids)

@@ -11,6 +11,8 @@ from scdata_agent.application.resource_pipeline import (
 from scdata_agent.domain.lifecycle import SemanticBundle
 from scdata_agent.domain.models import (
     AssayProfile,
+    DataAsset,
+    DataRole,
     DatasetCandidate,
     EvidenceClass,
     OmicsLayer,
@@ -41,6 +43,28 @@ class TestOmicsLayerClaims:
     def test_no_assay_profiles_produces_zero_claims_not_a_fabricated_one(self):
         candidate = DatasetCandidate(candidate_id="cand_1", title="study")
         assert omics_layer_claims(candidate) == []
+
+    def test_repository_manifest_roles_supply_missing_layer_claims(self):
+        candidate = DatasetCandidate(candidate_id="cand_1", title="study")
+        assets = [
+            DataAsset(
+                asset_id="rna", candidate_id="cand_1", role=DataRole.RNA_MATRIX,
+                file_name="raw_feature_bc_matrix.h5",
+            ),
+            DataAsset(
+                asset_id="atac", candidate_id="cand_1", role=DataRole.FRAGMENTS,
+                file_name="atac_fragments.tsv.gz",
+            ),
+        ]
+
+        claims = omics_layer_claims(candidate, assets=assets)
+
+        assert {item.predicate for item in claims} == {
+            "has_omics_layer:chromatin_accessibility",
+            "has_omics_layer:transcriptome",
+        }
+        assert all(item.evidence_class == EvidenceClass.REPOSITORY_REPORTED for item in claims)
+        assert all("Repository-listed assets" in item.rationale for item in claims)
 
     def test_multiple_layers_produce_one_claim_each(self):
         candidate = DatasetCandidate(
