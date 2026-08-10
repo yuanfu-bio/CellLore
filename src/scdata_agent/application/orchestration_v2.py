@@ -76,6 +76,7 @@ from scdata_agent.domain.resource_pipeline import (
     EvidenceEscalationReport,
     ScoutPhase,
 )
+from scdata_agent.infrastructure.llm import tracing
 from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
 from scdata_agent.infrastructure.observability import configure_tracing
 from scdata_agent.infrastructure.persistence.catalog import Catalog
@@ -730,8 +731,20 @@ class MultiAgentSupervisor:
             "graph_node_started",
             {"node": node_id or name.value, "task_id": task.task_id},
         )
+
+        def _persist_llm_event(event: dict[str, Any]) -> None:
+            item = artifact(
+                context.run_id,
+                ArtifactKind.LLM_CALL,
+                name,
+                event,
+            )
+            self.ledger.add_artifact(item)
+            context.artifacts.append(item)
+
         try:
-            outputs = await implementation.run(context)
+            with tracing.stage(node_id or name.value), tracing.sink(_persist_llm_event):
+                outputs = await implementation.run(context)
             for output in outputs:
                 self.ledger.add_artifact(output)
                 context.artifacts.append(output)
