@@ -394,6 +394,7 @@ html{scroll-behavior:smooth}.home-main{scroll-snap-type:y proximity;overscroll-b
 .clarification-entry .primary:disabled{cursor:not-allowed;opacity:.45}
 .ask-submit-error{margin:.65rem 0 0;padding:.55rem .65rem;border-left:3px solid #fb7185;border-radius:5px;background:#fb71851a;color:#fecdd3;font-size:11px;line-height:1.45}
 .atlas-form:has(input[aria-invalid=true]){border-color:#fb7185;box-shadow:0 0 0 3px #fb71851a}
+.atlas-form.submitting{border-color:#a7b2ff;box-shadow:0 0 0 3px #8d85ff1f}.atlas-form button:disabled,.suggestion-row button:disabled{cursor:wait;opacity:.68;transform:none;box-shadow:none}.submit-spinner{display:block;width:17px;height:17px;border:2px solid #ffffff55;border-top-color:#fff;border-radius:50%;animation:submit-spin .75s linear infinite}.ask-submit-progress{margin:.65rem 0 0;color:#cbd2ff;font-size:11px;line-height:1.45}@keyframes submit-spin{to{transform:rotate(360deg)}}
 
 /* Agent Activity Dock occupies the process map's intentional left gutter. */
 .topology-card{position:relative}
