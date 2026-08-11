@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from scdata_agent.domain.manifest import (
+from celllore.domain.manifest import (
     PAIRED_MULTIOME_ZH_V1,
     REQUIRED_FIELDS,
     ManifestFormatError,
@@ -19,7 +19,7 @@ from scdata_agent.domain.manifest import (
     dialect_by_id,
     parse_size,
 )
-from scdata_agent.infrastructure.manifest_reader import (
+from celllore.infrastructure.manifest_reader import (
     XLSX_EXTRA_HINT,
     read_manifest,
     read_tabular,

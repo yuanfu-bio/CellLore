@@ -8,14 +8,14 @@ import json
 
 import pytest
 
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     OmicsLayer,
     PairingLevel,
     PairingRequirement,
     ResearchRequirement,
 )
-from scdata_agent.domain.requirements import QueryPlanner
-from scdata_agent.infrastructure.llm.query_planner import (
+from celllore.domain.requirements import QueryPlanner
+from celllore.infrastructure.llm.query_planner import (
     LLMQueryPlanner,
     _sanitize_terms,
     configured_query_planner,

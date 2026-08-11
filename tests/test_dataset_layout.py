@@ -1,17 +1,17 @@
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.agents.transfer_execution import TransferExecutionAgent
-from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
-from scdata_agent.application.dataset_layout import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.agents.transfer_execution import TransferExecutionAgent
+from celllore.application.collaboration import AgentName, ArtifactKind, artifact
+from celllore.application.dataset_layout import (
     production_run_root,
     raw_stage_for_role,
     readable_pair_unit_id,
     study_accession,
 )
-from scdata_agent.domain.lifecycle import SemanticBundle
-from scdata_agent.domain.models import (
+from celllore.domain.lifecycle import SemanticBundle
+from celllore.domain.models import (
     DataAsset,
     DataRole,
     DatasetCandidate,
@@ -20,7 +20,7 @@ from scdata_agent.domain.models import (
     QueryPlan,
     ResearchRequirement,
 )
-from scdata_agent.domain.pair_units import ProposedPairUnit
+from celllore.domain.pair_units import ProposedPairUnit
 
 
 def test_production_root_is_isolated_by_date_and_run_id():

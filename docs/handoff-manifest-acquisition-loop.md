@@ -154,9 +154,9 @@ $P/python scripts/compare_scorecards.py eval/baseline_scorecard.json var/scoreca
 
 | 文件                                                   | 行数      | 内容                                                                                                                                                                                                                                                                                                                      |
 | ------------------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/scdata_agent/domain/repository_urls.py`         | 96        | `geo_static_url()` / `geo_bucket()` / `geo_namespace()` / `is_geo_accession()` / `canonical_assembly()`。从原型 `:171-190`、`:161-169` 移植，纯字符串运算，零依赖                                                                                                                                           |
-| `src/scdata_agent/domain/manifest.py`                | 621       | `ManifestDialect` / `ManifestRow` / `ManifestDocument` / `ManifestIssue` / `IssueSeverity`、`CANONICAL_FIELDS` / `REQUIRED_FIELDS`、`PAIRED_MULTIOME_ZH_V1` 方言、`detect_dialect()` / `dialect_by_id()` / `normalize_row()` / `preflight_manifest()` / `parse_size()` / `summarize_issues()` |
-| `src/scdata_agent/infrastructure/manifest_reader.py` | 134       | `read_tabular()`（按后缀分派 csv/tsv/xlsx）/ `read_manifest()` / `file_sha256()`；XLSX 走 lazy import + `XLSX_EXTRA_HINT`                                                                                                                                                                                         |
+| `src/celllore/domain/repository_urls.py`         | 96        | `geo_static_url()` / `geo_bucket()` / `geo_namespace()` / `is_geo_accession()` / `canonical_assembly()`。从原型 `:171-190`、`:161-169` 移植，纯字符串运算，零依赖                                                                                                                                           |
+| `src/celllore/domain/manifest.py`                | 621       | `ManifestDialect` / `ManifestRow` / `ManifestDocument` / `ManifestIssue` / `IssueSeverity`、`CANONICAL_FIELDS` / `REQUIRED_FIELDS`、`PAIRED_MULTIOME_ZH_V1` 方言、`detect_dialect()` / `dialect_by_id()` / `normalize_row()` / `preflight_manifest()` / `parse_size()` / `summarize_issues()` |
+| `src/celllore/infrastructure/manifest_reader.py` | 134       | `read_tabular()`（按后缀分派 csv/tsv/xlsx）/ `read_manifest()` / `file_sha256()`；XLSX 走 lazy import + `XLSX_EXTRA_HINT`                                                                                                                                                                                         |
 | `tests/data/manifest_paired_multiome_sample.csv`     | 20 行数据 | **从真实 manifest 逐字节抽取**，保留 BOM 与中文表头：3 行 BMMC、5 行 NEATseq CD4_memory_lane2、5 行 NEATseq CD4_memory_lane1（S3 加，跟 lane2 同 dataset 不同 pair unit，用来钉住 C3）、3 行 kidney SHARED_METADATA、2 行 Zenodo、1 行 10x portal、1 行 DOGMA `GSM5065531`                                        |
 | `tests/test_manifest_dialect.py`                     | 113       | 方言识别、必需列缺失、XLSX extra 错误串、`parse_size` 参数化（含空值 → `None` 而非 `0`）                                                                                                                                                                                                                           |
 | `tests/test_geo_static_url.py`                       | 105       | 真实 accession 的精确 URL、bucket 算术、百分号编码、非 GEO accession 拒绝、`canonical_assembly` 参数化                                                                                                                                                                                                                  |
@@ -216,13 +216,13 @@ interfaces）。Schema 满足度判定从 `InventoryReconcileAgent` 提成
 
 **待做**：
 
-新建 `src/scdata_agent/application/manifest_ingestion.py`：
+新建 `src/celllore/application/manifest_ingestion.py`：
 
 ```python
 def ingest_manifest(document, *, run_id, filters, policy) -> ManifestIngestion
 ```
 
-新建 `src/scdata_agent/application/agents/manifest_ingest.py`：`ManifestIngestAgent`（`name = AgentName.MANIFEST_INGEST`）。
+新建 `src/celllore/application/agents/manifest_ingest.py`：`ManifestIngestAgent`（`name = AgentName.MANIFEST_INGEST`）。
 
 **行 → 契约映射**：
 
@@ -259,7 +259,7 @@ def ingest_manifest(document, *, run_id, filters, policy) -> ManifestIngestion
 端到端测试 `tests/test_manifest_graph.py` 用真实 fixture（`GSE178707_NEATseq` 现有两个
 pair unit）钉住 C3：两个 bundle 都进 `recommended`，而非一个代表压制另一个。
 
-新建 `src/scdata_agent/application/orchestration_manifest.py`（~90 行）。**用子类，不改图**：`orchestration_v2.py` 是冻结接缝，且图无条件跑 `initialize_run → research_planner → planning_gate → resource_discovery`（`:304-311`）并覆写 `state["discovery"]`，所以 CLI 预先播种 artifact 的方案不可行。
+新建 `src/celllore/application/orchestration_manifest.py`（~90 行）。**用子类，不改图**：`orchestration_v2.py` 是冻结接缝，且图无条件跑 `initialize_run → research_planner → planning_gate → resource_discovery`（`:304-311`）并覆写 `state["discovery"]`，所以 CLI 预先播种 artifact 的方案不可行。
 
 ```python
 class ManifestRunSupervisor(MultiAgentSupervisor):

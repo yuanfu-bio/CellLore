@@ -10,11 +10,11 @@ exactly the large studies a pretraining corpus wants most.
 
 import pytest
 
-from scdata_agent.application.agents.inventory_reconcile import (
+from celllore.application.agents.inventory_reconcile import (
     InventoryReconcileAgent,
 )
-from scdata_agent.domain.lifecycle import SemanticBundle
-from scdata_agent.domain.models import (
+from celllore.domain.lifecycle import SemanticBundle
+from celllore.domain.models import (
     AccessLevel,
     AssetAvailability,
     AssetLocation,
@@ -24,7 +24,7 @@ from scdata_agent.domain.models import (
     DatasetCandidate,
     TransferProtocol,
 )
-from scdata_agent.infrastructure.sources.asset_registry import (
+from celllore.infrastructure.sources.asset_registry import (
     AssetResolverRegistry,
 )
 

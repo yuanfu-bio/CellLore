@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AccessLevel,
     AssetAvailability,
     AssetLocation,
@@ -9,7 +9,7 @@ from scdata_agent.domain.models import (
     DataRole,
     TransferProtocol,
 )
-from scdata_agent.infrastructure.remote_probe import RemoteAvailabilityProbe
+from celllore.infrastructure.remote_probe import RemoteAvailabilityProbe
 
 
 def asset(url: str) -> DataAsset:

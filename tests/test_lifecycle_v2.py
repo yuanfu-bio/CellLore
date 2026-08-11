@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from scdata_agent.domain.lifecycle import (
+from celllore.domain.lifecycle import (
     AcquisitionBundle,
     AcquisitionPlan,
     BundleStatus,
@@ -15,7 +15,7 @@ from scdata_agent.domain.lifecycle import (
     SemanticBundle,
     validate_bundle_transition,
 )
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AccessLevel,
     AssetAvailability,
     AssetLocation,
@@ -25,18 +25,18 @@ from scdata_agent.domain.models import (
     Identifier,
     TransferProtocol,
 )
-from scdata_agent.infrastructure.materialization import (
+from celllore.infrastructure.materialization import (
     DatasetMaterializer,
     MaterializedQualityInspector,
 )
-from scdata_agent.infrastructure.persistence.catalog import Catalog
-from scdata_agent.infrastructure.sources.article_access import (
+from celllore.infrastructure.persistence.catalog import Catalog
+from celllore.infrastructure.sources.article_access import (
     OpenArticleAccessService,
 )
-from scdata_agent.infrastructure.sources.asset_registry import (
+from celllore.infrastructure.sources.asset_registry import (
     AssetResolverRegistry,
 )
-from scdata_agent.infrastructure.transfer_executor import TransferExecutor
+from celllore.infrastructure.transfer_executor import TransferExecutor
 
 
 def test_pointer_maturity_and_bundle_transitions(tmp_path):
@@ -96,7 +96,7 @@ async def test_open_article_access_uses_only_pmc_xml():
 
     candidate_record = DatasetCandidate  # keep import boundary explicit
     del candidate_record
-    from scdata_agent.domain.models import SourceRecord
+    from celllore.domain.models import SourceRecord
 
     record = SourceRecord(
         record_id="record_1",
@@ -245,7 +245,7 @@ def test_processed_first_materialization_and_bounded_local_qc(tmp_path):
     with gzip.open(fragments, "wt") as handle:
         handle.write("chr1\t10\t20\tcell-1\t1\n")
         handle.write("chr1\t30\t40\tcell-2\t1\n")
-    from scdata_agent.domain.lifecycle import (
+    from celllore.domain.lifecycle import (
         TransferReceipt,
         TransferReceiptStatus,
     )

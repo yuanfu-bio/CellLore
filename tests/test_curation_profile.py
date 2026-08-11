@@ -9,13 +9,13 @@ a rank), and evidence has two distinct floors for acquisition vs corpus-ready.
 
 import pytest
 
-from scdata_agent.domain.curation.profile import CurationProfile, CurationUnitGrouping
-from scdata_agent.domain.curation.profiles import PROFILES, profile_by_id
-from scdata_agent.domain.curation.profiles.paired_atac_rna_human import (
+from celllore.domain.curation.profile import CurationProfile, CurationUnitGrouping
+from celllore.domain.curation.profiles import PROFILES, profile_by_id
+from celllore.domain.curation.profiles.paired_atac_rna_human import (
     PAIRED_ATAC_RNA_HUMAN,
 )
-from scdata_agent.domain.models import EvidenceClass, PairingLevel
-from scdata_agent.domain.requirements import RuleBasedRequirementCompiler
+from celllore.domain.models import EvidenceClass, PairingLevel
+from celllore.domain.requirements import RuleBasedRequirementCompiler
 
 
 def test_profile_by_id_resolves_the_registered_instance():

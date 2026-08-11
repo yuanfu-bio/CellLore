@@ -63,7 +63,7 @@ curation = [
 ]
 
 [project.scripts]
-celllore = "scdata_agent.interfaces.cli:app"
+celllore = "celllore.interfaces.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/yuanfu-bio/CellLore"
@@ -76,8 +76,8 @@ where = ["src"]
 [tool.setuptools.package-data]
 # The distribution declares "Typing :: Typed"; without this the marker is not
 # shipped and the claim is unenforceable for anyone installing the wheel.
-scdata_agent = ["py.typed"]
-"scdata_agent.interfaces" = [
+celllore = ["py.typed"]
+"celllore.interfaces" = [
   "templates/*.html",
   "static/ui/index.html",
   "static/ui/assets/*",

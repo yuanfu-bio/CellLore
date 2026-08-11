@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from scdata_agent.infrastructure.observability import TraceMode, configure_tracing
+from celllore.infrastructure.observability import TraceMode, configure_tracing
 
 
 def test_local_mode_disables_cloud_tracing(monkeypatch):
@@ -14,6 +14,6 @@ def test_local_mode_disables_cloud_tracing(monkeypatch):
 def test_langsmith_mode_requires_explicit_credentials(monkeypatch):
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
     monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
-    monkeypatch.setattr("scdata_agent.infrastructure.llm.stepfun.load_local_env", lambda: None)
+    monkeypatch.setattr("celllore.infrastructure.llm.stepfun.load_local_env", lambda: None)
     with pytest.raises(RuntimeError):
         configure_tracing("langsmith")

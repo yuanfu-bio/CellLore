@@ -1,20 +1,20 @@
 import pytest
 
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.agents.snapshot_governance import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.agents.snapshot_governance import (
     SnapshotCorpusGovernanceAgent,
 )
-from scdata_agent.application.collaboration import (
+from celllore.application.collaboration import (
     AgentName,
     ArtifactKind,
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.domain.curation.profiles.paired_atac_rna_human import (
+from celllore.domain.curation.profiles.paired_atac_rna_human import (
     PAIRED_ATAC_RNA_HUMAN,
 )
-from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.domain.lifecycle import (
+from celllore.domain.identifiers import stable_id
+from celllore.domain.lifecycle import (
     BundleStatus,
     EvidenceClaim,
     LicenseStatus,
@@ -25,8 +25,8 @@ from scdata_agent.domain.lifecycle import (
     MaterializedQCReport,
     PreflightBundleReport,
 )
-from scdata_agent.domain.models import EvidenceClass, GateStatus, PairingLevel, ResearchRequirement
-from scdata_agent.infrastructure.persistence.catalog import Catalog
+from celllore.domain.models import EvidenceClass, GateStatus, PairingLevel, ResearchRequirement
+from celllore.infrastructure.persistence.catalog import Catalog
 
 
 @pytest.mark.asyncio

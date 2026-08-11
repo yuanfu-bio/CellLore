@@ -8,12 +8,12 @@ import json
 
 import pytest
 
-from scdata_agent.application.agents.pair_unit_resolver import (
+from celllore.application.agents.pair_unit_resolver import (
     _SYSTEM_PROMPT,
     PairUnitResolutionDraft,
     PairUnitResolver,
 )
-from scdata_agent.domain.models import DataAsset, DataRole, DatasetCandidate, GeoSampleRecord
+from celllore.domain.models import DataAsset, DataRole, DatasetCandidate, GeoSampleRecord
 
 
 class _FakeClient:

@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from scdata_agent.infrastructure.llm.router import OpenAICompatibleClient, OpenAICompatibleSettings
+from celllore.infrastructure.llm.router import OpenAICompatibleClient, OpenAICompatibleSettings
 
 
 @pytest.mark.asyncio
@@ -20,7 +20,7 @@ async def test_openai_compatible_router_client():
 
 
 def test_profile_model_override(monkeypatch):
-    from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+    from celllore.infrastructure.llm.router import ModelRouter, ReasoningProfile
 
     monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "openai_compatible")
     monkeypatch.setenv("SCDATA_AGENT_MODEL_API_KEY", "test-key")
@@ -34,7 +34,7 @@ def test_profile_model_override(monkeypatch):
 
 
 def test_deepseek_provider_uses_documented_defaults(monkeypatch, tmp_path):
-    from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+    from celllore.infrastructure.llm.router import ModelRouter, ReasoningProfile
 
     # chdir away from the repo's real .env, which may itself configure DeepSeek.
     monkeypatch.chdir(tmp_path)
@@ -51,7 +51,7 @@ def test_deepseek_provider_uses_documented_defaults(monkeypatch, tmp_path):
 
 
 def test_deepseek_provider_honours_overrides(monkeypatch):
-    from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+    from celllore.infrastructure.llm.router import ModelRouter, ReasoningProfile
 
     monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "deepseek")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
@@ -66,7 +66,7 @@ def test_deepseek_provider_honours_overrides(monkeypatch):
 
 
 def test_deepseek_provider_requires_api_key(monkeypatch, tmp_path):
-    from scdata_agent.infrastructure.llm.router import ModelRouter
+    from celllore.infrastructure.llm.router import ModelRouter
 
     # chdir away from the repo's real .env, which may itself set DEEPSEEK_API_KEY.
     monkeypatch.chdir(tmp_path)
@@ -78,7 +78,7 @@ def test_deepseek_provider_requires_api_key(monkeypatch, tmp_path):
 
 
 def test_stepfun_planner_uses_low_effort_by_default(monkeypatch):
-    from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+    from celllore.infrastructure.llm.router import ModelRouter, ReasoningProfile
 
     monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "stepfun")
     monkeypatch.setenv("STEPFUN_API_KEY", "test-key")
@@ -92,7 +92,7 @@ def test_stepfun_planner_uses_low_effort_by_default(monkeypatch):
 
 
 def test_stepfun_extract_effort_can_be_overridden(monkeypatch):
-    from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+    from celllore.infrastructure.llm.router import ModelRouter, ReasoningProfile
 
     monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "stepfun")
     monkeypatch.setenv("STEPFUN_API_KEY", "test-key")

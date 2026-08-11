@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
-from scdata_agent.infrastructure.llm import tracing
-from scdata_agent.infrastructure.llm.agent_runtime import _record_model_messages
-from scdata_agent.infrastructure.llm.router import ReasoningProfile
+from celllore.infrastructure.llm import tracing
+from celllore.infrastructure.llm.agent_runtime import _record_model_messages
+from celllore.infrastructure.llm.router import ReasoningProfile
 
 
 def test_tool_agent_messages_are_recorded_with_normalized_usage() -> None:

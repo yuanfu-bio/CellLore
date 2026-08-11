@@ -17,22 +17,22 @@ from pathlib import Path
 
 import pytest
 
-from scdata_agent.application.collaboration import (
+from celllore.application.collaboration import (
     ArtifactKind,
     CollaborationLedger,
     DecisionCheckpoint,
     RunStatus,
 )
-from scdata_agent.application.manifest_ingestion import ingest_manifest
-from scdata_agent.application.orchestration_manifest import ManifestRunSupervisor
-from scdata_agent.domain.lifecycle import TransferReceipt, TransferReceiptStatus
-from scdata_agent.domain.models import (
+from celllore.application.manifest_ingestion import ingest_manifest
+from celllore.application.orchestration_manifest import ManifestRunSupervisor
+from celllore.domain.lifecycle import TransferReceipt, TransferReceiptStatus
+from celllore.domain.models import (
     AccessLevel,
     AssetAvailability,
     DataRole,
     TransferProtocol,
 )
-from scdata_agent.infrastructure.manifest_reader import read_manifest
+from celllore.infrastructure.manifest_reader import read_manifest
 
 FIXTURE = Path(__file__).parent / "data" / "manifest_paired_multiome_sample.csv"
 
@@ -122,7 +122,7 @@ async def test_manifest_run_admits_an_explicit_recommended_subset_through_both_g
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        "scdata_agent.application.agents.manifest_ingest.RemoteAvailabilityProbe",
+        "celllore.application.agents.manifest_ingest.RemoteAvailabilityProbe",
         _FakeProbe,
     )
 
@@ -138,7 +138,7 @@ async def test_manifest_run_admits_an_explicit_recommended_subset_through_both_g
         paths[asset.asset_id] = path
 
     monkeypatch.setattr(
-        "scdata_agent.application.agents.transfer_execution.select_transfer_backend",
+        "celllore.application.agents.transfer_execution.select_transfer_backend",
         lambda policy: _FakeTransferExecutor(paths),
     )
 

@@ -1,15 +1,15 @@
 import pytest
 
-from scdata_agent.application.agents.acquisition_v2 import AcquisitionStrategistAgent
-from scdata_agent.application.agents.progressive_lineage_v2 import ProgressiveLineageLeakageAgent
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.acquisition_v2 import AcquisitionStrategistAgent
+from celllore.application.agents.progressive_lineage_v2 import ProgressiveLineageLeakageAgent
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import (
     AgentName,
     ArtifactKind,
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.domain.lifecycle import (
+from celllore.domain.lifecycle import (
     BundleLineageAssessment,
     BundleStatus,
     LicenseStatus,
@@ -20,7 +20,7 @@ from scdata_agent.domain.lifecycle import (
     ResourcePointer,
     SemanticBundle,
 )
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AssetLocation,
     DataAsset,
     DataRole,
@@ -31,7 +31,7 @@ from scdata_agent.domain.models import (
     ResearchRequirement,
     TransferProtocol,
 )
-from scdata_agent.domain.resource_pipeline import BundleAccessStatus, RemoteBundleInventorySummary
+from celllore.domain.resource_pipeline import BundleAccessStatus, RemoteBundleInventorySummary
 
 
 def context(tmp_path, candidates):

@@ -9,21 +9,21 @@ legitimate, explicit choice for tests and offline debugging.
 
 import pytest
 
-from scdata_agent.application.agents.pair_unit_resolver import (
+from celllore.application.agents.pair_unit_resolver import (
     PairUnitResolver,
     configured_pair_unit_resolver,
 )
-from scdata_agent.application.agents.pairing_verifier import (
+from celllore.application.agents.pairing_verifier import (
     PairingVerifier,
     configured_pairing_verifier,
 )
-from scdata_agent.application.discovery import configured_requirement_compiler
-from scdata_agent.application.research_planning import (
+from celllore.application.discovery import configured_requirement_compiler
+from celllore.application.research_planning import (
     DeterministicResearchPlanner,
     configured_research_planner,
 )
-from scdata_agent.domain.requirements import QueryPlanner, RuleBasedRequirementCompiler
-from scdata_agent.infrastructure.llm.query_planner import configured_query_planner
+from celllore.domain.requirements import QueryPlanner, RuleBasedRequirementCompiler
+from celllore.infrastructure.llm.query_planner import configured_query_planner
 
 
 def _unconfigured_environment(monkeypatch, tmp_path):

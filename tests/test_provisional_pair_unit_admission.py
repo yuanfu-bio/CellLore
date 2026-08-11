@@ -13,22 +13,22 @@ ProgressivePreflightAssessmentAgent, end to end.
 
 import pytest
 
-from scdata_agent.application.agents.inventory_reconcile import (
+from celllore.application.agents.inventory_reconcile import (
     InventoryReconcileAgent,
 )
-from scdata_agent.application.agents.pair_unit_resolver import PairUnitResolver
-from scdata_agent.application.agents.pairing_verifier import PairingVerifier
-from scdata_agent.application.agents.progressive_preflight import (
+from celllore.application.agents.pair_unit_resolver import PairUnitResolver
+from celllore.application.agents.pairing_verifier import PairingVerifier
+from celllore.application.agents.progressive_preflight import (
     ProgressivePreflightAssessmentAgent,
 )
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import (
     ArtifactKind,
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.domain.lifecycle import BundleStatus
-from scdata_agent.domain.models import (
+from celllore.domain.lifecycle import BundleStatus
+from celllore.domain.models import (
     AccessLevel,
     AssayProfile,
     AssetAvailability,
@@ -46,7 +46,7 @@ from scdata_agent.domain.models import (
     ResearchRequirement,
     TransferProtocol,
 )
-from scdata_agent.domain.resource_pipeline import AssetInventoryDelta, ScoutPhase
+from celllore.domain.resource_pipeline import AssetInventoryDelta, ScoutPhase
 
 
 def _asset(asset_id, role, file_name):
@@ -190,7 +190,7 @@ async def test_a_genuinely_resolved_unit_from_the_same_technology_does_pass(tmp_
         {"samples_by_candidate": {"cand_1": [sample.model_dump(mode="json")]}},
     ))
 
-    from scdata_agent.application.agents.pair_unit_resolver import (
+    from celllore.application.agents.pair_unit_resolver import (
         PairUnitResolutionDraft,
     )
 

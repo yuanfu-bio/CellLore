@@ -1,13 +1,13 @@
 import pytest
 
-from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.supervisor import MultiAgentSupervisor
+from celllore.application.collaboration import (
     AgentName,
     CollaborationLedger,
     RunStatus,
     TaskStatus,
 )
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AccessLevel,
     CurationDecision,
     DatasetCandidate,
@@ -71,9 +71,11 @@ def test_cancel_does_not_rewrite_a_completed_run(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_supervisor_persists_specialist_handoffs_and_checkpoint(tmp_path, monkeypatch):
+async def test_supervisor_persists_handoffs_and_skips_empty_download(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
-        "scdata_agent.application.agents.discovery.default_workflow",
+        "celllore.application.agents.discovery.default_workflow",
         lambda database_path, use_llm=False: FakeWorkflow(),
     )
     ledger = CollaborationLedger(tmp_path / "agent.sqlite")
@@ -82,19 +84,16 @@ async def test_supervisor_persists_specialist_handoffs_and_checkpoint(tmp_path, 
 
     await supervisor.execute(run.run_id)
 
-    assert ledger.get_run(run.run_id).status == RunStatus.WAITING_FOR_DECISION
+    assert ledger.get_run(run.run_id).status == RunStatus.COMPLETED
     # The pre-download workflow includes direct/enriched scouting, metadata
     # evidence, escalation, GEO sample metadata, and inventory reconciliation.
     assert len(ledger.list_tasks(run.run_id)) == 11
     assert len(ledger.list_artifacts(run.run_id)) >= 8
-    checkpoint = ledger.list_checkpoints(run.run_id)[0]
-    before_resume = ledger.events_since(run.run_id)[-1]["event_id"]
-    await supervisor.resume_checkpoint(checkpoint.checkpoint_id, {"option": "plan_only"})
-    resume_events = ledger.events_since(run.run_id, before_resume)
+    assert ledger.list_checkpoints(run.run_id) == []
+    events = ledger.events_since(run.run_id)
     assert any(
-        event["type"] == "run_status"
-        and event["payload"] == {"status": "running"}
-        for event in resume_events
+        event["type"] == "download_skipped"
+        and event["payload"]["reason"] == "no_eligible_bundles"
+        for event in events
     )
-    assert ledger.get_run(run.run_id).status == RunStatus.COMPLETED
-    assert len(ledger.events_since(run.run_id)) > 10
+    assert len(events) > 10

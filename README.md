@@ -385,10 +385,10 @@ The package follows a strict dependency direction enforced by
 
 | Layer | Path | Responsibility |
 |---|---|---|
-| Domain | `src/scdata_agent/domain` | Typed models, gates, requirements and evidence rules |
-| Application | `src/scdata_agent/application` | Agents, handoffs, curation catalog and LangGraph supervisor |
-| Infrastructure | `src/scdata_agent/infrastructure` | Public APIs, LLM routing, persistence, transfer and QC |
-| Interfaces | `src/scdata_agent/interfaces` | Typer CLI and FastAPI control surface |
+| Domain | `src/celllore/domain` | Typed models, gates, requirements and evidence rules |
+| Application | `src/celllore/application` | Agents, handoffs, curation catalog and LangGraph supervisor |
+| Infrastructure | `src/celllore/infrastructure` | Public APIs, LLM routing, persistence, transfer and QC |
+| Interfaces | `src/celllore/interfaces` | Typer CLI and FastAPI control surface |
 | Frontend | `frontend` | React/Vite control room and catalog workspace |
 
 Model routing is provider-neutral. StepFun is enabled in the example by default;

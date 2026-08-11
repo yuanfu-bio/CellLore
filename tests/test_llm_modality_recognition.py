@@ -13,8 +13,8 @@ combination.
 
 import pytest
 
-from scdata_agent.domain.models import OmicsLayer
-from scdata_agent.domain.planning import (
+from celllore.domain.models import OmicsLayer
+from celllore.domain.planning import (
     DataNeed,
     ExecutionStatus,
     NeedPriority,
@@ -22,8 +22,8 @@ from scdata_agent.domain.planning import (
     ResearchIntent,
     ResearchPlanDraft,
 )
-from scdata_agent.domain.requirements import RuleBasedRequirementCompiler, _known_layers
-from scdata_agent.infrastructure.llm.research_planner import _compile_contracts
+from celllore.domain.requirements import RuleBasedRequirementCompiler, _known_layers
+from celllore.infrastructure.llm.research_planner import _compile_contracts
 
 
 class TestKnownLayers:
@@ -154,7 +154,7 @@ class TestCompileContracts:
     def test_protein_matrix_role_is_required_for_trimodal(self):
         """Regression: the old research_planner.py role derivation lacked
         the PROTEIN_MATRIX branch that the shared roles_for_layers has."""
-        from scdata_agent.domain.models import DataRole
+        from celllore.domain.models import DataRole
 
         question = "TEA-seq trimodal data"
         draft = _draft(question, [_need(["TEA-seq"])])

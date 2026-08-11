@@ -7,7 +7,7 @@ export default defineConfig({
   build: {
     // Ship the verified control-room build with the Python package so a fresh
     // clone and an installed wheel serve the same UI as a developer checkout.
-    outDir: "../src/scdata_agent/interfaces/static/ui",
+    outDir: "../src/celllore/interfaces/static/ui",
     emptyOutDir: true
   },
   server: {

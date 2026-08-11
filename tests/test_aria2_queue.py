@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from scdata_agent.application.manifest_ingestion import ingest_manifest
-from scdata_agent.domain.lifecycle import AcquisitionPlan, SemanticBundle, TransferReceiptStatus
-from scdata_agent.infrastructure.aria2_executor import (
+from celllore.application.manifest_ingestion import ingest_manifest
+from celllore.domain.lifecycle import AcquisitionPlan, SemanticBundle, TransferReceiptStatus
+from celllore.infrastructure.aria2_executor import (
     Aria2TransferBackend,
     QueueEntry,
     aria_common_args,
@@ -22,8 +22,8 @@ from scdata_agent.infrastructure.aria2_executor import (
     proxy_free_download_environment,
     queue_entry_text,
 )
-from scdata_agent.infrastructure.manifest_reader import read_manifest
-from scdata_agent.infrastructure.transfer_backend import (
+from celllore.infrastructure.manifest_reader import read_manifest
+from celllore.infrastructure.transfer_backend import (
     safe_destination_path,
     select_transfer_backend,
 )
@@ -135,13 +135,13 @@ def test_download_environment_removes_proxy_without_mutating_source():
 
 
 def test_auto_downloader_falls_back_to_httpx_when_aria2_missing(monkeypatch):
-    monkeypatch.setattr("scdata_agent.infrastructure.transfer_backend.shutil.which", lambda *_: None)
+    monkeypatch.setattr("celllore.infrastructure.transfer_backend.shutil.which", lambda *_: None)
     backend = select_transfer_backend({"downloader": "auto"})
     assert backend.name == "httpx"
 
 
 def test_explicit_aria2_without_binary_raises(monkeypatch):
-    monkeypatch.setattr("scdata_agent.infrastructure.transfer_backend.shutil.which", lambda *_: None)
+    monkeypatch.setattr("celllore.infrastructure.transfer_backend.shutil.which", lambda *_: None)
     with pytest.raises(RuntimeError):
         select_transfer_backend({"downloader": "aria2"})
 

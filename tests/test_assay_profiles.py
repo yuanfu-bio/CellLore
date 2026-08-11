@@ -1,5 +1,5 @@
-from scdata_agent.domain.feasibility import FeasibilityAssessor
-from scdata_agent.domain.models import (
+from celllore.domain.feasibility import FeasibilityAssessor
+from celllore.domain.models import (
     AssayProfile,
     DatasetCandidate,
     OmicsLayer,
@@ -8,8 +8,8 @@ from scdata_agent.domain.models import (
     ProfileBasis,
     ResearchRequirement,
 )
-from scdata_agent.domain.requirements import CorpusQueryPlanner, RuleBasedRequirementCompiler
-from scdata_agent.infrastructure.sources.common import infer_assay_profiles
+from celllore.domain.requirements import CorpusQueryPlanner, RuleBasedRequirementCompiler
+from celllore.infrastructure.sources.common import infer_assay_profiles
 
 
 def _profile(text):

@@ -1,10 +1,10 @@
-from scdata_agent.domain.identifiers import extract_identifiers
-from scdata_agent.domain.models import (
+from celllore.domain.identifiers import extract_identifiers
+from celllore.domain.models import (
     AccessLevel,
     Identifier,
     SourceRecord,
 )
-from scdata_agent.domain.resolution import merge_source_records
+from celllore.domain.resolution import merge_source_records
 
 
 def test_extract_common_accessions():

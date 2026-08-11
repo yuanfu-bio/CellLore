@@ -5,7 +5,7 @@ uses explicit per-predicate acceptable-class allow-lists instead -- the same
 PairingLevel).
 """
 
-from scdata_agent.domain.models import EvidenceClass, evidence_class_rank, evidence_class_satisfies
+from celllore.domain.models import EvidenceClass, evidence_class_rank, evidence_class_satisfies
 
 
 def test_model_inferred_is_the_weakest_tier():

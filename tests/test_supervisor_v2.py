@@ -2,19 +2,22 @@ from pathlib import Path
 
 import pytest
 
-from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.supervisor import MultiAgentSupervisor
+from celllore.application.collaboration import (
+    AgentName,
     ArtifactKind,
     CheckpointStatus,
     CollaborationLedger,
     DecisionCheckpoint,
     RunStatus,
+    artifact,
 )
-from scdata_agent.domain.lifecycle import (
+from celllore.domain.lifecycle import (
+    AcquisitionPlan,
     TransferReceipt,
     TransferReceiptStatus,
 )
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AccessLevel,
     AssetAvailability,
     AssetLocation,
@@ -111,6 +114,49 @@ class FakeTransferExecutor:
 
 
 @pytest.mark.asyncio
+async def test_download_approval_auto_skips_when_no_bundles(tmp_path):
+    database = tmp_path / "empty-download.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run("find unavailable data", {})
+    plan = AcquisitionPlan(
+        plan_id="plan_empty",
+        run_id=run.run_id,
+        destination_root=str(tmp_path / "data"),
+    )
+    ledger.add_artifact(
+        artifact(
+            run.run_id,
+            ArtifactKind.ACQUISITION_PLAN,
+            AgentName.ACQUISITION_STRATEGIST,
+            plan.model_dump(mode="json"),
+        )
+    )
+    supervisor = MultiAgentSupervisor(ledger, str(database))
+
+    result = await supervisor._download_approval(
+        {
+            "run_id": run.run_id,
+            "question": run.question,
+            "database_path": str(database),
+            "policy": {},
+        }
+    )
+
+    assert result == {
+        "resolution": {
+            "option": "plan_only",
+            "reason": "no_eligible_bundles",
+        }
+    }
+    assert ledger.list_checkpoints(run.run_id) == []
+    assert any(
+        item["type"] == "download_skipped"
+        and item["payload"]["reason"] == "no_eligible_bundles"
+        for item in ledger.events_since(run.run_id)
+    )
+
+
+@pytest.mark.asyncio
 async def test_research_clarification_requires_text_before_checkpoint_resolution(
     tmp_path,
 ):
@@ -163,7 +209,7 @@ async def test_supervisor_requires_download_then_corpus_approval(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(
-        "scdata_agent.application.agents.discovery.default_workflow",
+        "celllore.application.agents.discovery.default_workflow",
         lambda database_path, use_llm=False: FakeWorkflow(),
     )
     roles = [
@@ -206,11 +252,11 @@ async def test_supervisor_requires_download_then_corpus_approval(
             )
         )
     monkeypatch.setattr(
-        "scdata_agent.application.agents.progressive_asset_scout.AssetResolverRegistry",
+        "celllore.application.agents.progressive_asset_scout.AssetResolverRegistry",
         lambda **kwargs: FakeResolver(assets),
     )
     monkeypatch.setattr(
-        "scdata_agent.application.agents.transfer_execution.select_transfer_backend",
+        "celllore.application.agents.transfer_execution.select_transfer_backend",
         lambda policy: FakeTransferExecutor(paths),
     )
 

@@ -1,5 +1,5 @@
-from scdata_agent.domain.corpus import CorpusGovernor
-from scdata_agent.domain.models import (
+from celllore.domain.corpus import CorpusGovernor
+from celllore.domain.models import (
     AccessLevel,
     AssetBundle,
     CorpusPool,

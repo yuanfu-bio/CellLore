@@ -7,7 +7,7 @@ ungated at acquisition precisely because this often finds nothing (see
 tests/test_curation_decision.py).
 """
 
-from scdata_agent.infrastructure.sources.common import infer_genome_build
+from celllore.infrastructure.sources.common import infer_genome_build
 
 
 def test_named_build_is_recognized():

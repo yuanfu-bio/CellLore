@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from scdata_agent.domain.repository_urls import (
+from celllore.domain.repository_urls import (
     canonical_assembly,
     geo_bucket,
     geo_namespace,

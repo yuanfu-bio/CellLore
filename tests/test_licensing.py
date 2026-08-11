@@ -8,12 +8,12 @@ tool ends up asserting reuse rights nobody granted.
 
 import pytest
 
-from scdata_agent.domain.licensing import (
+from celllore.domain.licensing import (
     REPOSITORY_LICENSE_POLICIES,
     policies_for_urls,
     policy_for_url,
 )
-from scdata_agent.domain.lifecycle import LicenseStatus
+from celllore.domain.lifecycle import LicenseStatus
 
 
 class TestPolicyMatching:

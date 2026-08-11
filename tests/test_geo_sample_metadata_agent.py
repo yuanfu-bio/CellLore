@@ -1,13 +1,13 @@
 import pytest
 
-from scdata_agent.application.agents import geo_sample_metadata as module
-from scdata_agent.application.agents.geo_sample_metadata import (
+from celllore.application.agents import geo_sample_metadata as module
+from celllore.application.agents.geo_sample_metadata import (
     GeoSampleMetadataAgent,
     _refine_candidates_from_geo_samples,
 )
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import ArtifactKind, CollaborationLedger
-from scdata_agent.domain.models import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import ArtifactKind, CollaborationLedger
+from celllore.domain.models import (
     DatasetCandidate,
     DiscoveryRunResult,
     GeoSampleRecord,

@@ -11,15 +11,15 @@ tool loop itself is exercised end to end by the `use_llm=False` policy path.
 
 import pytest
 
-from scdata_agent.application.agents.discovery import (
+from celllore.application.agents.discovery import (
     MAX_SUPPLEMENTARY_SEARCHES,
     ResourceDiscoveryAgent,
     _apply_required_candidate_filters,
     _coverage_gaps,
 )
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import CollaborationLedger
-from scdata_agent.domain.models import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import CollaborationLedger
+from celllore.domain.models import (
     AssayProfile,
     DatasetCandidate,
     DiscoveryRunResult,

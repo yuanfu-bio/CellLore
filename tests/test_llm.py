@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from scdata_agent.infrastructure.llm.stepfun import StepFunChatClient, StepFunSettings
+from celllore.infrastructure.llm.stepfun import StepFunChatClient, StepFunSettings
 
 
 @pytest.mark.asyncio

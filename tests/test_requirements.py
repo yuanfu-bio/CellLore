@@ -1,5 +1,5 @@
-from scdata_agent.domain.models import DataRole, OmicsLayer, PairingLevel
-from scdata_agent.domain.requirements import (
+from celllore.domain.models import DataRole, OmicsLayer, PairingLevel
+from celllore.domain.requirements import (
     QueryPlanner,
     RuleBasedRequirementCompiler,
     applicable_bundle_schemas_by_layers,

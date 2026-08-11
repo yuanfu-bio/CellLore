@@ -4,12 +4,12 @@ has_omics_layer:*/resolved_assembly. Both stay REPOSITORY_REPORTED --
 FILE_OBSERVED-level evidence is Phase 5B's job once files are in hand.
 """
 
-from scdata_agent.application.resource_pipeline import (
+from celllore.application.resource_pipeline import (
     omics_layer_claims,
     resolved_assembly_claim,
 )
-from scdata_agent.domain.lifecycle import SemanticBundle
-from scdata_agent.domain.models import (
+from celllore.domain.lifecycle import SemanticBundle
+from celllore.domain.models import (
     AssayProfile,
     DataAsset,
     DataRole,
@@ -18,7 +18,7 @@ from scdata_agent.domain.models import (
     OmicsLayer,
     ResearchRequirement,
 )
-from scdata_agent.domain.resource_pipeline import BundleAccessStatus, RemoteBundleInventorySummary
+from celllore.domain.resource_pipeline import BundleAccessStatus, RemoteBundleInventorySummary
 
 
 class TestOmicsLayerClaims:

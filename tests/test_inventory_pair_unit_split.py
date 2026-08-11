@@ -8,24 +8,24 @@ study now reconciles to two independently-judgeable bundles.
 
 import pytest
 
-from scdata_agent.application.agents.inventory_reconcile import (
+from celllore.application.agents.inventory_reconcile import (
     InventoryReconcileAgent,
     _geo_sample_assets,
     _geo_sample_data_role,
     _unit_covers_required_omics,
 )
-from scdata_agent.application.agents.pair_unit_resolver import (
+from celllore.application.agents.pair_unit_resolver import (
     PairUnitResolutionDraft,
     PairUnitResolver,
 )
-from scdata_agent.application.agents.pairing_verifier import PairingVerifier
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.pairing_verifier import PairingVerifier
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import (
     ArtifactKind,
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AccessLevel,
     AssayProfile,
     AssetAvailability,
@@ -42,7 +42,7 @@ from scdata_agent.domain.models import (
     ResearchRequirement,
     TransferProtocol,
 )
-from scdata_agent.domain.resource_pipeline import AssetInventoryDelta, ScoutPhase
+from celllore.domain.resource_pipeline import AssetInventoryDelta, ScoutPhase
 
 
 class _FakeClient:
@@ -556,7 +556,7 @@ async def test_geo_sample_probe_upgrades_declared_assets_to_verified(tmp_path, m
     on another route) must not be re-probed."""
     _FakeProbe.instances.clear()
     monkeypatch.setattr(
-        "scdata_agent.application.agents.inventory_reconcile.RemoteAvailabilityProbe",
+        "celllore.application.agents.inventory_reconcile.RemoteAvailabilityProbe",
         _FakeProbe,
     )
     candidate = DatasetCandidate(

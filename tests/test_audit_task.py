@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from scdata_agent.domain.lifecycle import (
+from celllore.domain.lifecycle import (
     AuditQueueAction,
     AuditTask,
     AuditTaskCategoryFamily,

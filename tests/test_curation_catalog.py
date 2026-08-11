@@ -2,14 +2,14 @@
 
 from openpyxl import load_workbook
 
-from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
-from scdata_agent.application.curation_catalog import (
+from celllore.application.collaboration import AgentName, ArtifactKind, artifact
+from celllore.application.curation_catalog import (
     CurationCatalog,
     build_curation_catalog,
     write_curation_catalog_xlsx,
 )
-from scdata_agent.domain.lifecycle import SemanticBundle
-from scdata_agent.domain.models import (
+from celllore.domain.lifecycle import SemanticBundle
+from celllore.domain.models import (
     DataAsset,
     DataRole,
     DatasetCandidate,
@@ -20,7 +20,7 @@ from scdata_agent.domain.models import (
     ResearchRequirement,
     SourceRecord,
 )
-from scdata_agent.domain.pair_units import ProposedPairUnit
+from celllore.domain.pair_units import ProposedPairUnit
 
 
 def test_discovered_study_without_pair_unit_is_retained_as_a_hold():

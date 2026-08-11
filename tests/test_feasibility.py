@@ -1,5 +1,5 @@
-from scdata_agent.domain.feasibility import FeasibilityAssessor
-from scdata_agent.domain.models import (
+from celllore.domain.feasibility import FeasibilityAssessor
+from celllore.domain.models import (
     AccessLevel,
     AssayProfile,
     CurationDecision,
@@ -11,7 +11,7 @@ from scdata_agent.domain.models import (
     PairingRequirement,
     ResearchRequirement,
 )
-from scdata_agent.domain.requirements import RuleBasedRequirementCompiler
+from celllore.domain.requirements import RuleBasedRequirementCompiler
 
 
 def _scatac_profile() -> AssayProfile:

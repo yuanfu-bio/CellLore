@@ -2,14 +2,14 @@ from typing import Any
 
 import pytest
 
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import (
     AgentName,
     ArtifactKind,
     CollaborationLedger,
 )
-from scdata_agent.application.orchestration_v2 import MultiAgentSupervisor
-from scdata_agent.infrastructure.llm import tracing
+from celllore.application.orchestration_v2 import MultiAgentSupervisor
+from celllore.infrastructure.llm import tracing
 
 
 class _TracingAgent:

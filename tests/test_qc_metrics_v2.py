@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from scdata_agent.domain.lifecycle import (
+from celllore.domain.lifecycle import (
     MaterializationManifest,
     MaterializationStatus,
     TransferReceipt,
     TransferReceiptStatus,
 )
-from scdata_agent.domain.models import DataRole, GateStatus, TransferProtocol
-from scdata_agent.infrastructure.qc_metrics import compute_role_metrics
+from celllore.domain.models import DataRole, GateStatus, TransferProtocol
+from celllore.infrastructure.qc_metrics import compute_role_metrics
 
 
 def _receipt(asset_id: str, path: Path) -> TransferReceipt:

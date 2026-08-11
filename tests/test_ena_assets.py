@@ -1,12 +1,12 @@
 import httpx
 import pytest
 
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AssetAvailability,
     DatasetCandidate,
     Identifier,
 )
-from scdata_agent.infrastructure.sources.ena import ENAAssetResolver
+from celllore.infrastructure.sources.ena import ENAAssetResolver
 
 
 @pytest.mark.asyncio

@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scdata_agent.domain.assets import infer_data_role
-from scdata_agent.domain.manifest import (
+from celllore.domain.assets import infer_data_role
+from celllore.domain.manifest import (
     PAIRED_MULTIOME_ZH_V1,
     IssueSeverity,
     normalize_row,
 )
-from scdata_agent.domain.models import DataRole
-from scdata_agent.infrastructure.manifest_reader import read_manifest, read_tabular
+from celllore.domain.models import DataRole
+from celllore.infrastructure.manifest_reader import read_manifest, read_tabular
 
 FIXTURE = Path(__file__).parent / "data" / "manifest_paired_multiome_sample.csv"
 

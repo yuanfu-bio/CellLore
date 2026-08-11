@@ -7,8 +7,8 @@ every semantic bundle was reported as incomplete.
 
 import pytest
 
-from scdata_agent.domain.assets import infer_data_role
-from scdata_agent.domain.models import DataRole
+from celllore.domain.assets import infer_data_role
+from celllore.domain.models import DataRole
 
 
 @pytest.mark.parametrize(

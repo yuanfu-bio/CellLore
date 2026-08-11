@@ -7,7 +7,7 @@ handed two ESSENTIAL clinical-cohort needs it never asked for, which polluted
 capability_gaps and depressed readiness.
 """
 
-from scdata_agent.infrastructure.llm.research_planner import (
+from celllore.infrastructure.llm.research_planner import (
     _fallback_compact_intent,
     _fallback_compact_strategy,
     _mentions_clinical_outcomes,

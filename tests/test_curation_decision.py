@@ -6,18 +6,18 @@ values it accepts, at each gate. USER_CORRECTED is a universal exception --
 never something a predicate needs to list to accept it.
 """
 
-from scdata_agent.domain.curation.decision import (
+from celllore.domain.curation.decision import (
     EvidenceGate,
     evaluate_evidence_completeness,
 )
-from scdata_agent.domain.curation.profile import (
+from celllore.domain.curation.profile import (
     CurationProfile,
     CurationUnitGrouping,
     RequiredEvidence,
 )
-from scdata_agent.domain.curation.profiles.paired_atac_rna_human import PAIRED_ATAC_RNA_HUMAN
-from scdata_agent.domain.lifecycle import EvidenceClaim
-from scdata_agent.domain.models import EvidenceClass
+from celllore.domain.curation.profiles.paired_atac_rna_human import PAIRED_ATAC_RNA_HUMAN
+from celllore.domain.lifecycle import EvidenceClaim
+from celllore.domain.models import EvidenceClass
 
 
 def _profile(*required_evidence: RequiredEvidence) -> CurationProfile:

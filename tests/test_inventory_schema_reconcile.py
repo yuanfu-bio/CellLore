@@ -8,16 +8,16 @@ lacking an RNA matrix they were never expected to have.
 
 import pytest
 
-from scdata_agent.application.agents.inventory_reconcile import (
+from celllore.application.agents.inventory_reconcile import (
     InventoryReconcileAgent,
 )
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import (
     ArtifactKind,
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AccessLevel,
     AssayProfile,
     AssetAvailability,
@@ -32,7 +32,7 @@ from scdata_agent.domain.models import (
     ResearchRequirement,
     TransferProtocol,
 )
-from scdata_agent.domain.resource_pipeline import AssetInventoryDelta, ScoutPhase
+from celllore.domain.resource_pipeline import AssetInventoryDelta, ScoutPhase
 
 
 def _asset(candidate_id: str, role: DataRole, file_name: str) -> DataAsset:

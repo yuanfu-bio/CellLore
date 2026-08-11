@@ -2,14 +2,14 @@ import json
 
 import pytest
 
-from scdata_agent.domain.models import OmicsLayer, PairingLevel
-from scdata_agent.domain.planning import (
+from celllore.domain.models import OmicsLayer, PairingLevel
+from celllore.domain.planning import (
     ExecutionStatus,
     PlanCritique,
     PlanOrigin,
     PlanReadiness,
 )
-from scdata_agent.infrastructure.llm.research_planner import (
+from celllore.infrastructure.llm.research_planner import (
     MultiStageResearchPlanner,
     _normalize_model_enums,
     _structured_call,

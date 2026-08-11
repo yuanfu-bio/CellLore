@@ -11,15 +11,15 @@ data cannot support, and nothing downstream objects -- so it has to be caught
 here or not at all.
 """
 
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AccessLevel,
     Identifier,
     OmicsLayer,
     PairingLevel,
     SourceRecord,
 )
-from scdata_agent.domain.resolution import merge_source_records
-from scdata_agent.infrastructure.sources.common import (
+from celllore.domain.resolution import merge_source_records
+from celllore.infrastructure.sources.common import (
     infer_assay_profiles,
     prose_text,
 )

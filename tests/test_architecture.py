@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 def test_public_entrypoints_and_all_specialists_import():
-    import_module("scdata_agent.interfaces.api")
-    import_module("scdata_agent.interfaces.cli")
+    import_module("celllore.interfaces.api")
+    import_module("celllore.interfaces.cli")
     for module in (
         "planning", "discovery", "supervisor", "shared", "evidence_advice",
         "progressive_evidence", "evidence_escalation", "progressive_asset_scout",
@@ -15,12 +15,12 @@ def test_public_entrypoints_and_all_specialists_import():
         "progressive_lineage_v2", "acquisition_v2", "transfer_execution", "curator",
         "materialized_quality", "snapshot_governance",
     ):
-        import_module(f"scdata_agent.application.agents.{module}")
+        import_module(f"celllore.application.agents.{module}")
 
 
 def test_retired_v1_modules_are_absent():
     """The v1 graph was fully superseded; keep the package free of dead paths."""
-    agents = Path(__file__).parents[1] / "src" / "scdata_agent" / "application" / "agents"
+    agents = Path(__file__).parents[1] / "src" / "celllore" / "application" / "agents"
     application = agents.parent
     retired = {
         agents / name for name in (
@@ -33,7 +33,7 @@ def test_retired_v1_modules_are_absent():
 
 
 def test_domain_does_not_depend_on_application_or_infrastructure():
-    domain = Path(__file__).parents[1] / "src" / "scdata_agent" / "domain"
-    forbidden = ("scdata_agent.application", "scdata_agent.infrastructure", "scdata_agent.interfaces")
+    domain = Path(__file__).parents[1] / "src" / "celllore" / "domain"
+    forbidden = ("celllore.application", "celllore.infrastructure", "celllore.interfaces")
     for path in domain.glob("*.py"):
         assert not any(marker in path.read_text() for marker in forbidden), path

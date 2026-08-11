@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from scdata_agent.infrastructure.sources.base import request_with_retry
+from celllore.infrastructure.sources.base import request_with_retry
 
 
 @pytest.mark.asyncio

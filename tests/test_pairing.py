@@ -8,23 +8,23 @@ assay profile existed at all. Asking for paired data changed nothing downstream.
 
 import pytest
 
-from scdata_agent.application.agents.progressive_preflight import (
+from celllore.application.agents.progressive_preflight import (
     ProgressivePreflightAssessmentAgent,
 )
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import (
     AgentName,
     ArtifactKind,
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.application.resource_pipeline import bundle_shape_for
-from scdata_agent.domain.curation.profiles.paired_atac_rna_human import (
+from celllore.application.resource_pipeline import bundle_shape_for
+from celllore.domain.curation.profiles.paired_atac_rna_human import (
     PAIRED_ATAC_RNA_HUMAN,
 )
-from scdata_agent.domain.identifiers import stable_id
-from scdata_agent.domain.lifecycle import BundleStatus, EvidenceClaim, SemanticBundle
-from scdata_agent.domain.models import (
+from celllore.domain.identifiers import stable_id
+from celllore.domain.lifecycle import BundleStatus, EvidenceClaim, SemanticBundle
+from celllore.domain.models import (
     AccessLevel,
     AssayProfile,
     AssetAvailability,
@@ -46,13 +46,13 @@ from scdata_agent.domain.models import (
     pairing_satisfies,
     relationship_kind,
 )
-from scdata_agent.domain.requirements import (
+from celllore.domain.requirements import (
     BUNDLE_SCHEMAS,
     QueryPlanner,
     RuleBasedRequirementCompiler,
     applicable_bundle_schemas_by_layers,
 )
-from scdata_agent.domain.resource_pipeline import (
+from celllore.domain.resource_pipeline import (
     BundleAccessStatus,
     CandidateEvidenceEscalation,
     EvidenceEscalationReport,

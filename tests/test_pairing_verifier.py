@@ -5,9 +5,9 @@ import json
 
 import pytest
 
-from scdata_agent.application.agents.pairing_verifier import PairingVerifier
-from scdata_agent.domain.lifecycle import EvidenceClaim
-from scdata_agent.domain.models import (
+from celllore.application.agents.pairing_verifier import PairingVerifier
+from celllore.domain.lifecycle import EvidenceClaim
+from celllore.domain.models import (
     AssayProfile,
     DatasetCandidate,
     EvidenceClass,
@@ -15,7 +15,7 @@ from scdata_agent.domain.models import (
     PairingLevel,
     ProfileBasis,
 )
-from scdata_agent.domain.pair_units import ProposedPairUnit
+from celllore.domain.pair_units import ProposedPairUnit
 
 
 class _FakeClient:

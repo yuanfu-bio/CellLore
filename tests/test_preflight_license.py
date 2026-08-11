@@ -7,18 +7,18 @@ priority over them.
 
 import pytest
 
-from scdata_agent.application.agents.progressive_preflight import (
+from celllore.application.agents.progressive_preflight import (
     ProgressivePreflightAssessmentAgent,
 )
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import (
     AgentName,
     ArtifactKind,
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.domain.lifecycle import LicenseStatus, SemanticBundle
-from scdata_agent.domain.models import (
+from celllore.domain.lifecycle import LicenseStatus, SemanticBundle
+from celllore.domain.models import (
     AccessLevel,
     AssayProfile,
     AssetAvailability,
@@ -32,7 +32,7 @@ from scdata_agent.domain.models import (
     ResearchRequirement,
     TransferProtocol,
 )
-from scdata_agent.domain.resource_pipeline import (
+from celllore.domain.resource_pipeline import (
     BundleAccessStatus,
     RemoteBundleInventorySummary,
 )

@@ -1,10 +1,10 @@
-from scdata_agent.domain.models import (
+from celllore.domain.models import (
     AccessLevel,
     DatasetCandidate,
     DiscoveryRunResult,
 )
-from scdata_agent.domain.requirements import QueryPlanner, RuleBasedRequirementCompiler
-from scdata_agent.infrastructure.persistence.evidence_ledger import EvidenceLedger
+from celllore.domain.requirements import QueryPlanner, RuleBasedRequirementCompiler
+from celllore.infrastructure.persistence.evidence_ledger import EvidenceLedger
 
 
 def test_ledger_roundtrip(tmp_path):

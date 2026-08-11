@@ -2,25 +2,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from scdata_agent.application.agents.evidence_escalation import (
+from celllore.application.agents.evidence_escalation import (
     EvidenceEscalationAgent,
 )
-from scdata_agent.application.agents.progressive_evidence import (
+from celllore.application.agents.progressive_evidence import (
     ProgressiveEvidenceCuratorAgent,
 )
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import (
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import (
     ArtifactKind,
     CollaborationLedger,
     artifact,
 )
-from scdata_agent.application.orchestration_v2 import (
+from celllore.application.orchestration_v2 import (
     MultiAgentSupervisor,
     workflow_topology,
 )
-from scdata_agent.application.resource_pipeline import merge_pointers
-from scdata_agent.domain.lifecycle import PointerStatus, ResourcePointer
-from scdata_agent.domain.models import (
+from celllore.application.resource_pipeline import merge_pointers
+from celllore.domain.lifecycle import PointerStatus, ResourcePointer
+from celllore.domain.models import (
     AccessLevel,
     AssayProfile,
     DatasetCandidate,
@@ -31,7 +31,7 @@ from scdata_agent.domain.models import (
     ResearchRequirement,
     SourceRecord,
 )
-from scdata_agent.domain.resource_pipeline import (
+from celllore.domain.resource_pipeline import (
     AssetInventoryDelta,
     EvidenceEscalationReport,
     PointerBatchStage,
@@ -189,7 +189,7 @@ async def test_missing_discovery_pointer_escalates_to_open_fulltext(
             )
 
     monkeypatch.setattr(
-        "scdata_agent.application.agents.progressive_evidence.OpenArticleAccessService",
+        "celllore.application.agents.progressive_evidence.OpenArticleAccessService",
         FakeArticleAccess,
     )
     outputs = await ProgressiveEvidenceCuratorAgent("fulltext").run(

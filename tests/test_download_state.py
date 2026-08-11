@@ -8,12 +8,12 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from scdata_agent.application.collaboration import CollaborationLedger, DecisionCheckpoint
-from scdata_agent.application.manifest_repair import (
+from celllore.application.collaboration import CollaborationLedger, DecisionCheckpoint
+from celllore.application.manifest_repair import (
     RepairNotAuthorized,
     classify_repair_candidates,
 )
-from scdata_agent.domain.transfer_state import (
+from celllore.domain.transfer_state import (
     ALLOWED_FILE_TRANSITIONS,
     RETRYABLE_CLASSES,
     FailureClass,
@@ -21,9 +21,9 @@ from scdata_agent.domain.transfer_state import (
     classify_http_outcome,
     is_allowed_transition,
 )
-from scdata_agent.infrastructure.download_triage import probe_and_classify
-from scdata_agent.infrastructure.persistence.catalog import Catalog
-from scdata_agent.infrastructure.persistence.download_store import DownloadStateStore
+from celllore.infrastructure.download_triage import probe_and_classify
+from celllore.infrastructure.persistence.catalog import Catalog
+from celllore.infrastructure.persistence.download_store import DownloadStateStore
 
 
 def test_every_status_has_an_entry_in_the_transition_table():

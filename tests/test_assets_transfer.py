@@ -1,5 +1,5 @@
-from scdata_agent.domain.assets import build_asset_bundle, infer_data_role
-from scdata_agent.domain.models import (
+from celllore.domain.assets import build_asset_bundle, infer_data_role
+from celllore.domain.models import (
     AccessLevel,
     AssetAvailability,
     AssetLocation,
@@ -7,7 +7,7 @@ from scdata_agent.domain.models import (
     DataRole,
     TransferProtocol,
 )
-from scdata_agent.domain.transfer import TransferPlanner
+from celllore.domain.transfer import TransferPlanner
 
 
 def test_role_inference_and_complete_transfer_plan(tmp_path):

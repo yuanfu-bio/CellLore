@@ -11,18 +11,18 @@ from pathlib import Path
 import httpx
 import pytest
 
-from scdata_agent.application.agents.manifest_ingest import ManifestIngestAgent
-from scdata_agent.application.agents.shared import AgentContext
-from scdata_agent.application.collaboration import CollaborationLedger
-from scdata_agent.application.manifest_ingestion import ingest_manifest
-from scdata_agent.domain.models import (
+from celllore.application.agents.manifest_ingest import ManifestIngestAgent
+from celllore.application.agents.shared import AgentContext
+from celllore.application.collaboration import CollaborationLedger
+from celllore.application.manifest_ingestion import ingest_manifest
+from celllore.domain.models import (
     AccessLevel,
     AssetAvailability,
     EvidenceClass,
     TransferProtocol,
 )
-from scdata_agent.infrastructure.manifest_reader import read_manifest
-from scdata_agent.infrastructure.persistence.catalog import Catalog
+from celllore.infrastructure.manifest_reader import read_manifest
+from celllore.infrastructure.persistence.catalog import Catalog
 
 FIXTURE = Path(__file__).parent / "data" / "manifest_paired_multiome_sample.csv"
 
@@ -229,7 +229,7 @@ async def test_ingest_agent_probe_upgrades_direct_assets_and_skips_manual(
 ) -> None:
     _FakeProbe.instances.clear()
     monkeypatch.setattr(
-        "scdata_agent.application.agents.manifest_ingest.RemoteAvailabilityProbe",
+        "celllore.application.agents.manifest_ingest.RemoteAvailabilityProbe",
         _FakeProbe,
     )
     ledger = CollaborationLedger(tmp_path / "system.sqlite")
@@ -275,7 +275,7 @@ async def test_remote_availability_probe_can_upgrade_a_declared_manifest_asset()
     become OBSERVED once our own code independently checks the URL -- that is
     not the human's claim, it is ours, so it does not violate non-negotiable #2.
     """
-    from scdata_agent.infrastructure.remote_probe import RemoteAvailabilityProbe
+    from celllore.infrastructure.remote_probe import RemoteAvailabilityProbe
 
     _, result = _ingest()
     target = result.assets[0]

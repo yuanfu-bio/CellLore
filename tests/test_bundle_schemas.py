@@ -6,8 +6,8 @@ one unioned role list, which was then applied to standalone scATAC depositions
 that legitimately ship no RNA matrix and no barcode linkage.
 """
 
-from scdata_agent.domain.models import BundleSchema, DataRole
-from scdata_agent.domain.requirements import BUNDLE_SCHEMAS
+from celllore.domain.models import BundleSchema, DataRole
+from celllore.domain.requirements import BUNDLE_SCHEMAS
 
 
 def _schema(schema_id: str) -> BundleSchema:

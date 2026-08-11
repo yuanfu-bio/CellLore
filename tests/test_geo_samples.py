@@ -9,7 +9,7 @@ accession-number adjacency is not: GSM5391762 and GSM5391769 are seven
 accessions apart, not adjacent, yet clearly the same patient by title.
 """
 
-from scdata_agent.infrastructure.sources.geo_samples import parse_sample_blocks
+from celllore.infrastructure.sources.geo_samples import parse_sample_blocks
 
 _FIXTURE = """\
 ^SAMPLE = GSM5391762

@@ -35,8 +35,8 @@ from typing import Any
 
 import yaml
 
-from scdata_agent.application.discovery import DiscoveryWorkflow
-from scdata_agent.domain.models import (
+from celllore.application.discovery import DiscoveryWorkflow
+from celllore.domain.models import (
     CurationDecision,
     GateStatus,
     OmicsLayer,
@@ -47,8 +47,8 @@ from scdata_agent.domain.models import (
     pairing_rank,
     pairing_satisfies,
 )
-from scdata_agent.domain.requirements import RuleBasedRequirementCompiler
-from scdata_agent.infrastructure.sources.common import infer_assay_profiles
+from celllore.domain.requirements import RuleBasedRequirementCompiler
+from celllore.infrastructure.sources.common import infer_assay_profiles
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RECORDS = REPO_ROOT / "eval" / "records.jsonl"
