@@ -36,6 +36,8 @@ from __future__ import annotations
 import json
 from typing import Protocol
 
+from pydantic import Field
+
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import EvidenceClaim
 from scdata_agent.domain.models import (
@@ -44,6 +46,7 @@ from scdata_agent.domain.models import (
     GeoSampleRecord,
     PairingLevel,
     ProfileBasis,
+    StrictModel,
 )
 from scdata_agent.domain.pair_units import ProposedPairUnit
 from scdata_agent.infrastructure.llm.requirement_compiler import _json_object
@@ -56,6 +59,12 @@ class ChatCompletionClient(Protocol):
     async def complete(
         self, messages: list[dict[str, object]], *, temperature: float = 0.1, max_tokens: int = 2_000
     ) -> str: ...
+
+
+class PairingInferenceDraft(StrictModel):
+    pairing_level: PairingLevel = PairingLevel.UNVERIFIED
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    rationale: str = "LLM evidence inference."
 
 
 _SYSTEM_PROMPT = (
@@ -140,18 +149,29 @@ class PairingVerifier:
                 for item in member_samples
             ],
         }
-        response = await self.client.complete(
-            [
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
-            temperature=0.0,
-            max_tokens=600,
-        )
-        decoded = _json_object(response)
-        level = PairingLevel(decoded.get("pairing_level", PairingLevel.UNVERIFIED.value))
-        confidence = float(decoded.get("confidence", 0.5))
-        rationale = str(decoded.get("rationale", "LLM evidence inference."))
+        messages = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+        structured_complete = getattr(self.client, "complete_structured", None)
+        if callable(structured_complete):
+            response = await structured_complete(
+                messages,
+                schema=PairingInferenceDraft.model_json_schema(),
+                schema_name="PairingInference",
+                temperature=0.0,
+                max_tokens=800,
+            )
+        else:
+            response = await self.client.complete(
+                messages,
+                temperature=0.0,
+                max_tokens=800,
+            )
+        decoded = PairingInferenceDraft.model_validate(_json_object(response))
+        level = decoded.pairing_level
+        confidence = decoded.confidence
+        rationale = decoded.rationale
         evidence_ids = list(dict.fromkeys(pair_unit.evidence_ids))
         return EvidenceClaim(
             claim_id=stable_id(

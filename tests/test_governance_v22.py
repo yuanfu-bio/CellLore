@@ -15,7 +15,9 @@ from scdata_agent.domain.lifecycle import (
     LicenseStatus,
     LineageFamily,
     LineageGraphSnapshot,
+    PointerStatus,
     PreflightBundleReport,
+    ResourcePointer,
     SemanticBundle,
 )
 from scdata_agent.domain.models import (
@@ -75,7 +77,14 @@ async def test_lineage_is_transitive_and_evaluation_leakage_propagates(tmp_path)
                                   AgentName.ASSET_SCOUT,
                                   {"assets": [item.model_dump(mode="json") for item in assets],
                                    "bundles": [item.model_dump(mode="json") for item in bundles],
-                                   "pointers": []}))
+                                   "pointers": [ResourcePointer(
+                                       pointer_id="removed_pointer",
+                                       candidate_id="removed_by_scope_filter",
+                                       namespace="geo_series",
+                                       locator="GSE_REMOVED",
+                                       source_name="ncbi_geo",
+                                       status=PointerStatus.REPORTED,
+                                   ).model_dump(mode="json")]}))
     output = await ProgressiveLineageLeakageAgent("early").run(ctx)
     snapshot = LineageGraphSnapshot.model_validate(output[0].payload)
     assert len(snapshot.families) == 1

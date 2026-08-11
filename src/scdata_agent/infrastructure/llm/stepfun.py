@@ -15,6 +15,7 @@ from scdata_agent.infrastructure.llm.tracing import emit as emit_llm_event
 DEFAULT_BASE_URL = "https://api.stepfun.com/step_plan/v1"
 DEFAULT_MODEL = "step-3.7-flash"
 VALID_EFFORTS = {"low", "medium", "high"}
+MAX_OUTPUT_TOKENS = 32_000
 
 
 def load_local_env(path: str | Path = ".env") -> None:
@@ -130,13 +131,16 @@ class StepFunChatClient:
                 "model": self.settings.model,
                 "messages": messages,
                 "temperature": temperature,
-                "max_tokens": max_tokens,
+                # Keep a provider-independent safety ceiling even when a
+                # caller sizes output from an unusually large input study.
+                "max_tokens": min(max_tokens, MAX_OUTPUT_TOKENS),
                 "reasoning_effort": self.settings.reasoning_effort,
             }
             if response_format is not None:
                 request_payload["response_format"] = response_format
             empty_diagnostic = "unknown"
             for attempt in range(2):
+                attempt_started = time.perf_counter()
                 response = await client.post(
                     f"{self.settings.base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {self.settings.api_key}"},
@@ -159,7 +163,7 @@ class StepFunChatClient:
                         raw_reply=content,
                         reasoning_content=reasoning_content,
                         usage=payload.get("usage"),
-                        latency_ms=round((time.perf_counter() - started) * 1000),
+                        latency_ms=round((time.perf_counter() - attempt_started) * 1000),
                         attempt=attempt,
                         truncated=False,
                         error=None,
@@ -171,10 +175,36 @@ class StepFunChatClient:
                     f"reasoning_chars={len(reasoning_content or '')}"
                 )
                 if attempt == 0:
-                    request_payload["max_tokens"] = min(
-                        max(int(request_payload["max_tokens"]) * 2, 4_000),
-                        32_000,
+                    # Record every HTTP request, not just the final attempt.
+                    # This keeps API-call and token accounting aligned with
+                    # what the provider actually bills.
+                    emit_llm_event(
+                        client="stepfun",
+                        role=getattr(self, "role", None),
+                        model=self.settings.model,
+                        system_prompt=system_prompt,
+                        user_payload=user_content,
+                        raw_reply=content,
+                        reasoning_content=reasoning_content,
+                        usage=payload.get("usage"),
+                        latency_ms=round(
+                            (time.perf_counter() - attempt_started) * 1000
+                        ),
+                        attempt=attempt,
+                        truncated=truncated,
+                        error="empty_or_truncated_retrying: " + empty_diagnostic,
                     )
+                    # A blanket 4k retry floor made tiny extraction jobs burn
+                    # thousands of reasoning tokens without ever reaching
+                    # their short JSON answer. Give the retry twice the
+                    # caller's task-specific budget and lower reasoning
+                    # effort so output, rather than more deliberation, gets
+                    # the additional room.
+                    request_payload["max_tokens"] = min(
+                        int(request_payload["max_tokens"]) * 2,
+                        MAX_OUTPUT_TOKENS,
+                    )
+                    request_payload["reasoning_effort"] = "low"
                 else:
                     emit_llm_event(
                         client="stepfun",
@@ -185,7 +215,9 @@ class StepFunChatClient:
                         raw_reply=content,
                         reasoning_content=reasoning_content,
                         usage=payload.get("usage"),
-                        latency_ms=round((time.perf_counter() - started) * 1000),
+                        latency_ms=round(
+                            (time.perf_counter() - attempt_started) * 1000
+                        ),
                         attempt=attempt,
                         truncated=truncated,
                         error="empty_or_truncated_after_retry: " + empty_diagnostic,

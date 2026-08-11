@@ -1,7 +1,10 @@
 import pytest
 
 from scdata_agent.application.agents import geo_sample_metadata as module
-from scdata_agent.application.agents.geo_sample_metadata import GeoSampleMetadataAgent
+from scdata_agent.application.agents.geo_sample_metadata import (
+    GeoSampleMetadataAgent,
+    _refine_candidates_from_geo_samples,
+)
 from scdata_agent.application.agents.shared import AgentContext
 from scdata_agent.application.collaboration import ArtifactKind, CollaborationLedger
 from scdata_agent.domain.models import (
@@ -9,9 +12,68 @@ from scdata_agent.domain.models import (
     DiscoveryRunResult,
     GeoSampleRecord,
     Identifier,
+    OmicsLayer,
     QueryPlan,
     ResearchRequirement,
 )
+
+
+def test_geo_samples_filter_pbmc_scope_and_required_rna_atac_layers():
+    requirement = ResearchRequirement(
+        question="human PBMC paired RNA and ATAC",
+        cell_types=["human PBMC"],
+        required_omics_layers=[
+            OmicsLayer.CHROMATIN_ACCESSIBILITY,
+            OmicsLayer.TRANSCRIPTOME,
+        ],
+    )
+    valid = DatasetCandidate(candidate_id="valid", title="Multiomic immune profiling")
+    unrelated = DatasetCandidate(candidate_id="unrelated", title="Tumor multiome")
+    cite = DatasetCandidate(candidate_id="cite", title="PBMC CITE-seq")
+    samples = {
+        "valid": [
+            GeoSampleRecord(
+                gsm_accession="GSM1", series_accession="GSE1",
+                title="PBMC donor 1 RNA",
+                supplementary_files=["GSM1_RNA_counts.csv.gz"],
+            ),
+            GeoSampleRecord(
+                gsm_accession="GSM2", series_accession="GSE1",
+                title="PBMC donor 1 ATAC",
+                supplementary_files=["GSM2_ATAC_fragments.tsv.gz"],
+            ),
+        ],
+        "unrelated": [
+            GeoSampleRecord(
+                gsm_accession="GSM3", series_accession="GSE2",
+                title="Tumor RNA and ATAC",
+                supplementary_files=[
+                    "GSM3_RNA_counts.csv.gz", "GSM3_ATAC_fragments.tsv.gz"
+                ],
+            )
+        ],
+        "cite": [
+            GeoSampleRecord(
+                gsm_accession="GSM4", series_accession="GSE3",
+                title="PBMC RNA and ADT",
+                supplementary_files=[
+                    "GSM4_RNA_counts.csv.gz", "GSM4_ADT_counts.csv.gz"
+                ],
+            )
+        ],
+    }
+
+    kept, report = _refine_candidates_from_geo_samples(
+        [valid, unrelated, cite], requirement, samples
+    )
+
+    assert [item.candidate_id for item in kept] == ["valid"]
+    excluded = {
+        item["candidate_id"]: item["reasons"]
+        for item in report["excluded_candidates"]
+    }
+    assert "pbmc_scope_not_observed" in excluded["unrelated"]
+    assert any("chromatin_accessibility" in reason for reason in excluded["cite"])
 
 
 def _context(tmp_path, candidates):

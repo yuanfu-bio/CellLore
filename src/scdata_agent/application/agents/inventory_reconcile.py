@@ -13,6 +13,8 @@ verifier's output may become a ``has_pair_relationship`` claim.
 
 from __future__ import annotations
 
+import asyncio
+import re
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlparse
 
@@ -54,13 +56,25 @@ from scdata_agent.domain.models import (
     DataRole,
     DatasetCandidate,
     GeoSampleRecord,
+    OmicsLayer,
     PairingLevel,
     TransferProtocol,
 )
 from scdata_agent.domain.pair_units import ProposedPairUnit
 from scdata_agent.domain.resource_pipeline import AssetInventoryDelta
 from scdata_agent.infrastructure.remote_probe import RemoteAvailabilityProbe
-from scdata_agent.infrastructure.sources.common import infer_genome_build
+from scdata_agent.infrastructure.sources.common import infer_assay_profiles, infer_genome_build
+
+
+async def _verify_with_limit(
+    verifier: PairingVerifier,
+    semaphore: asyncio.Semaphore,
+    unit: ProposedPairUnit,
+    candidate: DatasetCandidate,
+    samples: list[GeoSampleRecord],
+) -> EvidenceClaim | None:
+    async with semaphore:
+        return await verifier.verify(unit, candidate, samples)
 
 
 class InventoryReconcileAgent:
@@ -117,24 +131,49 @@ class InventoryReconcileAgent:
         # turning them into real DataAssets here, only series-level
         # supplementary files (typically unrelated sidecars or an unopened
         # RAW.tar archive) ever reached the inventory, and a study's actual
-        # per-sample RNA/ATAC files never became part of any bundle. Skip any
+        # per-sample RNA/ATAC files never became part of any bundle. Merge any
         # (candidate, file_name) another resolver already produced -- e.g. a
         # direct file_url pointer -- so the same physical file never becomes
-        # two DataAssets.
-        delta_assets = [asset for delta in deltas for asset in delta.assets]
-        already_resolved = {
-            (asset.candidate_id, asset.file_name) for asset in delta_assets
-        }
+        # two DataAssets while its stronger GSM semantics are retained.
         candidate_by_id = {
             item.candidate_id: item for item in discovery.candidates
         }
-        geo_sample_assets = [
+        allowed_candidate_ids = set(candidate_by_id)
+        delta_assets = [
+            asset
+            for delta in deltas
+            for asset in delta.assets
+            if asset.candidate_id in allowed_candidate_ids
+        ]
+        all_geo_sample_assets = [
             asset
             for candidate_id, samples in samples_by_candidate.items()
+            if candidate_id in allowed_candidate_ids
             for asset in _geo_sample_assets(
                 candidate_id, samples, candidate_by_id.get(candidate_id)
             )
-            if (candidate_id, asset.file_name) not in already_resolved
+        ]
+        geo_assets_by_file = {
+            (asset.candidate_id, asset.file_name): asset
+            for asset in all_geo_sample_assets
+        }
+        # A series-level resolver may have already emitted the same URL with
+        # role=OTHER because it lacked the owning GSM's title and
+        # characteristics. Keep that resolver's verified location/status, but
+        # upgrade the semantic role and evidence using the more specific
+        # sample-level record instead of letting the earlier weak result mask
+        # it forever.
+        delta_assets = [
+            _upgrade_asset_from_geo_sample(asset, geo_assets_by_file)
+            for asset in delta_assets
+        ]
+        already_resolved = {
+            (asset.candidate_id, asset.file_name) for asset in delta_assets
+        }
+        geo_sample_assets = [
+            asset
+            for asset in all_geo_sample_assets
+            if (asset.candidate_id, asset.file_name) not in already_resolved
         ]
         # These assets are built here, not by ProgressiveAssetScoutAgent, so
         # unlike delta_assets they have never had a chance to earn
@@ -145,7 +184,17 @@ class InventoryReconcileAgent:
         # depositor's claim -- is what lets a fully-verified bundle actually
         # reach "recommended".
         geo_probe_observations: list[RemoteAssetObservation] = []
-        if bool(context.policy.get("remote_probe_enabled", True)):
+        remote_probe_enabled = bool(
+            context.policy.get("remote_probe_enabled", True)
+        )
+        if remote_probe_enabled:
+            self._publish_progress(
+                context,
+                phase="remote_probe",
+                completed=0,
+                total=len(geo_sample_assets),
+                percent=0,
+            )
             geo_sample_assets, geo_probe_observations = await self._probe(
                 context, geo_sample_assets
             )
@@ -184,16 +233,43 @@ class InventoryReconcileAgent:
             ).append(asset)
         assets_by_id = {item.asset_id: item for item in assets}
 
+        candidates_with_assets = [
+            candidate
+            for candidate in discovery.candidates
+            if assets_by_candidate.get(candidate.candidate_id)
+        ]
+        candidate_total = len(candidates_with_assets)
+        progress_base = 20 if remote_probe_enabled and geo_sample_assets else 0
+        self._publish_progress(
+            context,
+            phase="candidate_reconciliation",
+            completed=0,
+            total=candidate_total,
+            percent=progress_base,
+        )
+
         bundles: list[SemanticBundle] = []
         proposed_units: list[ProposedPairUnit] = []
+        excluded_pair_units: list[dict[str, object]] = []
         pairing_claims: list[EvidenceClaim] = []
         layer_claims: list[EvidenceClaim] = []
-        for candidate in discovery.candidates:
+        for candidate_index, candidate in enumerate(candidates_with_assets, 1):
             candidate_assets = assets_by_candidate.get(
                 candidate.candidate_id, []
             )
-            if not candidate_assets:
-                continue
+            self._publish_progress(
+                context,
+                phase="candidate_reconciliation",
+                completed=candidate_index - 1,
+                total=candidate_total,
+                percent=self._candidate_percent(
+                    candidate_index - 1,
+                    candidate_total,
+                    progress_base,
+                ),
+                current_candidate_id=candidate.candidate_id,
+                current_candidate_title=candidate.title,
+            )
             # Candidate-scoped (not per-unit): AssayProfile text doesn't
             # distinguish per-pair-unit, so every pair-unit of this candidate
             # shares the same declared-layer evidence.
@@ -203,6 +279,7 @@ class InventoryReconcileAgent:
             samples = samples_by_candidate.get(candidate.candidate_id, [])
             units = await resolver.resolve(candidate, samples, candidate_assets)
             proposed_units.extend(units)
+            verification_items: list[tuple[ProposedPairUnit, list[DataAsset]]] = []
             for unit in units:
                 unit_assets = [
                     assets_by_id[asset_id]
@@ -210,8 +287,46 @@ class InventoryReconcileAgent:
                     if asset_id in assets_by_id
                 ]
                 if not unit_assets:
+                    excluded_pair_units.append({
+                        "proposed_unit_id": unit.proposed_unit_id,
+                        "candidate_id": candidate.candidate_id,
+                        "reason": "no_resolved_assets",
+                    })
                     continue
-                claim = await verifier.verify(unit, candidate, samples)
+                if not _unit_covers_required_omics(
+                    unit_assets, candidate, context.requirement
+                ):
+                    excluded_pair_units.append({
+                        "proposed_unit_id": unit.proposed_unit_id,
+                        "candidate_id": candidate.candidate_id,
+                        "reason": "missing_required_omics_layers",
+                    })
+                    continue
+                verification_items.append((unit, unit_assets))
+
+            # Units are independent once the resolver has fixed membership.
+            # A small concurrency bound removes the previous N × model-latency
+            # serial bottleneck without changing any unit's evidence scope.
+            concurrency = max(
+                1,
+                min(
+                    8,
+                    int(context.policy.get("pairing_verifier_concurrency", 3)),
+                ),
+            )
+            semaphore = asyncio.Semaphore(concurrency)
+
+            claims = await asyncio.gather(
+                *(
+                    _verify_with_limit(
+                        verifier, semaphore, unit, candidate, samples
+                    )
+                    for unit, _ in verification_items
+                )
+            )
+            for (unit, unit_assets), claim in zip(
+                verification_items, claims, strict=True
+            ):
                 if claim is not None:
                     pairing_claims.append(claim)
                 verified_relationship = (
@@ -262,6 +377,20 @@ class InventoryReconcileAgent:
                         ),
                     )
                 )
+
+            self._publish_progress(
+                context,
+                phase="candidate_reconciliation",
+                completed=candidate_index,
+                total=candidate_total,
+                percent=self._candidate_percent(
+                    candidate_index,
+                    candidate_total,
+                    progress_base,
+                ),
+                current_candidate_id=candidate.candidate_id,
+                current_candidate_title=candidate.title,
+            )
 
         # Truncation is a property of the whole run's scouting, so union the
         # phases: a listing cut short in the direct phase stays partial even if
@@ -340,6 +469,13 @@ class InventoryReconcileAgent:
             for item in context.artifacts
             if item.kind == ArtifactKind.EVIDENCE_ESCALATION
         ]
+        self._publish_progress(
+            context,
+            phase="completed",
+            completed=candidate_total,
+            total=candidate_total,
+            percent=100,
+        )
         return [
             artifact(
                 context.run_id,
@@ -360,6 +496,7 @@ class InventoryReconcileAgent:
                     "proposed_pair_units": [
                         item.model_dump(mode="json") for item in proposed_units
                     ],
+                    "excluded_pair_units": excluded_pair_units,
                     "pairing_claims": [
                         item.model_dump(mode="json") for item in pairing_claims
                     ],
@@ -414,10 +551,54 @@ class InventoryReconcileAgent:
             for item in assets
             if item.locations and item.locations[0].protocol != TransferProtocol.MANUAL
         ]
-        probed, probe_observations = await probe.probe_assets(probeable)
+        def report(completed: int, total: int) -> None:
+            self._publish_progress(
+                context,
+                phase="remote_probe",
+                completed=completed,
+                total=total,
+                percent=round(20 * completed / total) if total else 20,
+            )
+
+        probed, probe_observations = await probe.probe_assets(
+            probeable,
+            progress_callback=report,
+        )
         probed_by_id = {item.asset_id: item for item in probed}
         merged_assets = [probed_by_id.get(item.asset_id, item) for item in assets]
         return merged_assets, probe_observations
+
+    @staticmethod
+    def _candidate_percent(completed: int, total: int, base: int) -> int:
+        return (
+            round(base + (100 - base) * completed / total)
+            if total
+            else 100
+        )
+
+    @staticmethod
+    def _publish_progress(
+        context: AgentContext,
+        *,
+        phase: str,
+        completed: int,
+        total: int,
+        percent: int,
+        current_candidate_id: str | None = None,
+        current_candidate_title: str | None = None,
+    ) -> None:
+        context.ledger.add_event(
+            context.run_id,
+            "inventory_progress",
+            {
+                "phase": phase,
+                "completed": completed,
+                "total": total,
+                "percent": max(0, min(100, percent)),
+                "current_candidate_id": current_candidate_id,
+                "current_candidate_title": current_candidate_title,
+            },
+        )
 
     @staticmethod
     def _merge_assets(assets: list[DataAsset]) -> list[DataAsset]:
@@ -486,7 +667,44 @@ def _geo_sample_assets(
     assets: list[DataAsset] = []
     for sample in samples:
         genome_build = infer_genome_build([sample.raw_text]) or candidate_genome_build
-        for url in sample.supplementary_files:
+        locators = [
+            url
+            for url in sample.supplementary_files
+            if not _is_missing_geo_file_locator(url)
+        ]
+        roles_by_url = {
+            url: _geo_sample_data_role(_geo_sample_file_name(url), sample)
+            for url in locators
+        }
+        sample_layers = {
+            layer
+            for profile in infer_assay_profiles([
+                sample.title,
+                sample.source_name,
+                *sample.characteristics,
+                sample.raw_text,
+            ])
+            for layer in profile.omics_layers
+        }
+        classified_layers = {
+            layer
+            for role in roles_by_url.values()
+            for layer in [_omics_layer_for_data_role(role)]
+            if layer is not None
+        }
+        missing_layers = sample_layers - classified_layers
+        ambiguous_objects = [
+            url
+            for url, role in roles_by_url.items()
+            if role == DataRole.OTHER
+            and _is_generic_matrix_object(_geo_sample_file_name(url))
+        ]
+        if len(missing_layers) == 1 and len(ambiguous_objects) == 1:
+            inferred_role = _data_role_for_omics_layer(next(iter(missing_layers)))
+            if inferred_role is not None:
+                roles_by_url[ambiguous_objects[0]] = inferred_role
+
+        for url in locators:
             file_name = _geo_sample_file_name(url)
             assets.append(
                 DataAsset(
@@ -495,18 +713,20 @@ def _geo_sample_assets(
                         f"{candidate_id}:geo_sample:{sample.gsm_accession}:{url}",
                     ),
                     candidate_id=candidate_id,
-                    role=infer_data_role(file_name) or DataRole.OTHER,
+                    role=roles_by_url[url],
                     file_name=file_name,
                     compression="gzip" if file_name.endswith(".gz") else None,
                     genome_build=genome_build,
                     locations=[
                         AssetLocation(
                             url=_geo_sample_https_url(url),
-                            protocol=(
-                                TransferProtocol.FTP
-                                if url.startswith("ftp://")
-                                else TransferProtocol.HTTPS
-                            ),
+                            # GEO publishes many locators with an ftp://
+                            # prefix, but the URL above is deliberately
+                            # normalized to NCBI's HTTPS endpoint. Keep the
+                            # protocol field consistent with the actual URL;
+                            # marking it FTP caused the transfer backend to
+                            # reject every file before making a request.
+                            protocol=TransferProtocol.HTTPS,
                             access_level=AccessLevel.PUBLIC_DECLARED,
                             availability=AssetAvailability.DECLARED,
                             evidence_ids=sample.evidence_ids,
@@ -516,6 +736,159 @@ def _geo_sample_assets(
                 )
             )
     return assets
+
+
+def _is_missing_geo_file_locator(locator: str) -> bool:
+    return locator.strip().casefold() in {
+        "none", "na", "n/a", "not available", "not applicable", "-"
+    }
+
+
+def _is_generic_matrix_object(file_name: str) -> bool:
+    return bool(re.search(
+        r"(?:matrix|processed|\.mtx(?:\.gz)?$|\.(?:rds|h5|hdf5)(?:\.gz)?$)",
+        file_name.casefold(),
+    ))
+
+
+def _omics_layer_for_data_role(role: DataRole) -> OmicsLayer | None:
+    if role in {
+        DataRole.FRAGMENTS,
+        DataRole.FRAGMENT_INDEX,
+        DataRole.PEAKS,
+        DataRole.PEAK_MATRIX,
+    }:
+        return OmicsLayer.CHROMATIN_ACCESSIBILITY
+    if role == DataRole.RNA_MATRIX:
+        return OmicsLayer.TRANSCRIPTOME
+    if role == DataRole.PROTEIN_MATRIX:
+        return OmicsLayer.PROTEIN
+    return None
+
+
+def _data_role_for_omics_layer(layer: OmicsLayer) -> DataRole | None:
+    return {
+        OmicsLayer.CHROMATIN_ACCESSIBILITY: DataRole.PEAK_MATRIX,
+        OmicsLayer.TRANSCRIPTOME: DataRole.RNA_MATRIX,
+        OmicsLayer.PROTEIN: DataRole.PROTEIN_MATRIX,
+    }.get(layer)
+
+
+def _unit_covers_required_omics(
+    assets: list[DataAsset],
+    candidate: DatasetCandidate,
+    requirement,
+) -> bool:
+    required = set(requirement.required_omics_layers if requirement else [])
+    if not required:
+        return True
+    observed = {
+        layer
+        for asset in assets
+        for layer in [_omics_layer_for_data_role(asset.role)]
+        if layer is not None
+    }
+    # A self-describing object can carry more than one modality. Only use the
+    # candidate's declared assay profile for it; never promote a generic file.
+    if any(asset.role == DataRole.STANDARD_OBJECT for asset in assets):
+        observed.update(
+            layer
+            for profile in candidate.assay_profiles
+            for layer in profile.omics_layers
+        )
+    return required <= observed
+
+
+def _upgrade_asset_from_geo_sample(
+    asset: DataAsset,
+    geo_assets_by_file: dict[tuple[str, str], DataAsset],
+) -> DataAsset:
+    contextual = geo_assets_by_file.get((asset.candidate_id, asset.file_name))
+    if (
+        contextual is None
+        or asset.role != DataRole.OTHER
+        or contextual.role == DataRole.OTHER
+    ):
+        return asset
+    return asset.model_copy(
+        update={
+            "role": contextual.role,
+            "genome_build": asset.genome_build or contextual.genome_build,
+            "evidence_ids": list(
+                dict.fromkeys([*asset.evidence_ids, *contextual.evidence_ids])
+            ),
+        }
+    )
+
+
+def _geo_sample_data_role(file_name: str, sample: GeoSampleRecord) -> DataRole:
+    """Classify a GEO supplementary file using its owning GSM as context.
+
+    GEO frequently publishes a generic ``matrix.mtx`` or an ``.rds`` whose
+    modality appears only in the Sample title/characteristics. The global
+    filename classifier cannot safely infer those files in isolation, but the
+    owning GSM supplies exactly the missing context. Explicit filename
+    signals win; only otherwise-ambiguous matrix/object files use the sample's
+    single observed omics layer.
+    """
+    inferred = infer_data_role(file_name)
+    if inferred is not None:
+        return inferred
+
+    normalized = file_name.casefold()
+    matrix_or_object = bool(
+        re.search(
+            r"(?:matrix|counts?|processed|\.mtx(?:\.gz)?$|"
+            r"\.(?:rds|h5|hdf5|csv|tsv)(?:\.gz)?$)",
+            normalized,
+        )
+    )
+    if matrix_or_object:
+        if re.search(
+            r"(?:^|[_./-])(?:adt|protein|antibody|epitope)(?:[_./-]|$)",
+            normalized,
+        ):
+            return DataRole.PROTEIN_MATRIX
+        if re.search(
+            r"(?:^|[_./-])(?:rna|gex|gene[_-]?expression|soupx)(?:[_./-]|$)",
+            normalized,
+        ):
+            return DataRole.RNA_MATRIX
+        if re.search(
+            r"(?:^|[_./-])(?:atac|chromatin|peak)(?:[_./-]|$)",
+            normalized,
+        ):
+            return DataRole.PEAK_MATRIX
+
+        profiles = infer_assay_profiles(
+            [sample.title, sample.source_name, *sample.characteristics]
+        )
+        layers = {
+            layer
+            for profile in profiles
+            for layer in profile.omics_layers
+        }
+        # Some GEO records use a generic title and put the only modality clue
+        # in fields such as ``!Sample_library_strategy``. Read the sample's
+        # own SOFT block as a fallback, but never merge it with an already
+        # ambiguous multi-layer interpretation.
+        if len(layers) != 1 and sample.raw_text:
+            raw_profiles = infer_assay_profiles([sample.raw_text])
+            raw_layers = {
+                layer
+                for profile in raw_profiles
+                for layer in profile.omics_layers
+            }
+            if len(raw_layers) == 1:
+                layers = raw_layers
+        if layers == {OmicsLayer.TRANSCRIPTOME}:
+            return DataRole.RNA_MATRIX
+        if layers == {OmicsLayer.CHROMATIN_ACCESSIBILITY}:
+            return DataRole.PEAK_MATRIX
+        if layers == {OmicsLayer.PROTEIN}:
+            return DataRole.PROTEIN_MATRIX
+
+    return DataRole.OTHER
 
 
 def _geo_sample_file_name(url: str) -> str:

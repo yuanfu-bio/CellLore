@@ -29,6 +29,7 @@ class TaskStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     SKIPPED = "skipped"
 
 
@@ -301,6 +302,38 @@ class CollaborationLedger:
                 (status.value, _dump(output_artifact_ids), error, now, task_id),
             )
         self.add_event(row["run_id"], "task_finished", {"task_id": task_id, "agent": row["agent"], "status": status.value, "error": error})
+
+    def cancel_running_tasks(self, run_id: str) -> None:
+        """Close task rows left open when their asyncio task is cancelled."""
+        now = utc_now().isoformat()
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT task_id, agent FROM agent_task "
+                "WHERE run_id = ? AND status = ?",
+                (run_id, TaskStatus.RUNNING.value),
+            ).fetchall()
+            connection.execute(
+                "UPDATE agent_task SET status = ?, error = ?, updated_at = ? "
+                "WHERE run_id = ? AND status = ?",
+                (
+                    TaskStatus.CANCELLED.value,
+                    "Run cancelled by user.",
+                    now,
+                    run_id,
+                    TaskStatus.RUNNING.value,
+                ),
+            )
+        for row in rows:
+            self.add_event(
+                run_id,
+                "task_finished",
+                {
+                    "task_id": row["task_id"],
+                    "agent": row["agent"],
+                    "status": TaskStatus.CANCELLED.value,
+                    "error": "Run cancelled by user.",
+                },
+            )
 
     def add_artifact(self, artifact: AgentArtifact) -> AgentArtifact:
         with self.connect() as connection:

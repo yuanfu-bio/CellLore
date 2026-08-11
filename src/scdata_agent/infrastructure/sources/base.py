@@ -46,10 +46,11 @@ async def request_with_retry(
     return response
 
 
-def default_async_client() -> httpx.AsyncClient:
+def default_async_client(*, trust_env: bool = True) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=httpx.Timeout(30.0, connect=10.0),
         follow_redirects=True,
+        trust_env=trust_env,
         headers={
             "User-Agent": (
                 "scdata-agent/0.1.0 "
@@ -57,4 +58,3 @@ def default_async_client() -> httpx.AsyncClient:
             )
         },
     )
-

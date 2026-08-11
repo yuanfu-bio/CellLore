@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -25,20 +26,32 @@ class RemoteAvailabilityProbe:
         self._max_attempts = max(1, max_attempts)
         self._metadata: dict[str, dict[str, object]] = {}
 
-    async def probe_assets(self, assets: list[DataAsset]) -> tuple[list[DataAsset], list[RemoteAssetObservation]]:
+    async def probe_assets(
+        self,
+        assets: list[DataAsset],
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> tuple[list[DataAsset], list[RemoteAssetObservation]]:
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(
             follow_redirects=True, timeout=self._timeout,
             headers={"User-Agent": "scdata-agent/0.1 remote-inventory"},
         )
         semaphore = asyncio.Semaphore(self._concurrency)
+        completed = 0
+        total = len(assets)
 
         async def probe_asset(asset: DataAsset) -> DataAsset:
+            nonlocal completed
             locations = await asyncio.gather(*[
                 self._probe_location(client, semaphore, location)
                 for location in asset.locations
             ])
-            return asset.model_copy(update={"locations": locations})
+            result = asset.model_copy(update={"locations": locations})
+            completed += 1
+            if progress_callback is not None:
+                progress_callback(completed, total)
+            return result
 
         try:
             probed = await asyncio.gather(*[probe_asset(asset) for asset in assets])

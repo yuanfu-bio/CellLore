@@ -86,21 +86,23 @@ async def test_unresolved_dogma_seq_study_does_not_reach_preflight_ready(tmp_pat
             acceptable_levels=[PairingLevel.SAME_CELL, PairingLevel.SAME_NUCLEUS]
         ),
     )
+    database = tmp_path / "provisional.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run(requirement.question, {"use_llm": False})
     discovery = DiscoveryRunResult(
-        run_id="run_1", requirement=requirement,
+        run_id=run.run_id, requirement=requirement,
         query_plan=QueryPlan(requirement=requirement, queries=[]),
         candidates=[candidate], source_records=[], feasibility_reports=[],
     )
-    database = tmp_path / "provisional.sqlite"
     context = AgentContext(
-        run_id="run_1", question=requirement.question, database_path=str(database),
-        ledger=CollaborationLedger(database), policy={"use_llm": False},
+        run_id=run.run_id, question=requirement.question, database_path=str(database),
+        ledger=ledger, policy={"use_llm": False},
         requirement=requirement, discovery=discovery,
     )
     context.artifacts.append(artifact(
-        "run_1", ArtifactKind.ASSET_INVENTORY_DELTA, InventoryReconcileAgent.name,
+        run.run_id, ArtifactKind.ASSET_INVENTORY_DELTA, InventoryReconcileAgent.name,
         AssetInventoryDelta(
-            inventory_id="delta_1", run_id="run_1", phase=ScoutPhase.DIRECT, assets=assets,
+            inventory_id="delta_1", run_id=run.run_id, phase=ScoutPhase.DIRECT, assets=assets,
         ).model_dump(mode="json"),
     ))
     # No GEO_SAMPLE_METADATA artifact at all -- exactly the "no per-sample
@@ -164,25 +166,27 @@ async def test_a_genuinely_resolved_unit_from_the_same_technology_does_pass(tmp_
             acceptable_levels=[PairingLevel.SAME_CELL, PairingLevel.SAME_NUCLEUS]
         ),
     )
+    database = tmp_path / "resolved.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run(requirement.question, {"use_llm": False})
     discovery = DiscoveryRunResult(
-        run_id="run_1", requirement=requirement,
+        run_id=run.run_id, requirement=requirement,
         query_plan=QueryPlan(requirement=requirement, queries=[]),
         candidates=[candidate], source_records=[], feasibility_reports=[],
     )
-    database = tmp_path / "resolved.sqlite"
     context = AgentContext(
-        run_id="run_1", question=requirement.question, database_path=str(database),
-        ledger=CollaborationLedger(database), policy={"use_llm": False},
+        run_id=run.run_id, question=requirement.question, database_path=str(database),
+        ledger=ledger, policy={"use_llm": False},
         requirement=requirement, discovery=discovery,
     )
     context.artifacts.append(artifact(
-        "run_1", ArtifactKind.ASSET_INVENTORY_DELTA, InventoryReconcileAgent.name,
+        run.run_id, ArtifactKind.ASSET_INVENTORY_DELTA, InventoryReconcileAgent.name,
         AssetInventoryDelta(
-            inventory_id="delta_1", run_id="run_1", phase=ScoutPhase.DIRECT, assets=assets,
+            inventory_id="delta_1", run_id=run.run_id, phase=ScoutPhase.DIRECT, assets=assets,
         ).model_dump(mode="json"),
     ))
     context.artifacts.append(artifact(
-        "run_1", ArtifactKind.GEO_SAMPLE_METADATA, InventoryReconcileAgent.name,
+        run.run_id, ArtifactKind.GEO_SAMPLE_METADATA, InventoryReconcileAgent.name,
         {"samples_by_candidate": {"cand_1": [sample.model_dump(mode="json")]}},
     ))
 

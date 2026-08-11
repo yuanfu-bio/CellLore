@@ -87,4 +87,17 @@ def test_stepfun_planner_uses_low_effort_by_default(monkeypatch):
 
     router = ModelRouter.from_environment()
     assert router.client(ReasoningProfile.PLANNER).settings.reasoning_effort == "low"
+    assert router.client(ReasoningProfile.EXTRACT).settings.reasoning_effort == "low"
     assert router.client(ReasoningProfile.REVIEW).settings.reasoning_effort == "medium"
+
+
+def test_stepfun_extract_effort_can_be_overridden(monkeypatch):
+    from scdata_agent.infrastructure.llm.router import ModelRouter, ReasoningProfile
+
+    monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "stepfun")
+    monkeypatch.setenv("STEPFUN_API_KEY", "test-key")
+    monkeypatch.setenv("STEPFUN_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("SCDATA_AGENT_REASONING_EFFORT_EXTRACT", "medium")
+
+    router = ModelRouter.from_environment()
+    assert router.client(ReasoningProfile.EXTRACT).settings.reasoning_effort == "medium"

@@ -1,7 +1,12 @@
 import pytest
 
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
-from scdata_agent.application.collaboration import CollaborationLedger, RunStatus
+from scdata_agent.application.collaboration import (
+    AgentName,
+    CollaborationLedger,
+    RunStatus,
+    TaskStatus,
+)
 from scdata_agent.domain.models import (
     AccessLevel,
     CurationDecision,
@@ -38,6 +43,33 @@ class FakeWorkflow:
         )
 
 
+def test_cancel_closes_running_task_rows(tmp_path):
+    database = tmp_path / "agent.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run("human PBMC multiome", {"use_llm": False})
+    ledger.start_task(run.run_id, AgentName.ASSET_SCOUT, [])
+    supervisor = MultiAgentSupervisor(ledger, str(database))
+
+    supervisor.cancel(run.run_id)
+
+    assert ledger.get_run(run.run_id).status == RunStatus.CANCELLED
+    tasks = ledger.list_tasks(run.run_id)
+    assert tasks[0].status == TaskStatus.CANCELLED
+    assert tasks[0].error == "Run cancelled by user."
+
+
+def test_cancel_does_not_rewrite_a_completed_run(tmp_path):
+    database = tmp_path / "agent.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run("completed run", {"use_llm": False})
+    ledger.set_run_status(run.run_id, RunStatus.COMPLETED)
+    supervisor = MultiAgentSupervisor(ledger, str(database))
+
+    supervisor.cancel(run.run_id)
+
+    assert ledger.get_run(run.run_id).status == RunStatus.COMPLETED
+
+
 @pytest.mark.asyncio
 async def test_supervisor_persists_specialist_handoffs_and_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setattr(
@@ -56,6 +88,13 @@ async def test_supervisor_persists_specialist_handoffs_and_checkpoint(tmp_path, 
     assert len(ledger.list_tasks(run.run_id)) == 11
     assert len(ledger.list_artifacts(run.run_id)) >= 8
     checkpoint = ledger.list_checkpoints(run.run_id)[0]
+    before_resume = ledger.events_since(run.run_id)[-1]["event_id"]
     await supervisor.resume_checkpoint(checkpoint.checkpoint_id, {"option": "plan_only"})
+    resume_events = ledger.events_since(run.run_id, before_resume)
+    assert any(
+        event["type"] == "run_status"
+        and event["payload"] == {"status": "running"}
+        for event in resume_events
+    )
     assert ledger.get_run(run.run_id).status == RunStatus.COMPLETED
     assert len(ledger.events_since(run.run_id)) > 10

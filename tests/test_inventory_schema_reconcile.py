@@ -82,32 +82,34 @@ async def _reconcile(tmp_path, candidates, assets):
             DataRole.SAMPLE_METADATA,
         ],
     )
+    database = tmp_path / "reconcile.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run(requirement.question, {"use_llm": False})
     discovery = DiscoveryRunResult(
-        run_id="run_1",
+        run_id=run.run_id,
         requirement=requirement,
         query_plan=QueryPlan(requirement=requirement, queries=[]),
         candidates=candidates,
         source_records=[],
         feasibility_reports=[],
     )
-    database = tmp_path / "reconcile.sqlite"
     context = AgentContext(
-        run_id="run_1",
+        run_id=run.run_id,
         question=requirement.question,
         database_path=str(database),
-        ledger=CollaborationLedger(database),
+        ledger=ledger,
         policy={"use_llm": False, "remote_probe_enabled": False},
         requirement=requirement,
         discovery=discovery,
     )
     context.artifacts.append(
         artifact(
-            "run_1",
+            run.run_id,
             ArtifactKind.ASSET_INVENTORY_DELTA,
             InventoryReconcileAgent.name,
             AssetInventoryDelta(
                 inventory_id="delta_1",
-                run_id="run_1",
+                run_id=run.run_id,
                 phase=ScoutPhase.DIRECT,
                 assets=assets,
             ).model_dump(mode="json"),

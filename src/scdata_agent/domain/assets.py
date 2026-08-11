@@ -28,7 +28,11 @@ ROLE_PATTERNS: tuple[tuple[DataRole, re.Pattern[str]], ...] = (
     # classified as a peak matrix by its own parent directory.
     (
         DataRole.CELL_METADATA,
-        re.compile(r"barcodes\.tsv(?:\.gz)?$|(?:cell|barcode).*(?:meta|annot)", re.I),
+        re.compile(
+            r"barcodes\.tsv(?:\.gz)?$|(?:cell|barcode).*(?:meta|annot)|"
+            r"(?:^|[/_-])metadata\.(?:csv|tsv|txt)(?:\.gz)?$",
+            re.I,
+        ),
     ),
     (DataRole.PEAKS, re.compile(r"narrowpeak|broadpeak|peaks?\.(?:bed|tsv|csv|txt)(?:\.gz)?$", re.I)),
     # Modality-specific matrices. 10x encodes the modality in the enclosing

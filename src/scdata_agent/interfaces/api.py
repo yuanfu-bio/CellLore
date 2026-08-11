@@ -241,7 +241,10 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
         task = app.state.background_tasks.get(run_id)
         if task and not task.done():
             task.cancel()
-        return {"run_id": run_id, "status": "cancelled"}
+        return {
+            "run_id": run_id,
+            "status": ledger.get_run(run_id).status.value,
+        }
 
     @app.post("/checkpoints/{checkpoint_id}/resolve")
     async def resolve_checkpoint(checkpoint_id: str, request: ResolveCheckpointRequest) -> dict[str, Any]:
@@ -342,6 +345,11 @@ def _run_payload(ledger: CollaborationLedger, run_id: str) -> dict[str, Any]:
     run_error = failed_tasks[-1].error if failed_tasks else None
     acquisition_artifacts = [item for item in artifacts if item.kind.value == "acquisition_plan"]
     acquisition_plan = acquisition_artifacts[-1].payload if acquisition_artifacts else None
+    inventory_progress_events = [
+        event
+        for event in ledger.events_since(run_id)
+        if event["type"] == "inventory_progress"
+    ]
     return {
         "run": run.model_dump(mode="json"),
         "workflow_topology": _workflow_topology_trace(ledger, run_id),
@@ -356,6 +364,11 @@ def _run_payload(ledger: CollaborationLedger, run_id: str) -> dict[str, Any]:
         "executable_contracts": research_plan.get("executable_contracts", []) if research_plan else [],
         "llm_calls": llm_calls,
         "acquisition_plan": acquisition_plan,
+        "inventory_progress": (
+            inventory_progress_events[-1]["payload"]
+            if inventory_progress_events
+            else None
+        ),
     }
 
 

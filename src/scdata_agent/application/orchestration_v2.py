@@ -103,17 +103,17 @@ def workflow_topology() -> dict[str, Any]:
         ("research_planner", "Research planner", "agent", 185, 20),
         ("planning_gate", "Planning gate", "gate", 350, 20),
         ("resource_discovery", "Resource discovery", "agent", 515, 20),
-        ("asset_scout_direct", "Asset scout · direct", "agent", 350, 115),
-        ("evidence_metadata", "Evidence curator · metadata", "agent", 515, 115),
-        ("evidence_escalation_gate", "Evidence escalation", "gate", 350, 210),
-        ("evidence_fulltext", "Evidence curator · full text", "agent", 515, 210),
-        ("asset_scout_enriched", "Asset scout · enriched", "agent", 515, 305),
-        ("geo_sample_metadata", "GEO sample metadata", "agent", 350, 305),
-        ("inventory_reconcile", "Inventory reconcile", "agent", 350, 400),
-        ("preflight_assessment", "Preflight assessment", "agent", 350, 495),
-        ("early_lineage", "Early lineage", "agent", 515, 495),
-        ("acquisition_strategy", "Acquisition strategy", "agent", 350, 590),
-        ("download_approval", "Download approval", "gate", 515, 590),
+        ("asset_scout_direct", "Asset scout · direct", "agent", 185, 115),
+        ("evidence_metadata", "Evidence curator · metadata", "agent", 350, 115),
+        ("evidence_escalation_gate", "Evidence escalation", "gate", 185, 210),
+        ("evidence_fulltext", "Evidence curator · full text", "agent", 350, 210),
+        ("asset_scout_enriched", "Asset scout · enriched", "agent", 350, 305),
+        ("geo_sample_metadata", "GEO sample metadata", "agent", 185, 305),
+        ("inventory_reconcile", "Inventory reconcile", "agent", 268, 400),
+        ("preflight_assessment", "Preflight assessment", "agent", 185, 495),
+        ("early_lineage", "Early lineage", "agent", 350, 495),
+        ("acquisition_strategy", "Acquisition strategy", "agent", 185, 590),
+        ("download_approval", "Download approval", "gate", 350, 590),
         ("transfer_execution", "Transfer execution", "agent", 20, 685),
         ("dataset_curator", "Dataset curator", "agent", 185, 685),
         ("materialized_quality", "Materialized quality", "agent", 350, 685),
@@ -252,6 +252,7 @@ class MultiAgentSupervisor:
         if checkpoint.kind == "download_selection":
             self._validate_download_resolution(checkpoint, resolution)
         checkpoint = self.ledger.resolve_checkpoint(checkpoint_id, resolution)
+        self.ledger.set_run_status(checkpoint.run_id, RunStatus.RUNNING)
         self.ledger.add_event(
             checkpoint.run_id,
             "graph_resumed",
@@ -293,8 +294,15 @@ class MultiAgentSupervisor:
         }
 
     def cancel(self, run_id: str) -> None:
-        self.ledger.get_run(run_id)
+        run = self.ledger.get_run(run_id)
+        if run.status in {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }:
+            return
         self.ledger.set_run_status(run_id, RunStatus.CANCELLED)
+        self.ledger.cancel_running_tasks(run_id)
         self.ledger.add_event(
             run_id, "graph_cancelled", {"thread_id": run_id}
         )
@@ -328,8 +336,7 @@ class MultiAgentSupervisor:
             self._specialist(AgentName.ASSET_SCOUT, self.asset_scout_enriched, "asset_scout_enriched"),
         )
         graph.add_node(
-            "geo_sample_metadata",
-            self._specialist(AgentName.GEO_SAMPLE_METADATA, self.geo_sample_metadata, "geo_sample_metadata"),
+            "geo_sample_metadata", self._geo_sample_metadata
         )
         graph.add_node(
             "inventory_reconcile",
@@ -579,6 +586,31 @@ class MultiAgentSupervisor:
 
         return node
 
+    async def _geo_sample_metadata(
+        self, state: SupervisorState
+    ) -> dict[str, Any]:
+        context = self._context(state)
+        await self._dispatch(
+            context,
+            AgentName.GEO_SAMPLE_METADATA,
+            self.geo_sample_metadata,
+            node_id="geo_sample_metadata",
+        )
+        refined = latest_artifact(
+            self.ledger.list_artifacts(state["run_id"]),
+            ArtifactKind.DISCOVERY_RESULT.value,
+        )
+        if refined is None:
+            return {}
+        known_fields = set(DiscoveryRunResult.model_fields)
+        return {
+            "discovery": DiscoveryRunResult.model_validate({
+                key: value
+                for key, value in refined.payload.items()
+                if key in known_fields
+            }).model_dump(mode="json")
+        }
+
     async def _download_approval(
         self, state: SupervisorState
     ) -> dict[str, Any]:
@@ -737,7 +769,11 @@ class MultiAgentSupervisor:
                 context.run_id,
                 ArtifactKind.LLM_CALL,
                 name,
-                event,
+                {
+                    **event,
+                    "task_id": task.task_id,
+                    "workflow_node": node_id or name.value,
+                },
             )
             self.ledger.add_artifact(item)
             context.artifacts.append(item)
@@ -838,7 +874,7 @@ class MultiAgentSupervisor:
                 plan_id=stable_id("acquisition", context.run_id),
                 run_id=context.run_id,
                 destination_root=str(
-                    Path(context.policy.get("data_root", "data")) / "raw"
+                    Path(context.policy.get("data_root", "data")) / "production"
                 ),
             )
         )

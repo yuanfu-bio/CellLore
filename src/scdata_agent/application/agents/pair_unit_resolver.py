@@ -64,6 +64,11 @@ _SYSTEM_PROMPT = (
     "with no experimental-design meaning -- you must never group samples "
     "because their accessions are numerically close or sequential; ignore "
     "accession order entirely and reason only from the sample content. "
+    "First identify each sample/file modality from explicit RNA/GEX, ATAC/"
+    "chromatin/fragments, and ADT/protein terms. ADT/protein is not ATAC: an "
+    "RNA+ADT CITE-seq pair must never be described as an RNA+ATAC pair. A "
+    "paired RNA+ATAC unit should include evidence for both complementary "
+    "modalities from the same named patient/donor/replicate. "
     "For every proposed unit, write a grouping_rationale that cites the "
     "specific text (titles, characteristics, file name fragments) that "
     "justifies the grouping, and list any uncertainties honestly. You are "
@@ -119,18 +124,30 @@ class PairUnitResolver:
             ],
             "json_schema": PairUnitResolutionDraft.model_json_schema(),
         }
-        response = await self.client.complete(
-            [
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-            temperature=0.0,
-            # A fixed 2_000 truncated a real 12-sample/6-unit study mid-JSON
-            # (verified against GSE306275): each proposed unit's own
-            # grouping_rationale is what makes this useful for audit, and
-            # that text scales with sample count, not a constant.
-            max_tokens=max(2_000, 350 * len(samples)),
-        )
+        messages = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+        ]
+        # A fixed 2_000 truncated a real 12-sample/6-unit study mid-JSON
+        # (verified against GSE306275): each proposed unit's own rationale
+        # scales with sample count. The StepFun client applies the global
+        # 32k safety ceiling for exceptionally large studies.
+        output_budget = max(2_000, 350 * len(samples))
+        structured_complete = getattr(self.client, "complete_structured", None)
+        if callable(structured_complete):
+            response = await structured_complete(
+                messages,
+                schema=PairUnitResolutionDraft.model_json_schema(),
+                schema_name="PairUnitResolution",
+                temperature=0.0,
+                max_tokens=output_budget,
+            )
+        else:
+            response = await self.client.complete(
+                messages,
+                temperature=0.0,
+                max_tokens=output_budget,
+            )
         return PairUnitResolutionDraft.model_validate(_json_object(response))
 
 

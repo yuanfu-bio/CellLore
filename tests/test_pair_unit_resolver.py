@@ -29,6 +29,17 @@ class _FakeClient:
         return self.response
 
 
+class _StructuredFakeClient(_FakeClient):
+    def __init__(self, response: str):
+        super().__init__(response=response)
+        self.structured_kwargs = None
+
+    async def complete_structured(self, messages, **kwargs):
+        self.calls.append({"messages": messages, "temperature": kwargs["temperature"]})
+        self.structured_kwargs = kwargs
+        return self.response
+
+
 def _candidate():
     return DatasetCandidate(candidate_id="cand_1", title="A paired multiome study")
 
@@ -114,6 +125,24 @@ async def test_llm_grouping_maps_member_samples_to_the_right_assets():
     assert set(hf1.evidence_ids) == {"ev_atac", "ev_rna"}
     hf2 = next(item for item in units if item.member_samples == ["GSM1005"])
     assert hf2.member_assets == ["a3"]
+
+
+@pytest.mark.asyncio
+async def test_llm_grouping_prefers_structured_output():
+    draft = PairUnitResolutionDraft(
+        units=[{
+            "proposed_unit_id": "hf1",
+            "member_samples": ["GSM1000", "GSM1050"],
+            "grouping_rationale": "Both titles name HF1.",
+        }]
+    )
+    client = _StructuredFakeClient(draft.model_dump_json())
+    resolver = PairUnitResolver(client=client)
+
+    await resolver.resolve(_candidate(), _samples(), _assets())
+
+    assert client.structured_kwargs["schema_name"] == "PairUnitResolution"
+    assert client.structured_kwargs["max_tokens"] == 2_000
 
 
 @pytest.mark.asyncio

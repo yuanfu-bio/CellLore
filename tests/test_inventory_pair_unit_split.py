@@ -10,6 +10,9 @@ import pytest
 
 from scdata_agent.application.agents.inventory_reconcile import (
     InventoryReconcileAgent,
+    _geo_sample_assets,
+    _geo_sample_data_role,
+    _unit_covers_required_omics,
 )
 from scdata_agent.application.agents.pair_unit_resolver import (
     PairUnitResolutionDraft,
@@ -69,17 +72,76 @@ def _sample(gsm, title, supplementary_files):
     )
 
 
+def test_geo_sample_context_resolves_generic_rna_atac_and_adt_files():
+    rna = _sample("GSM9196532", "Patient3 snRNA-seq", [])
+    atac = _sample("GSM9196533", "Patient3 snATAC-seq", [])
+    adt = _sample("GSM9196534", "Patient3 antibody-derived tags", [])
+    raw_only_rna = _sample("GSM9196535", "Patient3 library", []).model_copy(
+        update={"raw_text": "!Sample_library_strategy = RNA-Seq"}
+    )
+
+    assert _geo_sample_data_role(
+        "GSM9196532_Patient3_RNA_soupx_processed.rds.gz", rna
+    ) == DataRole.RNA_MATRIX
+    assert _geo_sample_data_role(
+        "GSM9196533_matrix.mtx.gz", atac
+    ) == DataRole.PEAK_MATRIX
+    assert _geo_sample_data_role(
+        "GSM9196534_ADT.csv.gz", adt
+    ) == DataRole.PROTEIN_MATRIX
+    assert _geo_sample_data_role(
+        "GSM9196535_matrix.mtx.gz", raw_only_rna
+    ) == DataRole.RNA_MATRIX
+
+
+def test_geo_sample_assets_skip_none_and_complete_unique_tea_seq_rna_object():
+    sample = _sample(
+        "GSM7535998", "PBMC TEA-seq", [
+            "NONE",
+            "GSM7535998_ADTcounts.csv.gz",
+            "GSM7535998_fragments.tsv.gz",
+            "GSM7535998_labeled.h5",
+        ]
+    ).model_copy(update={"raw_text": "TEA-seq of PBMC"})
+
+    assets = _geo_sample_assets("candidate_1", [sample], candidate=None)
+    roles = {item.file_name: item.role for item in assets}
+
+    assert "NONE" not in roles
+    assert roles["GSM7535998_ADTcounts.csv.gz"] == DataRole.PROTEIN_MATRIX
+    assert roles["GSM7535998_fragments.tsv.gz"] == DataRole.FRAGMENTS
+    assert roles["GSM7535998_labeled.h5"] == DataRole.RNA_MATRIX
+
+
+def test_pair_unit_must_cover_every_required_omics_layer():
+    requirement = ResearchRequirement(
+        question="paired RNA and ATAC",
+        required_omics_layers=[
+            OmicsLayer.CHROMATIN_ACCESSIBILITY,
+            OmicsLayer.TRANSCRIPTOME,
+        ],
+    )
+    candidate = DatasetCandidate(candidate_id="candidate_1", title="multiome")
+    atac = _asset("atac", "candidate_1", DataRole.FRAGMENTS, "fragments.tsv.gz")
+    rna = _asset("rna", "candidate_1", DataRole.RNA_MATRIX, "rna_counts.h5")
+
+    assert _unit_covers_required_omics([atac, rna], candidate, requirement)
+    assert not _unit_covers_required_omics([atac], candidate, requirement)
+
+
 async def _run(tmp_path, candidate, assets, samples, resolver, verifier, policy=None):
     requirement = ResearchRequirement(question="paired multiome")
+    database = tmp_path / "reconcile.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run(requirement.question, policy or {})
     discovery = DiscoveryRunResult(
-        run_id="run_1", requirement=requirement,
+        run_id=run.run_id, requirement=requirement,
         query_plan=QueryPlan(requirement=requirement, queries=[]),
         candidates=[candidate], source_records=[], feasibility_reports=[],
     )
-    database = tmp_path / "reconcile.sqlite"
     context = AgentContext(
-        run_id="run_1", question=requirement.question, database_path=str(database),
-        ledger=CollaborationLedger(database),
+        run_id=run.run_id, question=requirement.question, database_path=str(database),
+        ledger=ledger,
         # Tests must never touch the network (CONTRIBUTING.md); the probe's
         # own HTTP behavior is exercised offline in
         # test_geo_sample_probe_upgrades_declared_assets_to_verified below.
@@ -87,13 +149,13 @@ async def _run(tmp_path, candidate, assets, samples, resolver, verifier, policy=
         requirement=requirement, discovery=discovery,
     )
     context.artifacts.append(artifact(
-        "run_1", ArtifactKind.ASSET_INVENTORY_DELTA, InventoryReconcileAgent.name,
+        run.run_id, ArtifactKind.ASSET_INVENTORY_DELTA, InventoryReconcileAgent.name,
         AssetInventoryDelta(
-            inventory_id="delta_1", run_id="run_1", phase=ScoutPhase.DIRECT, assets=assets,
+            inventory_id="delta_1", run_id=run.run_id, phase=ScoutPhase.DIRECT, assets=assets,
         ).model_dump(mode="json"),
     ))
     context.artifacts.append(artifact(
-        "run_1", ArtifactKind.GEO_SAMPLE_METADATA, InventoryReconcileAgent.name,
+        run.run_id, ArtifactKind.GEO_SAMPLE_METADATA, InventoryReconcileAgent.name,
         {"samples_by_candidate": {
             candidate.candidate_id: [item.model_dump(mode="json") for item in samples]
         }},
@@ -226,6 +288,22 @@ async def test_no_geo_sample_metadata_falls_back_to_one_bundle_for_the_candidate
 
 
 @pytest.mark.asyncio
+async def test_reconcile_discards_assets_from_candidates_removed_upstream(tmp_path):
+    candidate = DatasetCandidate(candidate_id="kept", title="Kept candidate")
+    assets = [
+        _asset("a1", "kept", DataRole.RNA_MATRIX, "kept_rna_counts.mtx"),
+        _asset("a2", "excluded", DataRole.RNA_MATRIX, "excluded_rna_counts.mtx"),
+    ]
+
+    payload = await _run(
+        tmp_path, candidate, assets, samples=[],
+        resolver=PairUnitResolver(client=None), verifier=PairingVerifier(client=None),
+    )
+
+    assert [item["asset_id"] for item in payload["assets"]] == ["a1"]
+
+
+@pytest.mark.asyncio
 async def test_gsm_supplementary_files_become_real_assets_reaching_a_bundle(tmp_path):
     """Regression for the real-run gap found against GSE228428: a series'
     only asset-inventory-delta assets were unrelated series-level files (a
@@ -289,6 +367,7 @@ async def test_gsm_supplementary_files_become_real_assets_reaching_a_bundle(tmp_
     assert gsm_assets["GSM1_filtered_feature_bc_matrix.h5"]["role"] == DataRole.RNA_MATRIX
     assert gsm_assets["GSM2_atac_fragments.tsv.gz"]["role"] == DataRole.FRAGMENTS
     assert gsm_assets["GSM1_filtered_feature_bc_matrix.h5"]["locations"][0]["url"].startswith("https://")
+    assert gsm_assets["GSM1_filtered_feature_bc_matrix.h5"]["locations"][0]["protocol"] == "https"
     assert gsm_assets["GSM1_filtered_feature_bc_matrix.h5"]["evidence_ids"] == ["ev_GSM1"]
 
     assert len(payload["bundles"]) == 1
@@ -326,6 +405,34 @@ async def test_gsm_supplementary_file_already_resolved_by_another_route_is_not_d
     ]
     assert len(matching) == 1
     assert matching[0]["asset_id"] == "a1"
+
+
+@pytest.mark.asyncio
+async def test_gsm_context_upgrades_existing_other_role_without_duplication(tmp_path):
+    candidate = DatasetCandidate(candidate_id="cand_1", title="Sample-resolved modality")
+    assets = [
+        _asset("a1", "cand_1", DataRole.OTHER, "GSM1_matrix.mtx.gz"),
+    ]
+    samples = [
+        _sample(
+            "GSM1", "Donor 1 snRNA-seq",
+            ["ftp://ftp.ncbi.nlm.nih.gov/geo/samples/GSM1nnn/GSM1/suppl/GSM1_matrix.mtx.gz"],
+        ),
+    ]
+
+    payload = await _run(
+        tmp_path, candidate, assets, samples,
+        resolver=PairUnitResolver(client=None), verifier=PairingVerifier(client=None),
+    )
+
+    matching = [
+        item for item in payload["assets"]
+        if item["file_name"] == "GSM1_matrix.mtx.gz"
+    ]
+    assert len(matching) == 1
+    assert matching[0]["asset_id"] == "a1"
+    assert matching[0]["role"] == DataRole.RNA_MATRIX
+    assert matching[0]["evidence_ids"] == ["ev_GSM1"]
 
 
 @pytest.mark.asyncio
@@ -424,16 +531,19 @@ class _FakeProbe:
         self.seen_assets: list[DataAsset] | None = None
         _FakeProbe.instances.append(self)
 
-    async def probe_assets(self, assets):
+    async def probe_assets(self, assets, *, progress_callback=None):
         self.seen_assets = list(assets)
         upgraded = []
-        for asset in assets:
+        total = len(assets)
+        for index, asset in enumerate(assets, 1):
             location = asset.locations[0].model_copy(update={
                 "availability": AssetAvailability.OBSERVED,
                 "access_level": AccessLevel.PUBLIC_VERIFIED,
                 "size_bytes": 1024,
             })
             upgraded.append(asset.model_copy(update={"locations": [location]}))
+            if progress_callback is not None:
+                progress_callback(index, total)
         return upgraded, []
 
 

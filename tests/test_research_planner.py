@@ -4,7 +4,10 @@ import pytest
 
 from scdata_agent.domain.models import OmicsLayer, PairingLevel
 from scdata_agent.domain.planning import ExecutionStatus, PlanOrigin, PlanReadiness
-from scdata_agent.infrastructure.llm.research_planner import MultiStageResearchPlanner
+from scdata_agent.infrastructure.llm.research_planner import (
+    MultiStageResearchPlanner,
+    _normalize_model_enums,
+)
 
 
 class ScriptedClient:
@@ -20,6 +23,37 @@ class ScriptedClient:
         if not self.responses:
             raise AssertionError("unexpected planner call")
         return json.dumps(self.responses.pop(0), ensure_ascii=False)
+
+
+def test_planning_only_execution_status_is_normalized_at_llm_boundary():
+    value = {
+        "resource_needs": [
+            {"execution_status": "planning_only"},
+            {"execution_status": "planned"},
+        ]
+    }
+
+    normalized = _normalize_model_enums(value)
+
+    assert normalized["resource_needs"][0]["execution_status"] == "unsupported"
+    assert normalized["resource_needs"][1]["execution_status"] == "partial"
+
+
+def test_recommended_planning_language_is_normalized_by_field():
+    value = {
+        "constraints": [{"kind": "recommended", "origin": "recommended"}],
+        "data_needs": [{"priority": "recommended"}],
+        "resource_needs": [{"priority": "recommended"}],
+    }
+
+    normalized = _normalize_model_enums(value)
+
+    assert normalized["constraints"][0] == {
+        "kind": "preference",
+        "origin": "recommended",
+    }
+    assert normalized["data_needs"][0]["priority"] == "supporting"
+    assert normalized["resource_needs"][0]["priority"] == "supporting"
 
 
 def _intent(question):

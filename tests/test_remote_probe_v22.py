@@ -73,3 +73,23 @@ async def test_missing_url_is_marked_unavailable():
         )
     assert assets[0].locations[0].availability == AssetAvailability.UNAVAILABLE
     assert observations[0].http_status == 404
+
+
+@pytest.mark.asyncio
+async def test_probe_reports_completed_assets_in_real_time():
+    async def handler(request):
+        return httpx.Response(200, request=request)
+
+    progress = []
+    first = asset("https://files.test/first")
+    second = asset("https://files.test/second").model_copy(
+        update={"asset_id": "asset_2"}
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await RemoteAvailabilityProbe(client=client).probe_assets(
+            [first, second],
+            progress_callback=lambda completed, total: progress.append(
+                (completed, total)
+            ),
+        )
+    assert progress == [(1, 2), (2, 2)]

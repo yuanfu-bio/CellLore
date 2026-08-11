@@ -109,6 +109,27 @@ def _is_explicit_single_layer_series(
     return atac != rna
 
 
+def _known_profiles_miss_required_layers(
+    candidate: DatasetCandidate, requirement: ResearchRequirement
+) -> bool:
+    """Reject records whose *known* assay layers cannot satisfy the contract.
+
+    Unknown records are deliberately retained for metadata review, but once a
+    repository record has been classified as (for example) CITE-seq/RNA+ADT,
+    keeping it in an RNA+ATAC result set is a false positive rather than a
+    useful uncertainty. Profiles are alternative/partial observations, so
+    compare the union of their reported layers with the required layer set.
+    """
+    if not requirement.required_omics_layers or not candidate.assay_profiles:
+        return False
+    observed = {
+        layer
+        for profile in candidate.assay_profiles
+        for layer in profile.omics_layers
+    }
+    return not set(requirement.required_omics_layers) <= observed
+
+
 def _apply_required_candidate_filters(
     requirement: ResearchRequirement, candidates: list[DatasetCandidate]
 ) -> list[DatasetCandidate]:
@@ -116,6 +137,7 @@ def _apply_required_candidate_filters(
         candidate for candidate in candidates
         if _matches_required_organisms(candidate, requirement)
         and not _is_explicit_single_layer_series(candidate, requirement)
+        and not _known_profiles_miss_required_layers(candidate, requirement)
     ]
 
 

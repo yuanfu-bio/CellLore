@@ -70,7 +70,8 @@ async def test_stepfun_client_retries_empty_content_with_larger_budget():
         client = StepFunChatClient(settings, http_client)
         assert await client.complete([{"role": "user", "content": "hello"}], max_tokens=1_000) == "ok"
 
-    assert [payload["max_tokens"] for payload in payloads] == [1_000, 4_000]
+    assert [payload["max_tokens"] for payload in payloads] == [1_000, 2_000]
+    assert [payload["reasoning_effort"] for payload in payloads] == ["medium", "low"]
 
 
 @pytest.mark.asyncio
@@ -93,6 +94,28 @@ async def test_stepfun_client_retries_nonempty_truncated_content():
         assert await client.complete([{"role": "user", "content": "hello"}], max_tokens=2_400) == "complete"
 
     assert [payload["max_tokens"] for payload in payloads] == [2_400, 4_800]
+
+
+@pytest.mark.asyncio
+async def test_stepfun_client_caps_unusually_large_output_budget():
+    seen = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": "ok"}}]},
+            request=request,
+        )
+
+    settings = StepFunSettings(api_key="test-key")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = StepFunChatClient(settings, http_client)
+        assert await client.complete(
+            [{"role": "user", "content": "hello"}], max_tokens=90_000
+        ) == "ok"
+
+    assert seen["max_tokens"] == 32_000
 
 
 @pytest.mark.asyncio

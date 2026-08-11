@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+
 from scdata_agent.application.agents.shared import AgentContext, latest_artifact
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
+from scdata_agent.application.dataset_layout import (
+    raw_stage_for_role,
+    readable_pair_unit_id,
+    study_accession,
+)
 from scdata_agent.domain.lifecycle import (
     AcquisitionPlan,
     BundleStatus,
     PreflightBundleReport,
     SemanticBundle,
 )
-from scdata_agent.domain.models import DataAsset
+from scdata_agent.domain.models import DataAsset, DatasetCandidate
+from scdata_agent.domain.pair_units import ProposedPairUnit
 from scdata_agent.infrastructure.transfer_backend import select_transfer_backend
 
 
@@ -88,7 +96,11 @@ class TransferExecutionAgent:
                 or resolution.get("option") == "all_with_unknown_size"
             ),
             max_download_bytes=context.policy.get("max_download_bytes"),
-            layout=self._layout(context) if context.policy.get("honour_manifest_layout") else None,
+            layout=(
+                self._layout(context)
+                if context.policy.get("honour_manifest_layout", True)
+                else None
+            ),
         )
         if context.catalog is not None:
             for receipt in receipts:
@@ -130,16 +142,62 @@ class TransferExecutionAgent:
 
     @staticmethod
     def _layout(context: AgentContext) -> dict[str, str]:
-        """asset_id -> curator relative_path, for runs ingested from a manifest.
-
-        Only a manifest run has this sidecar at all; a discovered run's
-        transfer falls back to the flat bundle layout because there is no
-        curator tree to honour.
-        """
+        """Map assets into a study/pair-unit/role production tree."""
         ingestion = latest_artifact(context.artifacts, ArtifactKind.MANIFEST_INGESTION.value)
-        if ingestion is None:
+        if ingestion is not None:
+            return {
+                item["asset_id"]: item["relative_path"]
+                for item in ingestion.payload.get("sidecars", [])
+            }
+
+        discovery = latest_artifact(context.artifacts, ArtifactKind.DISCOVERY_RESULT.value)
+        inventory = latest_artifact(context.artifacts, ArtifactKind.ASSET_INVENTORY.value)
+        if discovery is None or inventory is None:
             return {}
-        return {
-            item["asset_id"]: item["relative_path"]
-            for item in ingestion.payload.get("sidecars", [])
+        candidates = {
+            item.candidate_id: item
+            for raw in discovery.payload.get("candidates", [])
+            for item in [DatasetCandidate.model_validate({
+                key: value for key, value in raw.items()
+                if key in DatasetCandidate.model_fields
+            })]
         }
+        assets = {
+            item.asset_id: item
+            for item in (
+                DataAsset.model_validate(raw)
+                for raw in inventory.payload.get("assets", [])
+            )
+        }
+        units = {
+            item.proposed_unit_id: item
+            for item in (
+                ProposedPairUnit.model_validate(raw)
+                for raw in inventory.payload.get("proposed_pair_units", [])
+            )
+        }
+        layout: dict[str, str] = {}
+        for bundle in (
+            SemanticBundle.model_validate(raw)
+            for raw in inventory.payload.get("bundles", [])
+        ):
+            candidate = candidates.get(bundle.candidate_id)
+            if candidate is None:
+                continue
+            bundle_assets = [assets[item] for item in bundle.asset_ids if item in assets]
+            pair_id = readable_pair_unit_id(
+                bundle,
+                units.get(bundle.pair_unit_id) if bundle.pair_unit_id else None,
+                bundle_assets,
+            )
+            for asset in bundle_assets:
+                layout.setdefault(
+                    asset.asset_id,
+                    PurePosixPath(
+                        study_accession(candidate),
+                        pair_id,
+                        raw_stage_for_role(asset.role),
+                        asset.file_name,
+                    ).as_posix(),
+                )
+        return layout

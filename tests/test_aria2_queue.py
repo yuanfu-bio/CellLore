@@ -19,6 +19,7 @@ from scdata_agent.infrastructure.aria2_executor import (
     bucket_for,
     bucket_settings,
     contact_email_and_user_agent,
+    proxy_free_download_environment,
     queue_entry_text,
 )
 from scdata_agent.infrastructure.manifest_reader import read_manifest
@@ -94,6 +95,7 @@ def test_bucket_settings_match_the_validated_prototype_profiles():
 
 def test_common_args_include_tuning_and_the_404_guard():
     args = aria_common_args("scdata-agent/0.1.0 (contact: a@b.com)", Path("/s"), Path("/l"))
+    assert "--no-conf=true" in args
     assert "--max-file-not-found=2" in args
     assert "--user-agent=scdata-agent/0.1.0 (contact: a@b.com)" in args
     assert "--save-session=/s" in args
@@ -112,6 +114,24 @@ def test_contact_email_from_policy_appears_in_user_agent():
     email, user_agent = contact_email_and_user_agent({"contact_email": "me@example.org"})
     assert email == "me@example.org"
     assert user_agent == "scdata-agent/0.1.0 (contact: me@example.org)"
+
+
+def test_download_environment_removes_proxy_without_mutating_source():
+    source = {
+        "PATH": "/usr/bin",
+        "HTTP_PROXY": "http://127.0.0.1:8010",
+        "https_proxy": "http://127.0.0.1:8010",
+        "ALL_PROXY": "socks5://127.0.0.1:1080",
+        "NO_PROXY": "localhost",
+    }
+    environment = proxy_free_download_environment(source)
+    assert source["HTTP_PROXY"] == "http://127.0.0.1:8010"
+    assert environment["PATH"] == "/usr/bin"
+    assert "HTTP_PROXY" not in environment
+    assert "https_proxy" not in environment
+    assert "ALL_PROXY" not in environment
+    assert environment["NO_PROXY"] == "*"
+    assert environment["no_proxy"] == "*"
 
 
 def test_auto_downloader_falls_back_to_httpx_when_aria2_missing(monkeypatch):

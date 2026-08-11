@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from pathlib import Path
+
 from scdata_agent.application.agents.shared import AgentContext, latest_artifact
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.resource_pipeline import barcode_overlap_pairing_claim
@@ -38,9 +42,38 @@ class MaterializedQualityAssessmentAgent:
             for item in transfers.payload.get("receipts", [])
         ]
         inspector = MaterializedQualityInspector()
-        reports = [
-            inspector.inspect(manifest, receipts) for manifest in manifests
-        ]
+        reports = []
+        for manifest in manifests:
+            # Full gzip validation and role-aware QC can scan multi-gigabyte
+            # files. Keep it sequential for predictable disk pressure, but
+            # move the blocking work off the ASGI event loop so the control
+            # surface remains responsive while QC is running.
+            reports.append(
+                await asyncio.to_thread(inspector.inspect, manifest, receipts)
+            )
+        for manifest, report in zip(manifests, reports, strict=True):
+            package = Path(manifest.package_path)
+            qc_root = package / "qc"
+            qc_root.mkdir(parents=True, exist_ok=True)
+            (qc_root / "validation_report.json").write_text(
+                json.dumps(report.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            status_path = package / "status.json"
+            status_payload = (
+                json.loads(status_path.read_text(encoding="utf-8"))
+                if status_path.is_file()
+                else {}
+            )
+            status_payload.update({
+                "qc_status": report.status.value,
+                "unavailable_metrics": report.unavailable_metrics,
+                "qc_reasons": report.reasons,
+            })
+            status_path.write_text(
+                json.dumps(status_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
         # Phase 5B: a FILE_OBSERVED/RECOMPUTED-level `has_pair_relationship`
         # claim, recomputed from the materialized RNA/ATAC barcode overlap

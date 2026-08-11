@@ -229,5 +229,11 @@ def _profile_value(profile: ReasoningProfile, default: str | None, suffix: str) 
 
 
 def _profile_effort(profile: ReasoningProfile, default: str | None) -> str | None:
-    stage_default = "low" if profile == ReasoningProfile.PLANNER else default
+    # Extraction asks for compact structured answers. High reasoning can
+    # consume the whole completion budget before emitting that answer.
+    stage_default = (
+        "low"
+        if profile in {ReasoningProfile.PLANNER, ReasoningProfile.EXTRACT}
+        else default
+    )
     return _profile_value(profile, stage_default, "REASONING_EFFORT")

@@ -454,14 +454,26 @@ def _normalize_model_enums(value: Any) -> Any:
     """Accept common planning-language variants at the LLM boundary.
 
     ``planned`` describes a partially supported capability in ordinary prose;
-    the contract intentionally represents that state as ``partial``. Keeping
-    this translation at the boundary preserves strict internal enums without
-    turning a harmless model vocabulary variant into a failed research run.
+    the contract intentionally represents that state as ``partial``.
+    ``planning_only`` is the capability-table spelling for a resource with no
+    executable adapter, which is ``unsupported`` in the plan contract. Models
+    also occasionally use ``recommended`` as an enum value even though it is
+    provenance language: a recommended constraint is a ``preference``, while a
+    recommended data/resource need is ``supporting``. Keeping these translations
+    at the boundary preserves strict internal enums without turning harmless
+    model vocabulary variants into a failed research run.
     """
     if isinstance(value, dict):
         return {
             key: (
-                "partial" if key == "execution_status" and item == "planned"
+                "partial"
+                if key == "execution_status" and item == "planned"
+                else "unsupported"
+                if key == "execution_status" and item == "planning_only"
+                else "preference"
+                if key == "kind" and item == "recommended"
+                else "supporting"
+                if key == "priority" and item == "recommended"
                 else _normalize_model_enums(item)
             )
             for key, item in value.items()

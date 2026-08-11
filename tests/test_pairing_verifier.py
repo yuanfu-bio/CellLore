@@ -31,6 +31,17 @@ class _FakeClient:
         return self.response
 
 
+class _StructuredFakeClient(_FakeClient):
+    def __init__(self, response: str):
+        super().__init__(response=response)
+        self.structured_kwargs = None
+
+    async def complete_structured(self, messages, **kwargs):
+        self.calls += 1
+        self.structured_kwargs = kwargs
+        return self.response
+
+
 def _pair_unit(member_samples=("GSM1", "GSM2"), evidence_ids=("ev1", "ev2"), is_resolved=True):
     return ProposedPairUnit(
         proposed_unit_id="unit_1", candidate_id="cand_1",
@@ -145,6 +156,25 @@ class TestTier3LLMInference:
         assert claim.evidence_class == EvidenceClass.MODEL_INFERRED
         assert claim.value == PairingLevel.SAME_CELL.value
         assert claim.rationale == "Inferred from indirect phrasing."
+
+    async def test_llm_inference_prefers_small_structured_completion(self):
+        candidate = DatasetCandidate(candidate_id="cand_1", title="study")
+        samples = [_sample("GSM1", "no relationship stated")]
+        client = _StructuredFakeClient(json.dumps({
+            "pairing_level": "unverified",
+            "confidence": 0.7,
+            "rationale": "No physical pairing statement was found.",
+        }))
+        verifier = PairingVerifier(client=client)
+
+        claim = await verifier.verify(
+            _pair_unit(member_samples=("GSM1",)), candidate, samples
+        )
+
+        assert claim is not None
+        assert client.calls == 1
+        assert client.structured_kwargs["schema_name"] == "PairingInference"
+        assert client.structured_kwargs["max_tokens"] == 800
 
     async def test_llm_error_yields_no_claim_not_a_crash(self):
         candidate = DatasetCandidate(candidate_id="cand_1", title="study")

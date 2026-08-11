@@ -20,6 +20,7 @@ from scdata_agent.application.agents.discovery import (
 from scdata_agent.application.agents.shared import AgentContext
 from scdata_agent.application.collaboration import CollaborationLedger
 from scdata_agent.domain.models import (
+    AssayProfile,
     DatasetCandidate,
     DiscoveryRunResult,
     OmicsLayer,
@@ -139,5 +140,45 @@ def test_paired_profile_filters_an_explicit_single_layer_series():
     unknown = DatasetCandidate(candidate_id="unknown", title="Psoas muscle profiling")
 
     filtered = _apply_required_candidate_filters(requirement, [atac_only, multiome, unknown])
+
+    assert [candidate.candidate_id for candidate in filtered] == ["multiome", "unknown"]
+
+
+def test_paired_rna_atac_filter_rejects_known_cite_seq_but_keeps_unknowns():
+    requirement = ResearchRequirement(
+        question="human paired RNA and ATAC",
+        required_omics_layers=[
+            OmicsLayer.CHROMATIN_ACCESSIBILITY,
+            OmicsLayer.TRANSCRIPTOME,
+        ],
+    )
+    cite_seq = DatasetCandidate(
+        candidate_id="cite",
+        title="CITE-seq profiling",
+        assay_profiles=[AssayProfile(
+            label="cite_seq",
+            omics_layers=[OmicsLayer.TRANSCRIPTOME, OmicsLayer.PROTEIN],
+            pairing_level=PairingLevel.SAME_CELL,
+            rationale="RNA and ADT were measured together.",
+        )],
+    )
+    multiome = DatasetCandidate(
+        candidate_id="multiome",
+        title="10x Multiome profiling",
+        assay_profiles=[AssayProfile(
+            label="10x_multiome_rna_atac",
+            omics_layers=[
+                OmicsLayer.CHROMATIN_ACCESSIBILITY,
+                OmicsLayer.TRANSCRIPTOME,
+            ],
+            pairing_level=PairingLevel.SAME_NUCLEUS,
+            rationale="RNA and ATAC were measured together.",
+        )],
+    )
+    unknown = DatasetCandidate(candidate_id="unknown", title="Unclassified study")
+
+    filtered = _apply_required_candidate_filters(
+        requirement, [cite_seq, multiome, unknown]
+    )
 
     assert [candidate.candidate_id for candidate in filtered] == ["multiome", "unknown"]

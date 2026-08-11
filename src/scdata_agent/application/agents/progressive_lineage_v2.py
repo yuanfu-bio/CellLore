@@ -54,7 +54,11 @@ class ProgressiveLineageLeakageAgent:
         relation_by_key: dict[str, str] = {}
 
         def add(candidate_id: str, relation: str, value: str) -> None:
-            if not value:
+            # Resource pointers originate before GEO Sample hard-constraint
+            # refinement, so the inventory artifact can legitimately retain
+            # pointers for candidates no longer present in discovery. They
+            # must not re-enter the union-find graph or index its parent map.
+            if candidate_id not in parent or not value:
                 return
             key = f"{relation}:{value.casefold()}"
             keyed[key].add(candidate_id)

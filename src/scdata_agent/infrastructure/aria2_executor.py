@@ -67,6 +67,36 @@ LARGE_FILE_THRESHOLD_BYTES = 500 * 1024**2
 
 _NCBI_HOST_SUFFIXES = ("ncbi.nlm.nih.gov", "nih.gov")
 
+_PROXY_ENVIRONMENT_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "FTP_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "ftp_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
+
+
+def proxy_free_download_environment(
+    source: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return a child environment that forces downloads to connect directly.
+
+    This intentionally does not mutate ``os.environ``: only the aria2 child
+    process has its proxy variables cleared, so the user's shell and metadata
+    discovery clients keep their existing network configuration.
+    """
+    environment = dict(os.environ if source is None else source)
+    for key in _PROXY_ENVIRONMENT_KEYS:
+        environment.pop(key, None)
+    environment["NO_PROXY"] = "*"
+    environment["no_proxy"] = "*"
+    return environment
+
 
 def _is_ncbi_url(url: str) -> bool:
     host = (urlparse(url).hostname or "").casefold()
@@ -117,6 +147,9 @@ def aria_common_args(user_agent: str, session: Path, log: Path) -> list[str]:
     error class exists to short-circuit.
     """
     return [
+        # Ignore ~/.aria2/aria2.conf as it may contain a workstation proxy;
+        # the subprocess environment is also stripped of proxy variables.
+        "--no-conf=true",
         "--continue=true",
         "--always-resume=true",
         "--auto-file-renaming=false",
@@ -163,7 +196,10 @@ class Aria2Runner(Protocol):
 
 class SubprocessAria2Runner:
     async def run(self, args: list[str]) -> int:
-        process = await asyncio.create_subprocess_exec(*args)
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            env=proxy_free_download_environment(),
+        )
         return await process.wait()
 
 

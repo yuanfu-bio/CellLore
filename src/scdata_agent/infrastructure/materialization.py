@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from scdata_agent.domain.lifecycle import (
 from scdata_agent.domain.models import DataAsset, DataRole, GateStatus
 from scdata_agent.infrastructure.qc_metrics import compute_role_metrics
 from scdata_agent.infrastructure.standard_object_qc import inspect_standard_object
+from scdata_agent.infrastructure.transfer_backend import MANIFEST_LAYOUT_STAGES
 
 
 class DatasetMaterializer:
@@ -58,11 +60,7 @@ class DatasetMaterializer:
                 if receipt.asset_id in by_asset and by_asset[receipt.asset_id].genome_build
             }
         )
-        package = (
-            Path(curated_root).resolve()
-            / bundle.candidate_id
-            / bundle.bundle_id
-        )
+        package = _production_pair_root(successful, curated_root, bundle) / "04_standardized"
         package.mkdir(parents=True, exist_ok=True)
         errors: list[str] = []
         if not successful:
@@ -101,7 +99,11 @@ class DatasetMaterializer:
             "genome_builds": genome_builds,
             "license": license_terms,
         }
-        provenance_path = package / "provenance.json"
+        metadata_root = package / "metadata"
+        qc_root = package / "qc"
+        metadata_root.mkdir(parents=True, exist_ok=True)
+        qc_root.mkdir(parents=True, exist_ok=True)
+        provenance_path = metadata_root / "provenance.json"
         _atomic_json(provenance_path, provenance)
         data_card_path = _write_data_card(
             package, bundle, status, data_roles, standard_object, license_terms
@@ -126,6 +128,19 @@ class DatasetMaterializer:
         )
         _atomic_json(
             package / "manifest.json", manifest.model_dump(mode="json")
+        )
+        _atomic_json(
+            package / "status.json",
+            {
+                "bundle_id": manifest.bundle_id,
+                "candidate_id": manifest.candidate_id,
+                "materialization_status": manifest.status.value,
+                "source_file_count": len(manifest.source_receipt_ids),
+                "data_roles": [item.value for item in manifest.data_roles],
+                "genome_builds": manifest.genome_builds,
+                "qc_status": "pending",
+                "errors": manifest.errors,
+            },
         )
         return manifest
 
@@ -260,6 +275,21 @@ class MaterializedQualityInspector:
             inspected_paths=paths,
             reasons=reasons,
         )
+
+
+def _production_pair_root(
+    receipts: list[TransferReceipt],
+    curated_root: str | Path,
+    bundle: SemanticBundle,
+) -> Path:
+    """Locate the pair-unit root shared by role-specific raw directories."""
+    parents = [Path(item.local_path).resolve().parent for item in receipts]
+    if not parents:
+        return Path(curated_root).resolve() / bundle.candidate_id / bundle.bundle_id
+    common = Path(os.path.commonpath([str(item) for item in parents]))
+    if common.name in MANIFEST_LAYOUT_STAGES:
+        common = common.parent
+    return common
 
 
 def _sample_fragments(path: Path, limit: int = 10_000) -> tuple[int, set[str]]:

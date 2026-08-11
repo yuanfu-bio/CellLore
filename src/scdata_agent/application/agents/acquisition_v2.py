@@ -165,7 +165,7 @@ class AcquisitionStrategistAgent:
             manual_review_bundle_ids=manual,
             excluded_bundle_ids=excluded,
             total_expected_bytes=sum(item.expected_bytes or 0 for item in decisions if item.bundle_id in recommended),
-            destination_root=str(Path(context.policy.get("data_root", "data")) / "raw"),
+            destination_root=str(Path(context.policy.get("data_root", "data")) / "production"),
         )
         if context.catalog is not None:
             context.catalog.append(record_id=plan.plan_id, record_type="acquisition_plan",

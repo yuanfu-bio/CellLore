@@ -51,7 +51,11 @@ class TransferExecutor:
         layout = layout or {}
 
         owns_client = self._client is None
-        client = self._client or default_async_client()
+        # Downloads must not inherit a developer/workstation proxy. Source
+        # discovery may still use the normal environment-aware client, while
+        # the byte-transfer path connects directly and leaves the parent
+        # process environment untouched.
+        client = self._client or default_async_client(trust_env=False)
         semaphore = asyncio.Semaphore(self.concurrency)
         bundle_by_asset = {
             asset_id: bundle.bundle_id

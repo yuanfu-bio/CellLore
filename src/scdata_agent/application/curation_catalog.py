@@ -24,6 +24,7 @@ from typing import Any
 
 from scdata_agent.application.agents.shared import latest_artifact
 from scdata_agent.application.collaboration import AgentArtifact, ArtifactKind
+from scdata_agent.application.dataset_layout import readable_pair_unit_id
 from scdata_agent.domain.curation.profiles import profile_by_id
 from scdata_agent.domain.lifecycle import (
     AcquisitionBundle,
@@ -39,6 +40,7 @@ from scdata_agent.domain.models import (
     DataRole,
     DatasetCandidate,
     DiscoveryRunResult,
+    SourceRecord,
 )
 from scdata_agent.domain.pair_units import ProposedPairUnit
 
@@ -134,6 +136,13 @@ def write_curation_catalog_xlsx(catalog: CurationCatalog, path: str) -> None:
         sheet.append(headers)
         for row in rows:
             sheet.append(["" if row[key] is None else str(row[key]) for key in headers])
+            for cell in sheet[sheet.max_row]:
+                value = cell.value
+                if isinstance(value, str) and value.startswith(
+                    ("https://", "http://", "ftp://")
+                ):
+                    cell.hyperlink = value
+                    cell.style = "Hyperlink"
     workbook.save(path)
 
 
@@ -155,6 +164,9 @@ def build_curation_catalog(
     candidates_by_id = {
         item.candidate_id: item for item in (discovery.candidates if discovery else [])
     }
+    source_records_by_id = {
+        item.record_id: item for item in (discovery.source_records if discovery else [])
+    }
 
     inventory_artifact = latest_artifact(artifacts, ArtifactKind.ASSET_INVENTORY.value)
     payload = inventory_artifact.payload if inventory_artifact is not None else {}
@@ -163,6 +175,21 @@ def build_curation_catalog(
         for item in payload.get("assets", [])
     }
     bundles = [SemanticBundle.model_validate(item) for item in payload.get("bundles", [])]
+    required_layers = {
+        layer.value
+        for layer in (
+            discovery.requirement.required_omics_layers if discovery else []
+        )
+    }
+    if required_layers:
+        bundles = [
+            bundle
+            for bundle in bundles
+            if required_layers <= {
+                _omics_layer_for_role(asset.role)
+                for asset in _bundle_assets(bundle, assets_by_id)
+            }
+        ]
     proposed_units_by_id = {
         item["proposed_unit_id"]: ProposedPairUnit.model_validate(item)
         for item in payload.get("proposed_pair_units", [])
@@ -219,26 +246,35 @@ def build_curation_catalog(
         catalog.studies.append(
             _study_row(
                 candidate, candidate_bundles, reports_by_bundle, assets_by_id,
-                pairing_claims_by_unit,
+                pairing_claims_by_unit, proposed_units_by_id, source_records_by_id,
             )
         )
         if not candidate_bundles:
             catalog.audit_hold.append(_unresolved_study_audit_row(candidate))
         for bundle in candidate_bundles:
+            display_pair_unit_id = readable_pair_unit_id(
+                bundle,
+                proposed_units_by_id.get(bundle.pair_unit_id) if bundle.pair_unit_id else None,
+                _bundle_assets(bundle, assets_by_id),
+            )
             catalog.pair_units.append(
                 _pair_unit_row(
                     candidate, bundle, proposed_units_by_id, pairing_claims_by_unit,
                     reports_by_bundle, assembly_by_bundle, acquisition_by_bundle, assets_by_id,
+                    display_pair_unit_id,
                 )
             )
             catalog.files.extend(
                 _file_rows(
                     candidate, bundle, reports_by_bundle, acquisition_by_bundle, assets_by_id,
+                    display_pair_unit_id,
                 )
             )
 
     bundles_by_id = {item.bundle_id: item for item in bundles}
     for task in audit_tasks:
+        if task.bundle_id is not None and task.bundle_id not in bundles_by_id:
+            continue
         catalog.audit_hold.append(
             _audit_row(task, bundles_by_id, candidates_by_id, acquisition_by_bundle)
         )
@@ -269,6 +305,39 @@ def _study_accession(candidate: DatasetCandidate) -> str:
 
 def _repository(candidate: DatasetCandidate) -> str:
     return "GEO" if _geo_series(candidate) is not None else "unknown"
+
+
+def _public_year(
+    candidate: DatasetCandidate,
+    source_records_by_id: dict[str, SourceRecord],
+) -> int | None:
+    """Read the repository/publication year from linked discovery metadata."""
+    records = [
+        source_records_by_id[record_id]
+        for record_id in candidate.source_record_ids
+        if record_id in source_records_by_id
+    ]
+    records.sort(key=lambda item: 0 if item.source_name == "ncbi_geo" else 1)
+    preferred_keys = (
+        "pdat",
+        "pubyear",
+        "firstPublicationDate",
+        "electronicPublicationDate",
+        "dateOfPublication",
+    )
+    for record in records:
+        metadata = record.raw_metadata or {}
+        values = [metadata.get(key) for key in preferred_keys]
+        journal_info = metadata.get("journalInfo")
+        if isinstance(journal_info, dict):
+            values.extend(
+                journal_info.get(key)
+                for key in ("printPublicationDate", "electronicPublicationDate")
+            )
+        for value in values:
+            if match := re.search(r"\b(?:19|20)\d{2}\b", str(value or "")):
+                return int(match.group())
+    return None
 
 
 def _geo_url(accession: str) -> str:
@@ -329,13 +398,15 @@ def _study_row(
     reports_by_bundle: dict[str, PreflightBundleReport],
     assets_by_id: dict[str, DataAsset],
     pairing_claims_by_unit: dict[str, EvidenceClaim],
+    proposed_units_by_id: dict[str, ProposedPairUnit],
+    source_records_by_id: dict[str, SourceRecord],
 ) -> dict[str, Any]:
     accession = _study_accession(candidate)
     statuses = [_bundle_status(item, reports_by_bundle) for item in bundles]
     status_counts = {label: statuses.count(label) for label in ("READY", "REVIEW", "HOLD")}
     all_assets = [asset for bundle in bundles for asset in _bundle_assets(bundle, assets_by_id)]
     pairing_summary = ", ".join(dict.fromkeys(
-        f"{bundle.pair_unit_id}: {report.decision.value}"
+        f"{readable_pair_unit_id(bundle, proposed_units_by_id.get(bundle.pair_unit_id), _bundle_assets(bundle, assets_by_id))}: {report.decision.value}"
         for bundle in bundles
         if (report := reports_by_bundle.get(bundle.bundle_id)) is not None
         and report.decision != BundleStatus.PREFLIGHT_READY
@@ -344,7 +415,7 @@ def _study_row(
         "study_accession": accession,
         "study_title": candidate.title,
         "repository": _repository(candidate),
-        "public_year": None,
+        "public_year": _public_year(candidate, source_records_by_id),
         "method": _method(candidate),
         "human_material": _human_material(candidate),
         "assembly": ", ".join(dict.fromkeys(
@@ -354,9 +425,7 @@ def _study_row(
         )) or "unknown",
         "source_url": _geo_url(accession) if _geo_series(candidate) else None,
         "evidence_url": (
-            _geo_url(_GSM_RE.search(all_assets[0].locations[0].url).group())
-            if all_assets and all_assets[0].locations and _GSM_RE.search(all_assets[0].locations[0].url)
-            else None
+            _geo_url(gsm) if (gsm := _first_asset_gsm(all_assets)) else None
         ),
         "catalog_status": _catalog_status(statuses),
         "catalog_status_detail": (
@@ -375,7 +444,7 @@ def _study_row(
             else "Resolve the REVIEW/HOLD pair units listed in 04_Audit_Hold."
         ),
         "same_cell_evidence": ", ".join(dict.fromkeys(
-            f"{bundle.pair_unit_id}: {claim.value} ({claim.evidence_class.value})"
+            f"{readable_pair_unit_id(bundle, proposed_units_by_id.get(bundle.pair_unit_id), _bundle_assets(bundle, assets_by_id))}: {claim.value} ({claim.evidence_class.value})"
             for bundle in bundles
             if bundle.pair_unit_id
             and (claim := pairing_claim_for(bundle, pairing_claims_by_unit))
@@ -425,6 +494,22 @@ def _gsm_by_role(assets: list[DataAsset], roles: set[DataRole]) -> list[str]:
     return sorted(accessions)
 
 
+def _first_asset_gsm(assets: list[DataAsset]) -> str | None:
+    for item in assets:
+        if match := _GSM_RE.search(item.file_name):
+            return match.group()
+    # GEO URLs contain both a shortened bucket such as ``GSM9729nnn`` and the
+    # full accession later in the path. Prefer the longest match if a filename
+    # itself did not carry the accession.
+    matches = [
+        match
+        for item in assets
+        for location in item.locations
+        for match in _GSM_RE.findall(location.url)
+    ]
+    return max(matches, key=len) if matches else None
+
+
 def _pair_unit_row(
     candidate: DatasetCandidate,
     bundle: SemanticBundle,
@@ -434,6 +519,7 @@ def _pair_unit_row(
     assembly_by_bundle: dict[str, list[str]],
     acquisition_by_bundle: dict[str, AcquisitionBundle],
     assets_by_id: dict[str, DataAsset],
+    display_pair_unit_id: str,
 ) -> dict[str, Any]:
     accession = _study_accession(candidate)
     unit = proposed_units_by_id.get(bundle.pair_unit_id) if bundle.pair_unit_id else None
@@ -444,7 +530,7 @@ def _pair_unit_row(
     assembly_values = assembly_by_bundle.get(bundle.bundle_id) or _bundle_assembly(bundle, assets_by_id)
     return {
         "study_accession": accession,
-        "pair_unit_id": bundle.pair_unit_id or bundle.bundle_id,
+        "pair_unit_id": display_pair_unit_id,
         "sample_condition": (
             (unit.sample_interpretation or unit.grouping_rationale) if unit else None
         ),
@@ -476,6 +562,8 @@ def _omics_layer_for_role(role: DataRole) -> str:
         return "chromatin_accessibility"
     if role in _RNA_ROLES:
         return "transcriptome"
+    if role is DataRole.PROTEIN_MATRIX:
+        return "protein"
     if role in _METADATA_ROLES:
         return "metadata"
     return "other"
@@ -487,6 +575,7 @@ def _file_rows(
     reports_by_bundle: dict[str, PreflightBundleReport],
     acquisition_by_bundle: dict[str, AcquisitionBundle],
     assets_by_id: dict[str, DataAsset],
+    display_pair_unit_id: str,
 ) -> list[dict[str, Any]]:
     accession = _study_accession(candidate)
     status = _bundle_status(bundle, reports_by_bundle)
@@ -497,7 +586,7 @@ def _file_rows(
         gsm_match = _GSM_RE.search(asset.file_name)
         rows.append({
             "dataset_id": accession,
-            "pair_unit_id": bundle.pair_unit_id or bundle.bundle_id,
+            "pair_unit_id": display_pair_unit_id,
             "file_accession": gsm_match.group() if gsm_match else None,
             "assembly": asset.genome_build or "unknown",
             "omics_layer": _omics_layer_for_role(asset.role),
@@ -509,7 +598,6 @@ def _file_rows(
                 f"{location.availability.value}/{location.access_level.value}"
                 if location else "unknown"
             ),
-            "pairing_key": bundle.pair_unit_id,
             "audit_status": status,
             "priority": acquisition.priority if acquisition else None,
             "expected_downstream_action": _DOWNSTREAM_ACTION_BY_ROLE.get(
