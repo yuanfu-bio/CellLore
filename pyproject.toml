@@ -77,7 +77,11 @@ where = ["src"]
 # The distribution declares "Typing :: Typed"; without this the marker is not
 # shipped and the claim is unenforceable for anyone installing the wheel.
 scdata_agent = ["py.typed"]
-"scdata_agent.interfaces" = ["templates/*.html"]
+"scdata_agent.interfaces" = [
+  "templates/*.html",
+  "static/ui/index.html",
+  "static/ui/assets/*",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"

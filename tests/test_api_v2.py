@@ -46,3 +46,19 @@ def test_create_run_rejects_a_bare_run_id_as_the_research_question(tmp_path):
         assert response.status_code == 422
         assert "cannot be used as a research question" in response.text
         assert client.get("/runs").json() == []
+
+
+def test_clean_install_serves_the_bundled_react_ui_and_curation_profiles(tmp_path):
+    app = create_app(tmp_path / "bundled_ui.sqlite")
+
+    with TestClient(app) as client:
+        dashboard = client.get("/")
+        profiles = client.get("/curation-profiles")
+
+    assert dashboard.status_code == 200
+    assert '<div id="root"></div>' in dashboard.text
+    assert "/assets/index-" in dashboard.text
+    assert profiles.status_code == 200
+    assert [item["profile_id"] for item in profiles.json()] == [
+        "paired_atac_rna_human"
+    ]

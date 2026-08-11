@@ -33,7 +33,7 @@ _STATUS_COLOR = {
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["status_color"] = lambda status: _STATUS_COLOR.get(status, "gray")
 
-_FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+_FRONTEND_DIST = Path(__file__).resolve().parent / "static" / "ui"
 _RUN_ID_ONLY = re.compile(r"agent_run_[0-9a-f]{8,}", re.IGNORECASE)
 
 class CreateRunRequest(BaseModel):

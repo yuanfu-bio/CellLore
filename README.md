@@ -189,6 +189,9 @@ Use `--option plan_only` to retain plans without downloading any bytes.
 celllore serve --database var/celllore.sqlite --port 8000
 ```
 
+The production React control room is bundled with CellLore, so a fresh clone does
+not require a separate frontend build before `celllore serve`.
+
 Open `http://127.0.0.1:8000`. On a remote machine, forward the same port through your
 editor or SSH:
 
