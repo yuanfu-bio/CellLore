@@ -83,7 +83,7 @@ async def run_bounded_agent(*, profile: ReasoningProfile, tools: Sequence[Any], 
     agent = create_agent(model, tools=list(tools), system_prompt=system_prompt, name=f"scdata_{profile.value}")
     result = await agent.ainvoke(
         {"messages": [{"role": "user", "content": user_prompt}]},
-        config={"recursion_limit": max_steps, "tags": ["scdata-agent", profile.value]},
+        config={"recursion_limit": max_steps, "tags": ["celllore", profile.value]},
     )
     _record_model_messages(
         result["messages"],

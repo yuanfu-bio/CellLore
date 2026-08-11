@@ -63,6 +63,7 @@ from scdata_agent.application.collaboration import (
     RunStatus,
     artifact,
 )
+from scdata_agent.application.dataset_layout import production_run_root
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import (
     AcquisitionPlan,
@@ -251,6 +252,10 @@ class MultiAgentSupervisor:
         checkpoint = self.ledger.get_checkpoint(checkpoint_id)
         if checkpoint.kind == "download_selection":
             self._validate_download_resolution(checkpoint, resolution)
+        elif checkpoint.kind == "research_clarification":
+            resolution = self._validate_research_clarification_resolution(
+                checkpoint, resolution
+            )
         checkpoint = self.ledger.resolve_checkpoint(checkpoint_id, resolution)
         self.ledger.set_run_status(checkpoint.run_id, RunStatus.RUNNING)
         self.ledger.add_event(
@@ -488,8 +493,9 @@ class MultiAgentSupervisor:
                 "recommendation": checkpoint.recommendation,
             }
         )
-        clarification = str(resolution.get("clarification", "")).strip()
-        if clarification:
+        option = resolution.get("option")
+        if option == "provide_clarification":
+            clarification = str(resolution["clarification"]).strip()
             self.ledger.add_event(
                 state["run_id"],
                 "graph_topology_transition",
@@ -506,6 +512,8 @@ class MultiAgentSupervisor:
                 "planning_iterations": iteration + 1,
                 "planning_replan": True,
             }
+        if option != "proceed_with_assumptions":
+            raise ValueError(f"Unsupported research clarification option: {option!r}.")
         self.ledger.add_event(
             state["run_id"],
             "graph_topology_transition",
@@ -664,6 +672,30 @@ class MultiAgentSupervisor:
                 + ", ".join(sorted(unknown))
             )
 
+    @staticmethod
+    def _validate_research_clarification_resolution(
+        checkpoint: DecisionCheckpoint, resolution: dict[str, Any]
+    ) -> dict[str, Any]:
+        allowed = {str(item.get("id")) for item in checkpoint.options}
+        option = resolution.get("option")
+        if option not in allowed:
+            raise ValueError(
+                "Research clarification option must be one of: "
+                + ", ".join(sorted(allowed))
+                + "."
+            )
+        normalized = dict(resolution)
+        if option == "provide_clarification":
+            clarification = resolution.get("clarification")
+            if not isinstance(clarification, str) or not clarification.strip():
+                raise ValueError(
+                    "provide_clarification requires non-empty clarification text."
+                )
+            normalized["clarification"] = clarification.strip()
+        else:
+            normalized.pop("clarification", None)
+        return normalized
+
     async def _corpus_approval(
         self, state: SupervisorState
     ) -> dict[str, Any]:
@@ -725,6 +757,7 @@ class MultiAgentSupervisor:
             question=state["question"],
             database_path=state["database_path"],
             ledger=self.ledger,
+            created_at=self.ledger.get_run(state["run_id"]).created_at,
             policy=state.get("policy", {}),
             research_plan=(
                 ResearchPlan.model_validate(raw_plan) if raw_plan else None
@@ -873,9 +906,11 @@ class MultiAgentSupervisor:
             else AcquisitionPlan(
                 plan_id=stable_id("acquisition", context.run_id),
                 run_id=context.run_id,
-                destination_root=str(
-                    Path(context.policy.get("data_root", "data")) / "production"
-                ),
+                destination_root=str(production_run_root(
+                    context.policy.get("data_root", "data"),
+                    context.run_id,
+                    context.created_at,
+                )),
             )
         )
         preflight_artifact = latest_artifact(
@@ -1005,7 +1040,7 @@ class MultiAgentSupervisor:
         return {
             "configurable": {"thread_id": run_id},
             "recursion_limit": 50,
-            "tags": ["scdata-agent", "supervisor-v2"],
+            "tags": ["celllore", "supervisor-v2"],
         }
 
     def _record_failure(self, run_id: str, error: Exception) -> None:

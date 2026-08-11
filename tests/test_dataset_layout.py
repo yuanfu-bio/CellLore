@@ -1,9 +1,11 @@
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from scdata_agent.application.agents.shared import AgentContext
 from scdata_agent.application.agents.transfer_execution import TransferExecutionAgent
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
 from scdata_agent.application.dataset_layout import (
+    production_run_root,
     raw_stage_for_role,
     readable_pair_unit_id,
     study_accession,
@@ -19,6 +21,19 @@ from scdata_agent.domain.models import (
     ResearchRequirement,
 )
 from scdata_agent.domain.pair_units import ProposedPairUnit
+
+
+def test_production_root_is_isolated_by_date_and_run_id():
+    root = production_run_root(
+        "/datasets",
+        "agent_run_ed26f2d3daf026d0",
+        datetime(2026, 8, 11, 6, 58, tzinfo=UTC),
+    )
+
+    assert str(root) == (
+        "/datasets/production/"
+        "2026-08-11_RUN_agent_run_ed26f2d3daf026d0"
+    )
 
 
 def test_reference_style_pair_unit_id_hides_internal_hash():

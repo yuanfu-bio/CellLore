@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Protocol
 
 from scdata_agent.application.collaboration import AgentArtifact, AgentName, CollaborationLedger
@@ -23,6 +24,7 @@ class AgentContext:
     question: str
     database_path: str
     ledger: CollaborationLedger
+    created_at: datetime | None = None
     policy: dict[str, Any] = field(default_factory=dict)
     research_plan: ResearchPlan | None = None
     requirement: ResearchRequirement | None = None

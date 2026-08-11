@@ -3,10 +3,16 @@ import json
 import pytest
 
 from scdata_agent.domain.models import OmicsLayer, PairingLevel
-from scdata_agent.domain.planning import ExecutionStatus, PlanOrigin, PlanReadiness
+from scdata_agent.domain.planning import (
+    ExecutionStatus,
+    PlanCritique,
+    PlanOrigin,
+    PlanReadiness,
+)
 from scdata_agent.infrastructure.llm.research_planner import (
     MultiStageResearchPlanner,
     _normalize_model_enums,
+    _structured_call,
 )
 
 
@@ -54,6 +60,48 @@ def test_recommended_planning_language_is_normalized_by_field():
     }
     assert normalized["data_needs"][0]["priority"] == "supporting"
     assert normalized["resource_needs"][0]["priority"] == "supporting"
+
+
+def test_known_plan_critique_field_typo_is_normalized():
+    normalized = _normalize_model_enums(
+        {"intefit_fidelity_issues": ["same-cell requirement was weakened"]}
+    )
+
+    assert normalized == {
+        "intent_fidelity_issues": ["same-cell requirement was weakened"]
+    }
+
+
+@pytest.mark.asyncio
+async def test_structured_call_retries_once_after_schema_validation_failure():
+    valid_critique = {
+        "intent_fidelity_issues": [],
+        "scientific_design_issues": [],
+        "feasibility_issues": [],
+        "leakage_or_bias_risks": [],
+        "recommended_changes": [],
+        "critical_conflicts": [],
+    }
+    client = ScriptedClient(
+        [
+            {"unknown_critique_field": ["invalid"]},
+            valid_critique,
+        ]
+    )
+
+    result = await _structured_call(
+        client,
+        PlanCritique,
+        "Audit the plan.",
+        {"strategy": {}},
+        max_tokens=1_000,
+    )
+
+    assert result == PlanCritique.model_validate(valid_critique)
+    assert len(client.calls) == 2
+    repair_payload = json.loads(client.calls[1][1]["content"])
+    assert repair_payload["invalid_response"]
+    assert repair_payload["validation_errors"][0]["type"] == "extra_forbidden"
 
 
 def _intent(question):

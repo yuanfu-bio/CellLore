@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
+from pathlib import Path
 
 from scdata_agent.domain.lifecycle import SemanticBundle
 from scdata_agent.domain.models import DataAsset, DataRole, DatasetCandidate
@@ -38,6 +40,21 @@ def safe_path_segment(value: str, *, fallback: str = "unknown") -> str:
     """Return one filesystem-safe, readable path segment."""
     cleaned = re.sub(r"[^\w.-]+", "_", value.strip(), flags=re.UNICODE).strip("._")
     return (cleaned or fallback)[:120]
+
+
+def production_run_root(
+    data_root: str | Path,
+    run_id: str,
+    created_at: datetime | None,
+) -> Path:
+    """Return a production root isolated by UTC creation date and run ID."""
+    stamp = (
+        created_at.astimezone(UTC).date().isoformat()
+        if created_at is not None
+        else "undated"
+    )
+    run_segment = safe_path_segment(run_id, fallback="run")
+    return Path(data_root) / "production" / f"{stamp}_RUN_{run_segment}"
 
 
 def study_accession(candidate: DatasetCandidate) -> str:

@@ -186,8 +186,8 @@ def contact_email_and_user_agent(policy: dict[str, Any]) -> tuple[str | None, st
     """
     email = policy.get("contact_email") or os.environ.get("NCBI_CONTACT_EMAIL")
     if email:
-        return email, f"scdata-agent/0.1.0 (contact: {email})"
-    return None, "scdata-agent/0.1.0"
+        return email, f"CellLore/0.1.0 (contact: {email})"
+    return None, "CellLore/0.1.0"
 
 
 class Aria2Runner(Protocol):

@@ -47,7 +47,7 @@ from scdata_agent.infrastructure.sources.ena import ENAAssetResolver
 
 app = typer.Typer(
     no_args_is_help=True,
-    help="Evidence-first public scATAC/multiome data discovery agent.",
+    help="CellLore: evidence-first public scATAC/multiome data discovery agent.",
 )
 console = Console()
 
@@ -129,7 +129,7 @@ def manifest_run(
         ),
     ] = False,
     database: Annotated[Path, typer.Option("--database", "-d")] = Path(
-        "var/scdata_agent.sqlite"
+        "var/celllore.sqlite"
     ),
     data_root: Annotated[
         Path, typer.Option("--data-root", help="Raw and curated data root.")
@@ -234,9 +234,9 @@ def manifest_run(
 
 @app.command("manifest-status")
 def manifest_status(
-    run_id: Annotated[str, typer.Argument(help="scdata-agent run ID.")],
+    run_id: Annotated[str, typer.Argument(help="CellLore run ID.")],
     database: Annotated[Path, typer.Option("--database", "-d")] = Path(
-        "var/scdata_agent.sqlite"
+        "var/celllore.sqlite"
     ),
 ) -> None:
     """Summarize per-file download state for a run."""
@@ -255,7 +255,7 @@ def manifest_status(
 
 @app.command("manifest-repair")
 def manifest_repair(
-    run_id: Annotated[str, typer.Argument(help="scdata-agent run ID.")],
+    run_id: Annotated[str, typer.Argument(help="CellLore run ID.")],
     run: Annotated[
         bool,
         typer.Option(
@@ -264,7 +264,7 @@ def manifest_repair(
         ),
     ] = False,
     database: Annotated[Path, typer.Option("--database", "-d")] = Path(
-        "var/scdata_agent.sqlite"
+        "var/celllore.sqlite"
     ),
 ) -> None:
     """Classify a run's incomplete transfers; retry only what a repair should retry.
@@ -377,7 +377,7 @@ def _render_manifest_report(
 def agent_run(
     question: Annotated[str, typer.Argument(help="Natural-language research question.")],
     database: Annotated[Path, typer.Option("--database", "-d")] = Path(
-        "var/scdata_agent.sqlite"
+        "var/celllore.sqlite"
     ),
     max_results: Annotated[
         int, typer.Option("--max-results", "-n", min=1, max=100)
@@ -513,7 +513,7 @@ def resume(
             help="Approve only these recommended bundle IDs; repeatable.",
         ),
     ] = None,
-    database: Annotated[Path, typer.Option("--database", "-d")] = Path("var/scdata_agent.sqlite"),
+    database: Annotated[Path, typer.Option("--database", "-d")] = Path("var/celllore.sqlite"),
     trace_mode: Annotated[str, typer.Option("--trace-mode")] = "local",
 ) -> None:
     """Resume a persisted LangGraph run after a human decision."""
@@ -533,7 +533,7 @@ def resume(
 @app.command("graph-state")
 def graph_state(
     run_id: Annotated[str, typer.Argument(help="LangGraph thread/run ID.")],
-    database: Annotated[Path, typer.Option("--database", "-d")] = Path("var/scdata_agent.sqlite"),
+    database: Annotated[Path, typer.Option("--database", "-d")] = Path("var/celllore.sqlite"),
     trace_mode: Annotated[str, typer.Option("--trace-mode")] = "local",
 ) -> None:
     """Inspect the persisted LangGraph state for a run."""
@@ -545,7 +545,7 @@ def graph_state(
 @app.command("serve")
 def serve(
     database: Annotated[Path, typer.Option("--database", "-d")] = Path(
-        "var/scdata_agent.sqlite"
+        "var/celllore.sqlite"
     ),
     host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
@@ -677,7 +677,7 @@ def discover(
             "-d",
             help="SQLite evidence-ledger path.",
         ),
-    ] = Path("var/scdata_agent.sqlite"),
+    ] = Path("var/celllore.sqlite"),
     max_results: Annotated[
         int,
         typer.Option("--max-results", "-n", min=1, max=100),
@@ -748,7 +748,7 @@ def discover(
 def list_runs(
     database: Annotated[
         Path, typer.Option("--database", "-d")
-    ] = Path("var/scdata_agent.sqlite"),
+    ] = Path("var/celllore.sqlite"),
 ) -> None:
     """List discovery runs stored in the evidence ledger."""
     ledger = EvidenceLedger(database)
@@ -772,7 +772,7 @@ def show_run(
     run_id: Annotated[str, typer.Argument()],
     database: Annotated[
         Path, typer.Option("--database", "-d")
-    ] = Path("var/scdata_agent.sqlite"),
+    ] = Path("var/celllore.sqlite"),
 ) -> None:
     """Show persisted requirement, query plan, and candidates."""
     ledger = EvidenceLedger(database)
@@ -792,7 +792,7 @@ def show_run(
 def resolve_assets(
     run_id: Annotated[str, typer.Argument(help="Persisted discovery run ID.")],
     database: Annotated[Path, typer.Option("--database", "-d")] = Path(
-        "var/scdata_agent.sqlite"
+        "var/celllore.sqlite"
     ),
     candidate_id: Annotated[
         str | None,

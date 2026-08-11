@@ -1,4 +1,4 @@
-name: scdata-agent
+name: celllore
 channels:
   - conda-forge
 dependencies:

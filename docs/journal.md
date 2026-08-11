@@ -20,7 +20,7 @@
 
 ## Implemented
 
-- Python 3.12 mamba environment `scdata-agent`.
+- Python 3.12 mamba environment `celllore`.
 - Additive v2.2 contracts cover remote Bundle summaries, preflight scale/gate details, bundle lineage assessments, and three-tier acquisition decisions while preserving older payload defaults.
 - Central LangGraph Supervisor uses progressive dual-entry asset scouting plus per-Bundle state, download approval, and corpus approval checkpoints.
 - Resumable HTTPS transfer supports range continuation, disk/budget checks, checksums, failure receipts, and idempotent destinations.

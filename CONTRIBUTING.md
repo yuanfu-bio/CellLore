@@ -1,4 +1,4 @@
-# Contributing to scdata-agent
+# Contributing to CellLore
 
 Thanks for helping build this. The project curates **public** scientific data,
 so correctness and honesty about evidence matter more here than speed.
@@ -7,7 +7,7 @@ so correctness and honesty about evidence matter more here than speed.
 
 ```bash
 mamba env create -f environment.yml
-mamba activate scdata-agent
+mamba activate celllore
 python -m pip install -e '.[dev]'          # add ,curation for AnnData/MuData QC
 pytest                                     # should be green before you start
 ```

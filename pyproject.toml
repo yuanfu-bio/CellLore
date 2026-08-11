@@ -4,9 +4,9 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "scdata-agent"
+name = "celllore"
 version = "0.1.0"
-description = "Evidence-first discovery and curation agent for public single-cell epigenomics data."
+description = "CellLore: evidence-first discovery and curation for public single-cell epigenomics data."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -63,12 +63,12 @@ curation = [
 ]
 
 [project.scripts]
-scdata-agent = "scdata_agent.interfaces.cli:app"
+celllore = "scdata_agent.interfaces.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/yuanfu-bio/scdata_agent"
-Repository = "https://github.com/yuanfu-bio/scdata_agent"
-Issues = "https://github.com/yuanfu-bio/scdata_agent/issues"
+Homepage = "https://github.com/yuanfu-bio/CellLore"
+Repository = "https://github.com/yuanfu-bio/CellLore"
+Issues = "https://github.com/yuanfu-bio/CellLore/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -100,4 +100,3 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # The layering test imports modules for their side effects on sys.modules.
 "tests/test_architecture.py" = ["F401"]
-

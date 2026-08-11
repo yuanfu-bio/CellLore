@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}scdata-agent{% endblock %}</title>
+<title>{% block title %}CellLore{% endblock %}</title>
 <style>
 :root {
   --bg: #f5f6f8;
@@ -176,7 +176,7 @@ html[data-theme="dark"] { color-scheme:dark; --bg:#0d0f14; --bg-elevated:#151821
 </head>
 <body>
 <div class="topbar">
-  <a class="brand" href="/"><span class="dot"></span> scdata-agent</a>
+  <a class="brand" href="/"><span class="dot"></span> CellLore</a>
   <nav>{% block nav %}{% endblock %}</nav>
   <div class="theme-switcher" role="group" aria-label="Theme">
     <button type="button" data-theme="light">Light</button>
@@ -188,7 +188,7 @@ html[data-theme="dark"] { color-scheme:dark; --bg:#0d0f14; --bg-elevated:#151821
 {% block content %}{% endblock %}
 </div>
 <script>
-(() => { const root=document.documentElement, key='scdata-agent-theme'; const set=(value)=>{ if(value==='system') root.removeAttribute('data-theme'); else root.dataset.theme=value; localStorage.setItem(key,value); document.querySelectorAll('[data-theme]').forEach(b=>b.classList.toggle('active',b.dataset.theme===value)); }; set(localStorage.getItem(key)||'system'); document.querySelectorAll('[data-theme]').forEach(b=>b.addEventListener('click',()=>set(b.dataset.theme))); })();
+(() => { const root=document.documentElement, key='celllore-theme'; const set=(value)=>{ if(value==='system') root.removeAttribute('data-theme'); else root.dataset.theme=value; localStorage.setItem(key,value); document.querySelectorAll('[data-theme]').forEach(b=>b.classList.toggle('active',b.dataset.theme===value)); }; set(localStorage.getItem(key)||'system'); document.querySelectorAll('[data-theme]').forEach(b=>b.addEventListener('click',()=>set(b.dataset.theme))); })();
 </script>
 </body>
 </html>

@@ -5,7 +5,9 @@ import pytest
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
 from scdata_agent.application.collaboration import (
     ArtifactKind,
+    CheckpointStatus,
     CollaborationLedger,
+    DecisionCheckpoint,
     RunStatus,
 )
 from scdata_agent.domain.lifecycle import (
@@ -106,6 +108,54 @@ class FakeTransferExecutor:
                 if item.asset_id in bundle.asset_ids
             }
         ]
+
+
+@pytest.mark.asyncio
+async def test_research_clarification_requires_text_before_checkpoint_resolution(
+    tmp_path,
+):
+    database = tmp_path / "clarification.sqlite"
+    ledger = CollaborationLedger(database)
+    run = ledger.create_run("find paired PBMC multiome data", {})
+    checkpoint = ledger.add_checkpoint(
+        DecisionCheckpoint(
+            checkpoint_id="checkpoint_clarification",
+            run_id=run.run_id,
+            kind="research_clarification",
+            title="Clarify the research plan",
+            recommendation="Clarification is required.",
+            options=[
+                {"id": "provide_clarification", "label": "Provide clarification"},
+                {
+                    "id": "proceed_with_assumptions",
+                    "label": "Proceed with documented assumptions",
+                },
+            ],
+        )
+    )
+    supervisor = MultiAgentSupervisor(ledger, str(database))
+
+    with pytest.raises(ValueError, match="requires non-empty clarification text"):
+        await supervisor.resume_checkpoint(
+            checkpoint.checkpoint_id,
+            {"option": "provide_clarification"},
+        )
+
+    assert ledger.get_checkpoint(checkpoint.checkpoint_id).status == CheckpointStatus.OPEN
+    assert supervisor._validate_research_clarification_resolution(
+        checkpoint,
+        {
+            "option": "provide_clarification",
+            "clarification": "  Require two human PBMC same-cell RNA+ATAC datasets.  ",
+        },
+    ) == {
+        "option": "provide_clarification",
+        "clarification": "Require two human PBMC same-cell RNA+ATAC datasets.",
+    }
+    assert supervisor._validate_research_clarification_resolution(
+        checkpoint,
+        {"option": "proceed_with_assumptions", "clarification": "ignored"},
+    ) == {"option": "proceed_with_assumptions"}
 
 
 @pytest.mark.asyncio

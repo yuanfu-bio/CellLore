@@ -9,7 +9,7 @@ import re
 from typing import Any, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from scdata_agent.domain.curation.profile import CurationProfile
 from scdata_agent.domain.curation.profiles import select_profile
@@ -200,7 +200,7 @@ class MultiStageResearchPlanner:
             async with asyncio.timeout(timeout_seconds):
                 state = await self.graph.ainvoke(
                     {"question": question, "capabilities": self.capabilities},
-                    config={"tags": ["scdata-agent", "research-planner", self.mode]},
+                    config={"tags": ["celllore", "research-planner", self.mode]},
                 )
             draft = ResearchPlanDraft.model_validate(state["draft"])
             if self.mode == "fast":
@@ -414,44 +414,100 @@ async def _structured_call[T: BaseModel](
     *,
     max_tokens: int,
 ) -> T:
+    schema = model.model_json_schema()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {"input": payload, "json_schema": schema},
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    response = await _complete_structured_response(
+        client,
+        messages,
+        schema=schema,
+        schema_name=model.__name__,
+        max_tokens=max_tokens,
+    )
+    try:
+        return model.model_validate(_normalize_model_enums(_json_object(response)))
+    except (ValidationError, json.JSONDecodeError, ValueError) as error:
+        repair_messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"{system_prompt}\n\n"
+                    "Your previous response did not satisfy the required JSON schema. "
+                    "Correct only its JSON structure and field names while preserving the "
+                    "substantive content. Return the complete corrected JSON object only."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "input": payload,
+                        "json_schema": schema,
+                        "invalid_response": response,
+                        "validation_errors": _structured_error_details(error),
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        repaired_response = await _complete_structured_response(
+            client,
+            repair_messages,
+            schema=schema,
+            schema_name=model.__name__,
+            max_tokens=max_tokens,
+        )
+        return model.model_validate(
+            _normalize_model_enums(_json_object(repaired_response))
+        )
+
+
+async def _complete_structured_response(
+    client: ChatCompletionClient,
+    messages: list[dict[str, Any]],
+    *,
+    schema: dict[str, Any],
+    schema_name: str,
+    max_tokens: int,
+) -> str:
     structured_complete = getattr(client, "complete_structured", None)
     if callable(structured_complete):
-        response = await structured_complete(
-            [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"input": payload, "json_schema": model.model_json_schema()},
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
-            schema=model.model_json_schema(),
-            schema_name=model.__name__,
+        return await structured_complete(
+            messages,
+            schema=schema,
+            schema_name=schema_name,
             temperature=0.0,
             max_tokens=max_tokens,
         )
-    else:
-        response = await client.complete(
-            [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"input": payload, "json_schema": model.model_json_schema()},
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
-            temperature=0.0,
-            max_tokens=max_tokens,
-        )
-    return model.model_validate(_normalize_model_enums(_json_object(response)))
+    return await client.complete(
+        messages,
+        temperature=0.0,
+        max_tokens=max_tokens,
+    )
+
+
+def _structured_error_details(error: Exception) -> Any:
+    if isinstance(error, ValidationError):
+        return error.errors(include_url=False, include_input=False)
+    return str(error)
+
+
+_MODEL_FIELD_ALIASES = {
+    # Observed in StepFun output for PlanCritique on 2026-08-11.
+    "intefit_fidelity_issues": "intent_fidelity_issues",
+}
 
 
 def _normalize_model_enums(value: Any) -> Any:
-    """Accept common planning-language variants at the LLM boundary.
+    """Accept common model-output variants at the LLM boundary.
 
     ``planned`` describes a partially supported capability in ordinary prose;
     the contract intentionally represents that state as ``partial``.
@@ -461,11 +517,17 @@ def _normalize_model_enums(value: Any) -> Any:
     provenance language: a recommended constraint is a ``preference``, while a
     recommended data/resource need is ``supporting``. Keeping these translations
     at the boundary preserves strict internal enums without turning harmless
-    model vocabulary variants into a failed research run.
+    model vocabulary variants into a failed research run. Known field-name
+    misspellings are normalized here for the same reason.
     """
     if isinstance(value, dict):
-        return {
-            key: (
+        normalized: dict[str, Any] = {}
+        for raw_key, item in value.items():
+            key = _MODEL_FIELD_ALIASES.get(raw_key, raw_key)
+            # A correctly named field always wins if a response contains both.
+            if raw_key != key and key in value:
+                continue
+            normalized[key] = (
                 "partial"
                 if key == "execution_status" and item == "planned"
                 else "unsupported"
@@ -476,8 +538,7 @@ def _normalize_model_enums(value: Any) -> Any:
                 if key == "priority" and item == "recommended"
                 else _normalize_model_enums(item)
             )
-            for key, item in value.items()
-        }
+        return normalized
     if isinstance(value, list):
         return [_normalize_model_enums(item) for item in value]
     return value

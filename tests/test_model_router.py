@@ -45,7 +45,7 @@ def test_deepseek_provider_uses_documented_defaults(monkeypatch, tmp_path):
 
     router = ModelRouter.from_environment()
     settings = router.client(ReasoningProfile.PLANNER).settings
-    assert settings.model == "deepseek-chat"
+    assert settings.model == "deepseek-v4-flash"
     assert settings.base_url == "https://api.deepseek.com"
     assert settings.api_key == "test-key"
 
@@ -55,13 +55,13 @@ def test_deepseek_provider_honours_overrides(monkeypatch):
 
     monkeypatch.setenv("SCDATA_AGENT_MODEL_PROVIDER", "deepseek")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-reasoner")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://example.test/v1/")
     monkeypatch.setenv("SCDATA_AGENT_MODEL_PLANNER", "planner-override")
 
     router = ModelRouter.from_environment()
     assert router.client(ReasoningProfile.PLANNER).settings.model == "planner-override"
-    assert router.client(ReasoningProfile.REVIEW).settings.model == "deepseek-reasoner"
+    assert router.client(ReasoningProfile.REVIEW).settings.model == "deepseek-v4-pro"
     assert router.client(ReasoningProfile.REVIEW).settings.base_url == "https://example.test/v1"
 
 

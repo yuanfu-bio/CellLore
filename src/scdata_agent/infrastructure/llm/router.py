@@ -40,7 +40,7 @@ class OpenAICompatibleSettings(BaseModel):
 
 
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
 
 
 def _http_timeout_seconds() -> float:

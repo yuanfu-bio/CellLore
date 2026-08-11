@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from pathlib import Path
 
 from scdata_agent.application.agents.shared import AgentContext, latest_artifact
 from scdata_agent.application.collaboration import AgentName, ArtifactKind, artifact
+from scdata_agent.application.dataset_layout import production_run_root
 from scdata_agent.domain.identifiers import stable_id
 from scdata_agent.domain.lifecycle import (
     AcquisitionBundle,
@@ -165,7 +165,11 @@ class AcquisitionStrategistAgent:
             manual_review_bundle_ids=manual,
             excluded_bundle_ids=excluded,
             total_expected_bytes=sum(item.expected_bytes or 0 for item in decisions if item.bundle_id in recommended),
-            destination_root=str(Path(context.policy.get("data_root", "data")) / "production"),
+            destination_root=str(production_run_root(
+                context.policy.get("data_root", "data"),
+                context.run_id,
+                context.created_at,
+            )),
         )
         if context.catalog is not None:
             context.catalog.append(record_id=plan.plan_id, record_type="acquisition_plan",

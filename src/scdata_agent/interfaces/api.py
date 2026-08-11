@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -13,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from scdata_agent.application.agents.supervisor import MultiAgentSupervisor
 from scdata_agent.application.collaboration import CollaborationLedger
@@ -33,6 +34,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["status_color"] = lambda status: _STATUS_COLOR.get(status, "gray")
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+_RUN_ID_ONLY = re.compile(r"agent_run_[0-9a-f]{8,}", re.IGNORECASE)
 
 class CreateRunRequest(BaseModel):
     question: str = Field(min_length=3)
@@ -67,14 +69,27 @@ class CreateRunRequest(BaseModel):
     remote_probe_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     remote_probe_max_attempts: int = Field(default=2, ge=1, le=5)
 
+    @field_validator("question")
+    @classmethod
+    def validate_research_question(cls, value: str) -> str:
+        question = value.strip()
+        if len(question) < 3:
+            raise ValueError("Research question must contain at least 3 non-space characters.")
+        if _RUN_ID_ONLY.fullmatch(question):
+            raise ValueError(
+                "A CellLore run ID cannot be used as a research question. "
+                "Open it from Recent Projects, or enter the dataset you want to find."
+            )
+        return question
+
 class ResolveCheckpointRequest(BaseModel):
     resolution: dict[str, Any]
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
 
-def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI:
-    app = FastAPI(title="scdata-agent", version="0.2.0")
+def create_app(database_path: str | Path = "var/celllore.sqlite") -> FastAPI:
+    app = FastAPI(title="CellLore", version="0.2.0")
     ledger = CollaborationLedger(database_path)
     supervisor = MultiAgentSupervisor(ledger, str(database_path), trace_mode=os.getenv("SCDATA_AGENT_TRACE_MODE"))
     app.state.ledger = ledger
@@ -119,7 +134,7 @@ def create_app(database_path: str | Path = "var/scdata_agent.sqlite") -> FastAPI
             "remote_probe_timeout_seconds": request.remote_probe_timeout_seconds,
             "remote_probe_max_attempts": request.remote_probe_max_attempts,
         })
-        task = asyncio.create_task(supervisor.execute(run.run_id), name=f"scdata-agent:{run.run_id}")
+        task = asyncio.create_task(supervisor.execute(run.run_id), name=f"celllore:{run.run_id}")
         app.state.background_tasks[run.run_id] = task
         return run.model_dump(mode="json")
 
@@ -372,4 +387,4 @@ def _run_payload(ledger: CollaborationLedger, run_id: str) -> dict[str, Any]:
     }
 
 
-app = create_app(os.getenv("SCDATA_AGENT_DATABASE", "var/scdata_agent.sqlite"))
+app = create_app(os.getenv("SCDATA_AGENT_DATABASE", "var/celllore.sqlite"))

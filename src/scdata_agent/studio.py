@@ -11,7 +11,7 @@ import os
 from scdata_agent.application.collaboration import CollaborationLedger
 from scdata_agent.application.orchestration_v2 import MultiAgentSupervisor
 
-_database = os.getenv("SCDATA_AGENT_STUDIO_DATABASE", "var/studio_scdata_agent.sqlite")
+_database = os.getenv("SCDATA_AGENT_STUDIO_DATABASE", "var/studio_celllore.sqlite")
 _supervisor = MultiAgentSupervisor(
     CollaborationLedger(_database),
     _database,

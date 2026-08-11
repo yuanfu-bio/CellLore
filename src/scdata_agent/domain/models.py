@@ -340,7 +340,7 @@ class Evidence(StrictModel):
     evidence_class: EvidenceClass
     retrieved_at: datetime = Field(default_factory=utc_now)
     snapshot_hash: str | None = None
-    extractor_version: str = "scdata-agent/0.1.0"
+    extractor_version: str = "CellLore/0.1.0"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     validation_status: ValidationStatus = ValidationStatus.UNVALIDATED
 
@@ -621,4 +621,3 @@ class DiscoveryRunResult(StrictModel):
     candidates: list[DatasetCandidate]
     feasibility_reports: list[FeasibilityReport]
     errors: list[str] = Field(default_factory=list)
-

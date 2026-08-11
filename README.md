@@ -1,369 +1,406 @@
-# scdata-agent
+<p align="center">
+  <img src="docs/assets/celllore-readme-header.png" alt="CellLore — evidence-first single-cell data discovery and curation" width="100%" />
+</p>
 
-Evidence-first discovery and curation agent for **public single-cell epigenomics data**
-(scATAC-seq / snATAC-seq and single-cell multiome).
+<p align="center">
+  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-8B5CF6?style=flat-square" />
+  <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" />
+  <img alt="LangGraph" src="https://img.shields.io/badge/orchestration-LangGraph-6657E8?style=flat-square" />
+  <img alt="Workflow: 22 nodes" src="https://img.shields.io/badge/workflow-22_nodes-06B6D4?style=flat-square" />
+  <img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-22C55E?style=flat-square" />
+</p>
 
-`scdata-agent` automates the data-curation half of building a single-cell epigenomics
-foundation model: it turns a natural-language research question into an executable
-search contract, queries public repositories, reconciles the returned metadata against
-observed remote file manifests, and produces an auditable acquisition plan — **stopping
-at a human approval gate before a single byte is downloaded.**
+<p align="center">
+  <strong>Turn a biological question into a traceable, approval-gated, analysis-ready single-cell dataset.</strong>
+</p>
 
-> **Status: alpha / research prototype.** The pipeline runs end to end against live
-> public APIs. Read [Known limitations](#known-limitations) before trusting its
-> output — several classes of dataset are still deliberately routed to human review.
+<p align="center">
+  <a href="#-why-celllore">Why CellLore</a> ·
+  <a href="#-workflow">Workflow</a> ·
+  <a href="#-quick-start">Quick start</a> ·
+  <a href="#-curation-outputs">Outputs</a> ·
+  <a href="docs/commands.md">CLI reference</a> ·
+  <a href="docs/roadmap.md">Roadmap</a>
+</p>
 
 ---
 
-## Design principles
+## 🧬 Why CellLore
 
-These are enforced in code, not just documented:
+**CellLore** is an evidence-first discovery and curation agent for public single-cell
+epigenomics data: scATAC-seq, snATAC-seq, RNA + ATAC multiome, and matched multimodal
+studies.
 
-- **No bytes before consent.** Transfer execution is unreachable until a persisted
-  human checkpoint is resolved. A second checkpoint gates publication of the immutable
-  corpus snapshot.
-- **Evidence has provenance classes.** Claims are labelled by how they were obtained.
-  `FILE_OBSERVED` and `RECOMPUTED` evidence requires local bytes and therefore cannot
-  be produced before transfer — the agent cannot "conclude" something it never saw.
-- **No access circumvention.** Only open full text is fetched. Paywall or
-  authentication bypass is out of scope; controlled-access sources stay metadata-only.
-- **Deterministic gates, ranked advice.** Hard gates (access, modality, licence) are
-  plain code. The LLM proposes and summarises; it never silently decides admission.
-- **Append-only catalogue.** Runs, artifacts, claims, bundle states and snapshots are
-  written to a local SQLite ledger for cross-run auditing.
+It does more than search. CellLore turns a natural-language request into an executable
+research contract, discovers candidate studies, reconstructs sample and pair-unit
+relationships, reconciles remote files, checks download readiness, and materializes a
+human-readable production dataset — with a persisted approval gate before transfer.
 
-## Architecture
+> [!IMPORTANT]
+> **CellLore is the product and repository brand.** The Python distribution,
+> Conda environment, and CLI are named `celllore`. The internal Python import
+> namespace and existing `SCDATA_AGENT_*` configuration keys remain stable for
+> compatibility with persisted runs and local deployments.
 
-A LangGraph state machine (`application/orchestration_v2.py`) drives ten specialist
-agents. Discovery forks into a fast direct asset scout and a non-blocking metadata
-review; the two rejoin at an escalation gate that decides whether open full text is
-needed to resolve remaining hard fields.
+| | Capability | What CellLore records |
+|---|---|---|
+| 🔭 | **Evidence-aware discovery** | Study accessions, source URLs, publication year, assay and organism evidence |
+| 🧩 | **Pair-unit reconstruction** | Human-readable units such as `Patient3_GSM9196533__GSM9196532` |
+| 📦 | **File-level inventory** | Exact URLs, roles, byte sizes, checksums, availability and manifest status |
+| 🛡️ | **Human approval gates** | No transfer before consent; no corpus publication before governance approval |
+| 🧪 | **Post-transfer validation** | Compression, HDF5, semantic-role, barcode and materialized-object checks |
+| 🗂️ | **Analysis-ready layout** | Stable metadata, RNA, ATAC, pairing, QC and audit directories |
+| 🧾 | **Auditable provenance** | Append-only runs, artifacts, evidence classes, decisions and snapshots in SQLite |
+| 🖥️ | **Live control room** | React/Vite UI, SSE updates, workflow map, stage timing and downloadable XLSX catalog |
+
+> [!NOTE]
+> CellLore is an **alpha research prototype**. The workflow runs end to end against
+> live public APIs, but uncertain evidence is deliberately routed to audit or human
+> review rather than guessed.
+
+## 🧭 Workflow
+
+The control room renders the supervisor's canonical **22-node LangGraph DAG**.
+This compact view matches the live `PROCESS MAP`: planning feeds a branched
+discovery path, inventory fans out into parallel QC checks, and the lower two rows
+form an approval-gated curation loop back to finalization.
 
 ```mermaid
-flowchart TD
-    START([start]) --> init[initialize_run]
-    init --> planner[research_planner]
-    planner --> pgate{planning_gate}
-    pgate -->|needs clarification| planner
-    pgate -->|ready| disc[resource_discovery]
+flowchart TB
+    subgraph ROW1[" "]
+        direction LR
+        INIT[01 · Initialize run] --> PLAN[02 · Research planner] --> PGATE{03 · Planning gate}
+    end
 
-    disc --> scout1[asset_scout_direct]
-    disc --> ev1[evidence_metadata]
-    scout1 --> egate{evidence_escalation_gate}
-    ev1 --> egate
+    subgraph ROW2[" "]
+        direction LR
+        DISC[04 · Resource discovery] --> SCOUT1[05 · Asset scout · direct]
+        DISC --> META[06 · Evidence curator · metadata]
+        SCOUT1 --> EGATE{07 · Evidence escalation}
+        META --> EGATE
+        EGATE -->|fulltext| FULL[08 · Evidence curator · full text]
+    end
 
-    egate -->|hard fields unresolved| ft[evidence_fulltext]
-    egate -->|sufficient| scout2[asset_scout_enriched]
-    ft --> scout2
+    subgraph ROW3[" "]
+        direction LR
+        SCOUT2[09 · Asset scout · enriched] --> GEO[10 · GEO sample metadata] --> INV[11 · Inventory reconcile]
+    end
 
-    scout2 --> recon[inventory_reconcile]
-    recon --> pf[preflight_assessment]
-    recon --> lin1[early_lineage]
-    pf --> acq[acquisition_strategy]
-    lin1 --> acq
+    subgraph ROW4[" "]
+        direction LR
+        PREFLIGHT[12 · Preflight assessment] --> ACQ[14 · Acquisition strategy]
+        LINEAGE1[13 · Early lineage] --> ACQ
+    end
 
-    acq --> gate1{{"download_approval<br/>HUMAN CHECKPOINT"}}
-    gate1 -->|plan_only| fin[finalize]
-    gate1 -->|recommended / all| xfer[transfer_execution]
+    subgraph ROW5[" "]
+        direction LR
+        APPROVE{{15 · Download approval}} -->|transfer| XFER[16 · Transfer execution]
+        XFER --> CURATE[17 · Dataset curator] --> QC[18 · Materialized quality]
+    end
 
-    xfer --> cur[dataset_curator]
-    cur --> mq[materialized_quality]
-    mq --> lin2[late_lineage]
-    lin2 --> gov[corpus_governance]
-    gov --> gate2{{"corpus_approval<br/>HUMAN CHECKPOINT"}}
-    gate2 --> fin
-    fin --> END([end])
+    subgraph ROW6[" "]
+        direction RL
+        LINEAGE2[19 · Late lineage] --> GOV[20 · Corpus governance]
+        GOV --> CORPUS{{21 · Corpus approval}} --> FINAL[22 · Finalize run]
+    end
+
+    PGATE -->|replan| PLAN
+    PGATE -->|discover| DISC
+    EGATE -->|scout| SCOUT2
+    FULL --> SCOUT2
+    INV --> PREFLIGHT
+    INV --> LINEAGE1
+    ACQ --> APPROVE
+    APPROVE -->|stop| FINAL
+    QC --> LINEAGE2
+
+    classDef plan fill:#19142F,stroke:#8B5CF6,color:#F8FAFC,stroke-width:1.5px;
+    classDef discovery fill:#082638,stroke:#22D3EE,color:#F8FAFC,stroke-width:1.5px;
+    classDef quality fill:#101F43,stroke:#3B82F6,color:#F8FAFC,stroke-width:1.5px;
+    classDef curator fill:#24143B,stroke:#A78BFA,color:#F8FAFC,stroke-width:1.5px;
+    classDef human fill:#30154B,stroke:#C084FC,color:#FFFFFF,stroke-width:2px;
+    classDef row fill:transparent,stroke:transparent;
+    class INIT,PLAN,PGATE plan;
+    class DISC,SCOUT1,META,EGATE,FULL,SCOUT2,GEO,INV discovery;
+    class PREFLIGHT,LINEAGE1,ACQ quality;
+    class XFER,CURATE,QC,LINEAGE2,GOV,FINAL curator;
+    class APPROVE,CORPUS human;
+    class ROW1,ROW2,ROW3,ROW4,ROW5,ROW6 row;
 ```
 
-### Bundle schemas
+### Human checkpoints
 
-A candidate is judged against the shapes it could legitimately take, not against
-the union of everything the research question mentioned. Each schema
-(`domain/requirements.py::BUNDLE_SCHEMAS`) lists **role groups**: a conjunction of
-disjunctions, where every group must be satisfied by at least one of its roles.
-Satisfying *any one* schema makes a bundle complete.
+1. **Download approval** — choose plan-only, recommended bundles, or a bounded subset.
+   Transfer is unreachable before this persisted decision is resolved.
+2. **Corpus approval** — approve or retain the immutable corpus snapshot as a draft
+   after materialized QC and lineage checks.
 
-| Schema | Applies to | Requires |
-|---|---|---|
-| `scatac_standalone` | scATAC, snATAC | accessibility signal + a cell axis — **not** an RNA matrix |
-| `multiome_same_cell` | 10x Multiome, SNARE-seq, SHARE-seq | accessibility + RNA matrix + per-cell linkage |
-| `multiome_trimodal` | TEA-seq, DOGMA-seq | the above **+ a protein matrix** |
-| `matched_scrna_scatac` | separate assays on matched samples | accessibility + RNA matrix + a cell axis |
-| `atac_protein` | ASAP-seq, ISSAAC-seq | accessibility + protein matrix + a cell axis |
-| `raw_reads` | any | FASTQ (legitimate but expensive input) |
+## ⚡ Quick start
 
-`matched_scrna_scatac` is deliberately separate from `multiome_same_cell`: sharing
-a sample is a much weaker claim than sharing a cell, and collapsing the two let
-matched-sample studies pass as multiome.
-
-"Accessibility signal" is satisfied by fragments **or** a peak matrix **or** a joint
-AnnData/MuData object, which is why the groups are disjunctions. This is what stops a
-standalone scATAC study from being marked incomplete for lacking multiome files.
-
-### Licence handling
-
-Public genomics archives mostly publish no per-record licence. Treating that silence
-as "unknown" is literally correct but leaves nothing recommendable; treating it as an
-approved licence asserts a fact nobody checked. The agent takes a third position, with
-four distinct states resolved in strict precedence order:
-
-| Status | Meaning |
-|---|---|
-| `restricted` | A declared licence matched the restricted list — hard blocker, always wins |
-| `approved` | A declared licence was read and is on your allowlist, or you approved the candidate |
-| `repository_policy` | No per-record licence exists, and every file is served by an archive whose own published terms cover redistribution |
-| `unknown` | Anything else — including a declared licence that is real but not allowlisted |
-
-`repository_policy` never overrides a licence that was actually read; it only fills a
-genuine gap. Coverage must be **total** — one file from an unrecognised host voids the
-basis for the whole bundle — but it may come from more than one archive, since a
-deposition split across GEO (processed) and ENA (raw reads) is the norm. The policies
-relied on are recorded on the preflight report, in the acquisition plan's reasons, in
-the corpus snapshot, and in the package's `DATA_CARD.md`, so the basis is auditable
-rather than merely trusted.
-
-Pass `--strict-license` to require a declared, allowlisted licence and disable archive
-terms entirely.
-
-### Requiring paired data
-
-Asking for *paired* multiome is a constraint, not a topic. Phrasings such as
-"same-cell", "joint profiling", "10x Multiome", "配对", "同细胞" compile to a
-`minimum_pairing_level` on the requirement, which then changes three things:
-
-- **Search** switches from the broad modality blob to the named co-assay
-  technologies (SNARE-seq, SHARE-seq, sci-CAR, Paired-seq, TEA-seq, DOGMA-seq),
-  so standalone scATAC is no longer recalled alongside.
-- **Verification** compares the pairing level actually claimed by the candidate
-  against what was required. Levels form tiers: same-cell ≡ same-nucleus >
-  same-sample ≡ same-donor > study-level ≡ unverified.
-- **Decision** routes a shortfall to `manual_review` with `pairing:unverified`
-  rather than excluding it, because pairing is *inferred from text*: many real
-  multiome studies never write "same cell" in their abstract.
-
-### How the LLM's understanding reaches the query
-
-`agent-run` defaults to the planner's `deep` mode: four sequential LLM calls
-(intent → study design → critical review → synthesis, ~600s budget) rather than
-`fast` mode's two calls racing a 30s-per-branch budget. `fast` degrades to a
-generic template on timeout; `deep` is what lets the model actually finish
-analysing the question. Pass `--planner-mode fast` (or set
-`SCDATA_AGENT_PLANNER_MODE=fast`) when you want a quick, approximate result
-instead — `compile` and `discover` still default to `fast` for quick iteration.
-
-Whichever mode runs, the LLM's modality recognition and the deterministic
-compiler's now share one alias table (`domain/requirements.py::MODALITY_ALIASES`)
-instead of the LLM path re-implementing a narrower version of it — a mismatch
-that once caused a literal "TEA-seq/DOGMA-seq trimodal" request to compile
-without the trimodal modality. A technology name the LLM identifies that this
-table doesn't cover yet — a future co-assay method, for instance — is not
-discarded: it lands in `ResearchRequirement.supplementary_search_terms` and
-`QueryPlanner` ORs a bounded number of them into the query, so recall for a
-genuinely new assay can improve before anyone updates the alias table for it.
-This is deliberately *additive* rather than letting the LLM draft the query
-outright, matching the deterministic-gates principle above.
-
-Package layout follows a strict dependency direction, asserted by
-`tests/test_architecture.py`:
-
-| Layer | Path | May depend on |
-|---|---|---|
-| `domain` | pure models, gates, role inference | nothing internal |
-| `application` | agents + LangGraph orchestration | `domain` |
-| `infrastructure` | HTTP sources, LLM routing, persistence | `domain` |
-| `interfaces` | Typer CLI, FastAPI control room | all of the above |
-
-## Quick start
+### 1. Install
 
 ```bash
-# 1. Environment
 mamba env create -f environment.yml
-mamba activate scdata-agent
+mamba activate celllore
 python -m pip install -e '.[dev]'
+```
 
-# 2. Credentials (never commit .env — it is gitignored)
+### 2. Configure a model provider
+
+```bash
 cp .env.example .env
-$EDITOR .env                       # set STEPFUN_API_KEY (or another provider)
-scdata-agent llm-check             # validates config, sends no billable request
+$EDITOR .env                      # add the API key for your chosen provider
+celllore llm-check                # validates configuration without a billable call
+```
 
-# 3. Understand a question without touching the network
-scdata-agent compile 'scATAC-seq and multiome data for representation learning' --no-llm
+### 3. Compile a research question offline
 
-# 4. Live discovery across Europe PMC + GEO + SRA
-export NCBI_EMAIL='you@example.org'   # NCBI asks for this on sustained use
-scdata-agent discover 'human lung scATAC-seq and multiome' \
-  --max-results 10 \
-  --database var/scdata_agent.sqlite
+```bash
+celllore compile \
+  'public human PBMC data with same-cell scRNA-seq and scATAC-seq' \
+  --no-llm
+```
 
-# 5. Full pipeline; stops at the download checkpoint
-scdata-agent agent-run 'scATAC and multiome data for representation learning' \
-  --database var/scdata_agent.sqlite \
+### 4. Run the approval-gated pipeline
+
+```bash
+export NCBI_EMAIL='you@example.org'
+
+celllore agent-run \
+  'find 2 public human PBMC datasets with RNA and ATAC from the same cell or nucleus' \
+  --database var/celllore.sqlite \
   --data-root data \
-  --approved-license cc-by-4.0 \
   --remote-probe
 ```
 
-The run halts with `status = waiting_for_decision` and an open checkpoint. Resolve it
-explicitly — `plan_only` keeps plans and downloads nothing:
+The first half of the run stops at `waiting_for_decision`. Resume it explicitly:
 
 ```bash
-scdata-agent resume CHECKPOINT_ID --option plan_only --database var/scdata_agent.sqlite
+celllore resume CHECKPOINT_ID \
+  --option recommended \
+  --database var/celllore.sqlite
 ```
 
-A local control room (FastAPI + HTMX, SSE event stream) is available via
-`scdata-agent serve`. See [`docs/commands.md`](docs/commands.md) for the full command
-reference.
+Use `--option plan_only` to retain plans without downloading any bytes.
 
-### Accessing the web UI remotely
-
-`scdata-agent serve` binds to `127.0.0.1` on the machine it runs on, so on a
-remote or shared host you must forward the port before it opens in your own
-browser.
-
-**On a shared machine, first confirm the port is actually free** — another
-user's `scdata-agent serve` may already be bound to it:
+### 5. Open the control room
 
 ```bash
-ss -ltn | grep :8000
+celllore serve --database var/celllore.sqlite --port 8000
 ```
 
-If it's taken, start yours on a different port instead: `scdata-agent serve
---port 8001 ...`.
-
-**Forwarding via VS Code / Cursor Remote-SSH** (the common case for this
-repo):
-
-1. Start the server first (`scdata-agent serve --database var/scdata_agent.sqlite --port 8001`).
-2. Open the **Ports** tab at the bottom of the editor, next to *Terminal* and
-   *Output*. If it isn't visible, run **View → Open View... → Ports**, or
-   `Ctrl/Cmd+Shift+P` → *Forward a Port*. VS Code often auto-detects the new
-   listening port and pops up a notification offering to forward it —
-   accepting that does the same thing as the manual steps below.
-3. Click **Forward a Port**, type `8001` (or whichever port you used), press
-   Enter.
-4. The new row shows a **Local Address** such as `http://127.0.0.1:8001` —
-   click it (or the globe icon) to open the page in your local browser.
-5. Running the frontend in dev mode too (`cd frontend && npm run dev`)?
-   Forward Vite's port (default `5173`) the same way.
-
-**Forwarding via plain SSH** (no editor, terminal-only access):
+Open `http://127.0.0.1:8000`. On a remote machine, forward the same port through your
+editor or SSH:
 
 ```bash
-ssh -L 8001:127.0.0.1:8001 user@remote-host
+ssh -L 8000:127.0.0.1:8000 user@remote-host
 ```
 
-Add `-L 5173:127.0.0.1:5173` too if the Vite dev server is also running, then
-open `http://127.0.0.1:8001` in your local browser.
+See [the full CLI reference](docs/commands.md) for planner modes, licence policy,
+remote probes, result limits and checkpoint options.
 
-## Data source coverage
+## 📚 Curation outputs
 
-| Source | Role | Status |
+### Candidate dataset catalog
+
+Every run exposes four searchable UI sheets and a matching XLSX download:
+
+| Sheet | Purpose |
+|---|---|
+| `01_Studies` | Study evidence, public year, catalog status and next action |
+| `02_Pair units` | Traceable same-cell or same-nucleus RNA–ATAC logical units |
+| `03_Files` | Exact file, URL, role, size, manifest and post-download checks |
+| `04_Audit / hold` | Blocking reason, audit procedure, pass criteria and release condition |
+
+Internal IDs remain in the ledger for stable joins, while curator-facing tables and
+directories use readable identities whenever the evidence supports them.
+
+### Production directory
+
+Materialized bundles follow a consistent, inspection-friendly layout:
+
+```text
+data/production/YYYY-MM-DD_RUN_<run_id>/
+└── GSE158013/
+    └── Multiome_nuclei_W1_GSM5123949/
+        ├── 01_metadata/
+        ├── 02_rna_raw_counts/
+        ├── 03_atac_fragments/
+        ├── 04_standardized/
+        │   ├── rna/
+        │   │   ├── rna_raw_counts.h5ad
+        │   │   └── rna_file_manifest.json
+        │   ├── atac/
+        │   │   ├── fragments.tsv.gz
+        │   │   ├── fragments.tsv.gz.tbi
+        │   │   └── atac_file_manifest.json
+        │   ├── metadata/
+        │   │   ├── barcode_metadata.tsv.gz
+        │   │   ├── sample_metadata.json
+        │   │   └── metadata_sources.json
+        │   ├── pairing/
+        │   │   ├── barcode_mapping.tsv.gz
+        │   │   └── pairing_report.json
+        │   ├── qc/
+        │   │   ├── process.jsonl
+        │   │   ├── validation_report.json
+        │   │   ├── validation_summary.tsv.gz
+        │   │   └── warnings.log
+        │   └── status.json
+        ├── 05_auxiliary/
+        └── 99_raw_optional/
+```
+
+## 🔎 Data source coverage
+
+| Source | Role | Coverage |
 |---|---|---|
-| Europe PMC | publications, preprints, open full text | supported |
-| NCBI GEO | study records, supplementary file manifests | supported |
-| NCBI SRA | raw sequencing studies | supported |
-| ENA | FASTQ manifests, checksums, byte sizes | supported |
-| Zenodo / Figshare | author-deposited processed data | supported |
-| ENCODE | curated epigenomic reference data | **not implemented** |
-| CELLxGENE | curated single-cell atlases | **not implemented** |
-| Single Cell Portal, HCA, BioStudies/ArrayExpress | atlases and archives | **not implemented** |
-| EGA / dbGaP | controlled access | metadata-only by design |
+| NCBI GEO | Study metadata, samples and supplementary manifests | **Supported** |
+| NCBI SRA | Raw sequencing studies | **Supported** |
+| ENA | FASTQ manifests, checksums and byte sizes | **Supported** |
+| Europe PMC | Publications, preprints and open full text | **Supported** |
+| Zenodo / Figshare | Author-deposited processed data | **Supported** |
+| EGA / dbGaP | Controlled-access discovery | Metadata-only by design |
+| ENCODE / CELLxGENE / HCA / SCP | Curated atlases and references | Planned |
 
-The unimplemented sources are reported honestly at runtime in
-`QueryPlan.uncovered_sources` rather than silently ignored. Adding them is the
-highest-value contribution right now — see [Roadmap](#roadmap).
+Unsupported sources are recorded in `QueryPlan.uncovered_sources`; they are never
+silently treated as searched.
 
-## Known limitations
+## 🛡️ Evidence and safety model
 
-- **Archived supplementary files cannot be assessed remotely.** A large share of GEO
-  depositions ship a single `GSExxxxx_RAW.tar`. Its contents are unknowable without
-  downloading, so such bundles are labelled `archive:uninspected` and routed to human
-  review rather than being scored as complete or incomplete. Extracting archive
-  manifests post-transfer is not implemented.
-- **Most public data is admitted on archive terms, not a read licence.** GEO, SRA and
-  ENA publish no per-record licence field, so bundles sourced entirely from them are
-  marked `repository_policy` rather than `approved` — see
-  [Licence handling](#licence-handling). That is a weaker basis than a licence
-  somebody read, and the distinction is deliberately preserved end to end.
-- **Archives are the remaining brake on the `recommended` tier.** In a measured run
-  the top bundle reaches `recommended` on archive terms with an empty risk list, but
-  the next one is held at `archive:uninspected` alone.
-- **Very large depositions are enumerated only up to a budget.** `--max-assets`
-  (default 500) caps how many files are listed *per repository*. A study that exceeds
-  it is flagged `inventory:truncated`, its reported size becomes a lower bound, and it
-  is routed to human review rather than being treated as fully inventoried.
-- **Role inference is filename-based.** It recognises 10x, SNARE-seq and ENA
-  conventions (see `tests/test_role_inference.py`), but a deposition using
-  idiosyncratic names will under-report its roles. Inference never guesses: an
-  unrecognised file stays unclassified rather than being assigned a plausible role.
-- **Only five repositories are wired up.** ENCODE, CELLxGENE, Single Cell Portal and
-  HCA — arguably the most valuable sources for this problem — are not implemented and
-  are reported in `QueryPlan.uncovered_sources`.
-- **The offline planner fallback is a template.** In `fast` mode, if the model's
-  strategy branch exceeds `SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS` (default
-  30s), a deterministic template takes over. The CLI prints a warning when this
-  happens; the plan is still auditable but is not model-derived. `agent-run`
-  defaults to `deep` mode specifically to avoid this — pass `--planner-mode fast`
-  only when you accept the risk of degradation in exchange for a faster result.
+CellLore is built around a few enforceable invariants:
 
-## Configuration
+- **No bytes before consent.** Transfer execution is gated by a persisted human
+  decision.
+- **No access circumvention.** Paywall and authentication bypass are out of scope;
+  controlled-access studies remain metadata-only.
+- **Evidence has provenance classes.** `FILE_OBSERVED` and `RECOMPUTED` claims require
+  local bytes and cannot be produced before transfer.
+- **Deterministic gates, ranked advice.** Access, modality, pairing and licence gates
+  are code; models propose and summarize but do not silently admit data.
+- **Append-only audit trail.** Runs, artifacts, decisions, bundle states and corpus
+  snapshots are persisted in SQLite.
 
-Model routing is provider-neutral; StepFun is the default.
+<details>
+<summary><strong>Bundle completeness schemas</strong></summary>
+
+Candidates are evaluated against valid bundle shapes, not against the union of every
+modality mentioned in a question.
+
+| Schema | Applies to | Required shape |
+|---|---|---|
+| `scatac_standalone` | scATAC / snATAC | accessibility signal + cell axis |
+| `multiome_same_cell` | 10x Multiome, SNARE-seq, SHARE-seq | accessibility + RNA + per-cell linkage |
+| `multiome_trimodal` | TEA-seq / DOGMA-seq | multiome shape + protein matrix |
+| `matched_scrna_scatac` | matched but separate assays | accessibility + RNA + matched sample identity |
+| `atac_protein` | ASAP-seq / ISSAAC-seq | accessibility + protein + cell axis |
+| `raw_reads` | any assay | FASTQ; valid but expensive input |
+
+`matched_scrna_scatac` is intentionally weaker than `multiome_same_cell`: sharing a
+sample must never be reported as sharing a cell.
+
+</details>
+
+<details>
+<summary><strong>Licence resolution</strong></summary>
+
+| Status | Meaning |
+|---|---|
+| `restricted` | A declared licence matched the restricted list; always blocks |
+| `approved` | A declared licence is allowlisted or explicitly approved |
+| `repository_policy` | No record licence exists and all files are covered by recognized archive terms |
+| `unknown` | Licence evidence is missing, incomplete or not allowlisted |
+
+`repository_policy` fills only a genuine missing-field gap and never overrides a
+licence that was actually observed. Use `--strict-license` to require a declared,
+allowlisted licence.
+
+</details>
+
+<details>
+<summary><strong>Pairing verification</strong></summary>
+
+Pairing phrases such as *same-cell*, *same-nucleus*, *joint profiling*, `10x Multiome`,
+`配对` and `同细胞` compile into a minimum pairing tier:
+
+```text
+same-cell ≡ same-nucleus
+    > same-sample ≡ same-donor
+    > study-level ≡ unverified
+```
+
+A shortfall is routed to audit with `pairing:unverified` rather than silently excluded,
+because many valid multiome studies do not state “same cell” in their abstract.
+
+</details>
+
+## 🏗️ Architecture
+
+The package follows a strict dependency direction enforced by
+`tests/test_architecture.py`:
+
+| Layer | Path | Responsibility |
+|---|---|---|
+| Domain | `src/scdata_agent/domain` | Typed models, gates, requirements and evidence rules |
+| Application | `src/scdata_agent/application` | Agents, handoffs, curation catalog and LangGraph supervisor |
+| Infrastructure | `src/scdata_agent/infrastructure` | Public APIs, LLM routing, persistence, transfer and QC |
+| Interfaces | `src/scdata_agent/interfaces` | Typer CLI and FastAPI control surface |
+| Frontend | `frontend` | React/Vite control room and catalog workspace |
+
+Model routing is provider-neutral. StepFun is enabled in the example by default;
+DeepSeek, OpenAI-compatible, OpenRouter, Ollama and Anthropic routes remain available.
 
 | Variable | Purpose |
 |---|---|
-| `SCDATA_AGENT_MODEL_PROVIDER` | `stepfun` (default), `deepseek`, `openai_compatible`, `openai`, `openrouter`, `ollama`, `anthropic` |
-| `STEPFUN_API_KEY` / `STEPFUN_MODEL` | default provider credentials |
-| `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` / `DEEPSEEK_BASE_URL` | DeepSeek credentials (`SCDATA_AGENT_MODEL_PROVIDER=deepseek`); model defaults to `deepseek-chat`, base URL to `https://api.deepseek.com` |
-| `SCDATA_AGENT_MODEL_{PLANNER,DISCOVERY,REVIEW,CHAT}` | per-role model overrides |
-| `SCDATA_AGENT_REASONING_EFFORT[_ROLE]` | per-role reasoning effort |
-| `NCBI_EMAIL` / `NCBI_API_KEY` | NCBI E-utilities etiquette and rate limits |
-| `SCDATA_AGENT_PLANNER_BRANCH_TIMEOUT_SECONDS` | `fast`-mode planner latency budget before the offline template takes over (default 30) |
-| `SCDATA_AGENT_PLANNER_MODE` | `deep` or `fast`; `compile`/`discover` default here (default `fast`). `agent-run --planner-mode` overrides this per run (default `deep`) |
-| `SCDATA_AGENT_PLANNER_TIMEOUT_SECONDS` | overall planner budget (default 35s for `fast`, 600s for `deep`) |
-| `SCDATA_AGENT_TRACE_MODE` | `local` (default, nothing leaves the machine) or `langsmith` |
-
-**Tracing is local by default.** Setting `SCDATA_AGENT_TRACE_MODE=langsmith` together
-with `LANGSMITH_TRACING=true` uploads run traces — including your research questions —
-to LangSmith's cloud. Opt in deliberately.
+| `SCDATA_AGENT_MODEL_PROVIDER` | Default model provider |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` / `DEEPSEEK_BASE_URL` | DeepSeek credentials, V4 model ID and endpoint |
+| `SCDATA_AGENT_MODEL_{PLANNER,DISCOVERY,REVIEW,CHAT}` | Per-role model overrides |
+| `SCDATA_AGENT_REASONING_EFFORT[_ROLE]` | Per-role reasoning effort |
+| `SCDATA_AGENT_PLANNER_MODE` | `deep` or `fast` planner mode |
+| `SCDATA_AGENT_PLANNER_TIMEOUT_SECONDS` | Overall planner time budget |
+| `SCDATA_AGENT_TRACE_MODE` | `local` by default or explicit `langsmith` opt-in |
+| `NCBI_EMAIL` / `NCBI_API_KEY` | NCBI E-utilities etiquette and rate limit |
 
 See [`.env.example`](.env.example) for the complete list.
 
-## Development
+## 🧪 Development
 
 ```bash
-mamba run -n scdata-agent pytest              # 184 tests, fully offline
-mamba run -n scdata-agent ruff check src tests                # lint
-mamba run -n scdata-agent pytest tests/test_architecture.py   # layer boundaries
+mamba run -n celllore pytest
+mamba run -n celllore ruff check src tests
+cd frontend && npm ci && npm run build
 ```
 
-The suite uses `monkeypatch` and `httpx.MockTransport` throughout — no network access
-and no API key is needed to run it, which keeps CI cheap and deterministic.
+The test suite is offline by default and uses mocked HTTP transports; no API key is
+required. Optional AnnData/MuData inspection support is available through:
 
-Optional AnnData/MuData inspection support: `pip install -e '.[dev,curation]'`.
+```bash
+pip install -e '.[dev,curation]'
+```
 
-## Roadmap
+## ⚠️ Known limitations
 
-Ordered by value to a single-cell epigenomics foundation-model corpus:
+- Archive contents such as `GSExxxxx_RAW.tar` cannot be classified before transfer;
+  they are marked `archive:uninspected` and routed to review.
+- Public archives often provide repository terms rather than a per-record licence;
+  CellLore preserves that weaker evidence class instead of calling it an approved
+  licence.
+- `--max-assets` bounds very large manifests. Truncated inventories are flagged and
+  cannot be treated as complete.
+- File-role inference recognizes common 10x and archive conventions but intentionally
+  leaves unfamiliar names unclassified instead of guessing.
+- Several high-value atlas sources remain planned rather than implemented.
 
-1. Read archive manifests after transfer so `archive:uninspected` bundles can be
-   assessed instead of parked in manual review. This is now the main brake on the
-   `recommended` tier: roughly 40% of remotely observed GEO assets are archives.
-2. Add ENCODE, CELLxGENE, Single Cell Portal, HCA and BioStudies/ArrayExpress adapters,
-   each with its licence policy registered in `domain/licensing.py`.
-4. Preserve the semantic relation of every extracted accession
-   (`primary_data_deposition` vs `reused_dataset` vs `supplementary_reference`).
-5. Normalised donor/sample/cell entities with ontology IDs, so lineage can move beyond
-   accession and checksum families.
-6. Reference-backed TSS enrichment, doublet detection, and explicit RNA/ATAC barcode
-   intersection in QC.
-7. A corpus optimiser for diversity, rarity, redundancy caps and auditable sampling
-   weights.
+See the active [roadmap](docs/roadmap.md), its [Chinese version](docs/roadmap.zh-CN.md),
+and the [architecture journal](docs/journal.md).
 
-[`docs/roadmap.md`](docs/roadmap.md) tracks this with owners, acceptance criteria
-and daily status ([中文](docs/roadmap.zh-CN.md)); [`docs/journal.md`](docs/journal.md)
-records the architecture and what is already implemented.
+## 🤝 Contributing
 
-## Licence
+Contributions that improve source coverage, evidence resolution, pair-unit parsing,
+post-transfer QC or curator experience are welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md) and keep hard scientific gates deterministic and
+test-backed.
+
+## 📄 License
 
 Apache-2.0. See [LICENSE](LICENSE).

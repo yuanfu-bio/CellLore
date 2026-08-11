@@ -53,7 +53,7 @@ def default_async_client(*, trust_env: bool = True) -> httpx.AsyncClient:
         trust_env=trust_env,
         headers={
             "User-Agent": (
-                "scdata-agent/0.1.0 "
+                "CellLore/0.1.0 "
                 "(public single-cell epigenomics metadata discovery)"
             )
         },

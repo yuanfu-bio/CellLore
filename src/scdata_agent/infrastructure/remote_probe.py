@@ -35,7 +35,7 @@ class RemoteAvailabilityProbe:
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(
             follow_redirects=True, timeout=self._timeout,
-            headers={"User-Agent": "scdata-agent/0.1 remote-inventory"},
+            headers={"User-Agent": "CellLore/0.1 remote-inventory"},
         )
         semaphore = asyncio.Semaphore(self._concurrency)
         completed = 0

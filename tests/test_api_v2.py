@@ -33,3 +33,16 @@ def test_planner_mode_rejects_values_other_than_fast_or_deep():
 
     with pytest.raises(ValidationError):
         CreateRunRequest(question="x" * 10, planner_mode="thorough")
+
+
+def test_create_run_rejects_a_bare_run_id_as_the_research_question(tmp_path):
+    app = create_app(tmp_path / "reject_run_id.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/runs", json={"question": "agent_run_48b52065980da09e"}
+        )
+
+        assert response.status_code == 422
+        assert "cannot be used as a research question" in response.text
+        assert client.get("/runs").json() == []

@@ -1,4 +1,4 @@
-# Handoff: 打通 scdata-agent 的下载 → 整理 → 归档闭环
+# Handoff: 打通 CellLore 的下载 → 整理 → 归档闭环
 
 > **交接文档**。S1–S5 已完成并入库，**里程碑 0 已用真实字节达成**（httpx 与 aria2 两条路径
 > 都已用真实 NCBI GEO 字节验证过）。本文件包含继续这项工作（S6 起）所需的全部上下文：
@@ -6,7 +6,7 @@
 >
 > - 完整原始方案：`/data/home/yfu/.claude/plans/data-collab-ai-multiomics-yfu-02-agent-imperative-fountain.md`
 > - 状态：**S1–S5 完成**（289 tests passed, ruff clean, scorecard delta 0）→ **里程碑 0 已达成**：
->   `scdata-agent manifest-run` 对 `GSE178707_NEATseq / CD4_memory_lane2_GSM5396336__GSM5396337`
+>   `celllore manifest-run` 对 `GSE178707_NEATseq / CD4_memory_lane2_GSM5396336__GSM5396337`
 >   跑通真实端到端（真连 NCBI GEO，338 MB 真字节），`admitted_bundle_ids` 非空，
 >   `DATA_CARD.md`/`provenance.json`/`manifest.json` 均已生成并人工核对通过。**S6（QC 层）待做**。
 
@@ -18,13 +18,13 @@
 
 ```bash
 # 注意：本机 `python` 默认指向 miniconda base，没有本项目依赖。
-# 必须用这个 env，或 mamba activate scdata-agent。
-export P=/data/home/yfu/.local/share/mamba/envs/scdata-agent/bin
+# 必须用这个 env，或 mamba activate celllore。
+export P=/data/home/yfu/.local/share/mamba/envs/celllore/bin
 $P/python -m pytest          # 应为 241 passed
 $P/ruff check src tests      # 应为 All checks passed
 ```
 
-`scdata-agent` CLI 已 editable 安装，`scdata-agent --help` 可用。
+`celllore` CLI 已 editable 安装，`celllore --help` 可用。
 
 参考资料（只读，不在本仓库内）：
 
@@ -38,7 +38,7 @@ $P/ruff check src tests      # 应为 All checks passed
 
 ## 1. 为什么做这件事
 
-`scdata-agent` 的 LangGraph 管线在纸面上完整：
+CellLore 的 LangGraph 管线在纸面上完整：
 
 ```
 research_planner → planning_gate → resource_discovery
@@ -140,7 +140,7 @@ $P/python scripts/compare_scorecards.py eval/baseline_scorecard.json var/scoreca
 
 - **123 条 `DIRECT_GEO` URL 已经全部等于重算出的静态 URL**。重算是护栏不是修复 —— S1 实测 0 个 `geo_url_recomputed` 警告。
 - **`infer_data_role` 对 130 行中的 27 行不正确**。S1 实测报出 5 条真实分歧（4 条 DOGMA 的 RNA 矩阵因文件名含 `GExp_ATAC` 被误判为 `PEAK_MATRIX`；1 条临床元数据因 `446267cells_meta` 被误判为 `CELL_METADATA`）。
-- `aria2c` 在当前 env **已安装**（`.../mamba/envs/scdata-agent/bin/aria2c`）；`openpyxl` **未安装**。
+- `aria2c` 在当前 env **已安装**（`.../mamba/envs/celllore/bin/aria2c`）；`openpyxl` **未安装**。
 - `standard_object_path` 只出现在 6 处（见 §6.3），无其他依赖。
 - `applicable_bundle_schemas(set())` 返回**全部** schema（`requirements.py:124-126`）—— 这是空 modality 合成 candidate 方案的依据，已读码确认。
 
@@ -177,7 +177,7 @@ $P/python scripts/compare_scorecards.py eval/baseline_scorecard.json var/scoreca
 ### 实测结果
 
 ```bash
-$ scdata-agent manifest-check <真实 manifest>
+$ celllore manifest-check <真实 manifest>
 dialect=paired_multiome_zh_v1 sha256=96dee6074f2047f5…
 rows=130 pair_units=32
 issues: 0 error, 5 warning, 5 info      # warning 全是 role_inference_disagreement
@@ -252,7 +252,7 @@ def ingest_manifest(document, *, run_id, filters, policy) -> ManifestIngestion
 
 `orchestration_manifest.py` 按下方设计原样落地；`CollaborationLedger.get_checkpoint()`
 已加；`cli.py` 的 `resume`/`graph-state` 已改用 `supervisor_for_run`；新增
-`scdata-agent manifest-run` 命令（暂不含 S5 才有意义的 `--downloader`/`--profile`/
+`celllore manifest-run` 命令（暂不含 S5 才有意义的 `--downloader`/`--profile`/
 `--contact-email`/`--manifest-layout` 等参数——加了也是空转，等 S5 一起加）。C3 修复见
 `acquisition_v2.py:_grouping_key()` 与 `progressive_lineage_v2.py`（`candidate_ids`
 而非 `bundle_ids` 计数）；archive 警告修复见 `progressive_preflight.py:archive_may_explain_gap`。
@@ -318,16 +318,16 @@ archive_may_explain_gap = bool(archive_assets) and not bundle.satisfied_schema_i
 **真实端到端验证**（唯一碰网络的一步，已完整跑过一次）：
 
 ```
-$ scdata-agent manifest-run $M --dataset GSE178707_NEATseq \
+$ celllore manifest-run $M --dataset GSE178707_NEATseq \
     --pair-unit CD4_memory_lane2_GSM5396336__GSM5396337 \
     --data-root var/milestone0/data --database var/milestone0/agent_run.sqlite
 # → download_selection checkpoint, "Recommended bundles: 1; known expected bytes: 362787706."
-$ scdata-agent resume <download-checkpoint-id> --option recommended -d var/milestone0/agent_run.sqlite
+$ celllore resume <download-checkpoint-id> --option recommended -d var/milestone0/agent_run.sqlite
 # → 真连 ftp.ncbi.nlm.nih.gov 下载 5 个文件、261 MB fragments + 83 MB matrix 等，
 #   materialized_quality: status=pass, unavailable_metrics 含 standard_object/
 #   barcode_linkage/frip_computable（C1 生效：跑不了的检查不拖累状态）
 # → corpus_governance: "Admit 1, quarantine 0, exclude 0 bundle(s)."
-$ scdata-agent resume <corpus-checkpoint-id> --option approve_snapshot -d var/milestone0/agent_run.sqlite
+$ celllore resume <corpus-checkpoint-id> --option approve_snapshot -d var/milestone0/agent_run.sqlite
 # → run status: completed; admitted_bundle_ids: ['manifest_bundle_9f2f4b634d68d797']
 ```
 
@@ -437,7 +437,7 @@ resumed = 建队列时快照到的 .aria2 是否已存在
 aria2 退出码只作 run 级元数据（exit 3 = 有一个文件 404，对其余 40 个毫无意义）
 ```
 
-**`NCBI_CONTACT_EMAIL` 未设时不中止**。原型的 `raise SystemExit`(`:566`) 对一次性脚本正确、对库错误 —— 它会在人已经同意之后杀掉 run。改为：User-Agent 退回 `scdata-agent/0.1.0`，记 `contact_email_unset` 问题，并**把提示追加到 `_open_download_checkpoint` 的 `recommendation` 文本**，让人在同意**之前**看到。`.env.example` 补 `NCBI_CONTACT_EMAIL=`。
+**`NCBI_CONTACT_EMAIL` 未设时不中止**。原型的 `raise SystemExit`(`:566`) 对一次性脚本正确、对库错误 —— 它会在人已经同意之后杀掉 run。改为：User-Agent 退回 `CellLore/0.1.0`，记 `contact_email_unset` 问题，并**把提示追加到 `_open_download_checkpoint` 的 `recommendation` 文本**，让人在同意**之前**看到。`.env.example` 补 `NCBI_CONTACT_EMAIL=`。
 
 **磁盘布局作为策略**：`policy["honour_manifest_layout"]`（manifest run 默认开）用 sidecar 的 `relative_path`（`<dataset_id>/<pair_unit_id>/<NN_stage>/<filename>`，NN_stage ∈ `{00_manifest, 01_metadata, 02_rna_raw_counts, 03_atac_fragments, 05_auxiliary, 99_raw_optional}`），否则用 bundle 布局。用加固版 `_safe_relative_path` 守卫（拒绝绝对路径、任何 `..` 分量、盘符、`(root/rel).resolve()` 越界）—— 是 `transfer_executor.py:127-136` basename 守卫的严格推广。
 
@@ -547,10 +547,10 @@ def safe_extract(path, destination, *, max_extracted_bytes, max_expansion_ratio=
 ## 6. CLI 目标形态
 
 ```
-scdata-agent manifest-check MANIFEST                    # ✅ 已完成
+celllore manifest-check MANIFEST                    # ✅ 已完成
     --dialect / --dataset / --pair-unit / --stage (可重复) / --json
 
-scdata-agent manifest-run MANIFEST                      # S3
+celllore manifest-run MANIFEST                      # S3
     --dialect / --dataset / --pair-unit / --stage
     --direct-only / --include-portal                     [默认 --direct-only]
     --database / --data-root / --max-download-bytes
@@ -562,12 +562,12 @@ scdata-agent manifest-run MANIFEST                      # S3
     --require-standard-object / --allow-native-package   [默认 --allow-native-package]
     --approved-license-candidate (可重复) / --trace-mode
 
-scdata-agent manifest-status   RUN_ID                   # S5
-scdata-agent manifest-repair   RUN_ID [--run]           # S5
-scdata-agent manifest-validate RUN_ID [--sha256]        # S6
+celllore manifest-status   RUN_ID                   # S5
+celllore manifest-repair   RUN_ID [--run]           # S5
+celllore manifest-validate RUN_ID [--sha256]        # S6
 ```
 
-**不新增 resume 命令**：`scdata-agent resume <checkpoint-id> --option recommended` 在 `supervisor_for_run` 按 `run.policy` 选图后原样可用。
+**不新增 resume 命令**：`celllore resume <checkpoint-id> --option recommended` 在 `supervisor_for_run` 按 `run.policy` 选图后原样可用。
 
 **刻意不移植**：`benchmark`(`:531`)（对活服务器起 curl 子进程，离线不可验证，`--profile` + 文档化默认覆盖其 95% 价值）；`resolve-10x`(`:947`)（Playwright 抓 click-through 门户，属不可协商项 #4）；`biostudies`(`:1005`)（应按 CONTRIBUTING「Adding a data source」流程做成 `infrastructure/sources/` 里的正式适配器并注册 licence 策略）。
 
@@ -598,7 +598,7 @@ scdata-agent manifest-validate RUN_ID [--sha256]        # S6
 ## 8. 端到端验证（里程碑 0 达成后）
 
 ```bash
-export P=/data/home/yfu/.local/share/mamba/envs/scdata-agent/bin
+export P=/data/home/yfu/.local/share/mamba/envs/celllore/bin
 $P/python -m pytest                                  # 全绿，全离线
 $P/python -m pytest tests/test_architecture.py       # 分层边界
 
@@ -609,12 +609,12 @@ $P/python scripts/compare_scorecards.py eval/baseline_scorecard.json var/scoreca
 # 里程碑 0 端到端（唯一会碰网络的一步）
 export NCBI_CONTACT_EMAIL="<你的邮箱>"
 M=/data/collab/ai-multiomics/yfu/02_agent/04_thinking/paired_data/required_files_manifest.csv
-scdata-agent manifest-check $M --dataset GSE178707_NEATseq
-scdata-agent manifest-run   $M --dataset GSE178707_NEATseq \
+celllore manifest-check $M --dataset GSE178707_NEATseq
+celllore manifest-run   $M --dataset GSE178707_NEATseq \
     --pair-unit CD4_memory_lane2_GSM5396336__GSM5396337 \
     --data-root var/milestone0/data --database var/milestone0/agent_run.sqlite
-scdata-agent resume <download-checkpoint-id> --option recommended -d var/milestone0/agent_run.sqlite
-scdata-agent resume <corpus-checkpoint-id>   --option approve_snapshot -d var/milestone0/agent_run.sqlite
+celllore resume <download-checkpoint-id> --option recommended -d var/milestone0/agent_run.sqlite
+celllore resume <corpus-checkpoint-id>   --option approve_snapshot -d var/milestone0/agent_run.sqlite
 
 ls var/milestone0/data/curated/GSE178707_NEATseq/*/   # manifest.json DATA_CARD.md provenance.json
 ```

@@ -192,7 +192,7 @@ def configured_requirement_compiler(use_llm: bool = True) -> object:
 
 
 def default_workflow(
-    database_path: str = "var/scdata_agent.sqlite",
+    database_path: str = "var/celllore.sqlite",
     *,
     use_llm: bool = True,
 ) -> DiscoveryWorkflow:
@@ -222,7 +222,7 @@ def default_workflow(
 
 
 def default_corpus_workflow(
-    database_path: str = "var/scdata_agent.sqlite",
+    database_path: str = "var/celllore.sqlite",
 ) -> DiscoveryWorkflow:
     workflow = default_workflow(database_path, use_llm=False)
     workflow.planner = CorpusQueryPlanner()
