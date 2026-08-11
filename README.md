@@ -4,6 +4,7 @@
 
 <p align="center">
   <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-8B5CF6?style=flat-square" />
+  <a href="https://github.com/yuanfu-bio/CellLore/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/yuanfu-bio/CellLore/actions/workflows/tests.yml/badge.svg" /></a>
   <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" />
   <img alt="LangGraph" src="https://img.shields.io/badge/orchestration-LangGraph-6657E8?style=flat-square" />
   <img alt="Workflow: 22 nodes" src="https://img.shields.io/badge/workflow-22_nodes-06B6D4?style=flat-square" />
@@ -11,13 +12,18 @@
 </p>
 
 <p align="center">
-  <strong>Turn a biological question into a traceable, approval-gated, analysis-ready single-cell dataset.</strong>
+  <strong>From a biological question to an auditable, approval-gated, analysis-ready single-cell dataset.</strong>
+</p>
+
+<p align="center">
+  Search public archives, verify pairing evidence, inspect every file, approve transfers,<br />
+  and materialize a reproducible local corpus — without losing the scientific trail.
 </p>
 
 <p align="center">
   <a href="#-why-celllore">Why CellLore</a> ·
-  <a href="#-workflow">Workflow</a> ·
   <a href="#-quick-start">Quick start</a> ·
+  <a href="#-workflow">Workflow</a> ·
   <a href="#-curation-outputs">Outputs</a> ·
   <a href="docs/commands.md">CLI reference</a> ·
   <a href="docs/roadmap.md">Roadmap</a>
@@ -28,30 +34,28 @@
 ## 🧬 Why CellLore
 
 **CellLore** is an evidence-first discovery and curation agent for public single-cell
-epigenomics data: scATAC-seq, snATAC-seq, RNA + ATAC multiome, and matched multimodal
-studies.
+epigenomics and multimodal data: scATAC-seq, snATAC-seq, RNA + ATAC multiome, and
+matched assays.
 
 It does more than search. CellLore turns a natural-language request into an executable
 research contract, discovers candidate studies, reconstructs sample and pair-unit
 relationships, reconciles remote files, checks download readiness, and materializes a
 human-readable production dataset — with a persisted approval gate before transfer.
 
-> [!IMPORTANT]
-> **CellLore is the product and repository brand.** The Python distribution,
-> Conda environment, and CLI are named `celllore`. The internal Python import
-> namespace and existing `SCDATA_AGENT_*` configuration keys remain stable for
-> compatibility with persisted runs and local deployments.
+CellLore is designed for the evidence-heavy work **before** downstream analysis. It
+does not replace Scanpy, Seurat, Signac or ArchR; it prepares a traceable local corpus
+for those tools.
 
-| | Capability | What CellLore records |
+| Focus | Capability | Recorded result |
 |---|---|---|
-| 🔭 | **Evidence-aware discovery** | Study accessions, source URLs, publication year, assay and organism evidence |
-| 🧩 | **Pair-unit reconstruction** | Human-readable units such as `Patient3_GSM9196533__GSM9196532` |
-| 📦 | **File-level inventory** | Exact URLs, roles, byte sizes, checksums, availability and manifest status |
-| 🛡️ | **Human approval gates** | No transfer before consent; no corpus publication before governance approval |
-| 🧪 | **Post-transfer validation** | Compression, HDF5, semantic-role, barcode and materialized-object checks |
-| 🗂️ | **Analysis-ready layout** | Stable metadata, RNA, ATAC, pairing, QC and audit directories |
-| 🧾 | **Auditable provenance** | Append-only runs, artifacts, evidence classes, decisions and snapshots in SQLite |
-| 🖥️ | **Live control room** | React/Vite UI, SSE updates, workflow map, stage timing and downloadable XLSX catalog |
+| Discovery | **Evidence-aware search** | Study accessions, source URLs, publication year, assay and organism evidence |
+| Identity | **Pair-unit reconstruction** | Human-readable units such as `Patient3_GSM9196533__GSM9196532` |
+| Inventory | **File-level resolution** | Exact URLs, roles, byte sizes, checksums, availability and manifest status |
+| Control | **Human approval gates** | No transfer before consent; no corpus publication before governance approval |
+| Validation | **Post-transfer QC** | Compression, HDF5, semantic-role, barcode and materialized-object checks |
+| Materialization | **Analysis-ready layout** | Stable metadata, RNA, ATAC, pairing, QC and audit directories |
+| Provenance | **Append-only audit trail** | Runs, artifacts, evidence classes, decisions and snapshots in SQLite |
+| Interface | **Live control room** | React/Vite UI, SSE updates, workflow map, stage timing and downloadable XLSX catalog |
 
 > [!NOTE]
 > CellLore is an **alpha research prototype**. The workflow runs end to end against
@@ -137,23 +141,65 @@ flowchart TB
 
 ## ⚡ Quick start
 
-### 1. Install
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/yuanfu-bio/CellLore.git
+cd CellLore
+
 mamba env create -f environment.yml
 mamba activate celllore
-python -m pip install -e '.[dev]'
+python -m pip install -e .
 ```
+
+`conda` can be used in place of `mamba`; the environment name remains `celllore`.
 
 ### 2. Configure a model provider
 
 ```bash
 cp .env.example .env
-$EDITOR .env                      # add the API key for your chosen provider
-celllore llm-check                # validates configuration without a billable call
+$EDITOR .env       # enable one provider block and add its API key
+celllore llm-check # validates configuration without making a billable request
 ```
 
-### 3. Compile a research question offline
+StepFun is enabled in the template; the same file shows exactly which lines to comment
+and uncomment for DeepSeek. Keep the populated `.env` local — it is ignored by Git.
+
+### 3. Launch the control room
+
+```bash
+celllore serve --database var/celllore.sqlite --port 8000
+```
+
+Open `http://127.0.0.1:8000`, choose a curation focus, and try:
+
+> Find 2 public human PBMC datasets with RNA and ATAC measured in the same cell or nucleus.
+
+The production React UI is bundled with CellLore. A fresh clone does **not** require
+`npm install` or a separate frontend build before `celllore serve`.
+
+On a remote machine, forward the same port through your editor or SSH:
+
+```bash
+ssh -L 8000:127.0.0.1:8000 user@remote-host
+```
+
+### What happens on the first run
+
+1. CellLore turns the question into explicit scientific and evidence requirements.
+2. The workflow searches public metadata and reconstructs study, sample and pair units.
+3. Candidate files are reconciled and checked before any transfer is allowed.
+4. The run pauses for download approval; choosing plan-only transfers no bytes.
+5. Approved data are organized under `data/production/` and validated again on disk.
+
+> [!TIP]
+> Set `NCBI_EMAIL=you@example.org` before sustained GEO/SRA use. It identifies your
+> requests to NCBI and is strongly recommended for responsible archive access.
+
+<details>
+<summary><strong>Prefer the CLI? Run the same approval-gated workflow</strong></summary>
+
+Compile a question without a model call:
 
 ```bash
 celllore compile \
@@ -161,7 +207,7 @@ celllore compile \
   --no-llm
 ```
 
-### 4. Run the approval-gated pipeline
+Run the pipeline:
 
 ```bash
 export NCBI_EMAIL='you@example.org'
@@ -173,7 +219,7 @@ celllore agent-run \
   --remote-probe
 ```
 
-The first half of the run stops at `waiting_for_decision`. Resume it explicitly:
+When the run reaches `waiting_for_decision`, resume the persisted checkpoint:
 
 ```bash
 celllore resume CHECKPOINT_ID \
@@ -181,28 +227,23 @@ celllore resume CHECKPOINT_ID \
   --database var/celllore.sqlite
 ```
 
-Use `--option plan_only` to retain plans without downloading any bytes.
+Use `--option plan_only` to retain the plans without downloading bytes. See the
+[full CLI reference](docs/commands.md) for planner modes, licence policy, remote
+probes, result limits and checkpoint options.
 
-### 5. Open the control room
-
-```bash
-celllore serve --database var/celllore.sqlite --port 8000
-```
-
-The production React control room is bundled with CellLore, so a fresh clone does
-not require a separate frontend build before `celllore serve`.
-
-Open `http://127.0.0.1:8000`. On a remote machine, forward the same port through your
-editor or SSH:
-
-```bash
-ssh -L 8000:127.0.0.1:8000 user@remote-host
-```
-
-See [the full CLI reference](docs/commands.md) for planner modes, licence policy,
-remote probes, result limits and checkpoint options.
+</details>
 
 ## 📚 Curation outputs
+
+One run produces several views of the same traceable record:
+
+| Surface | Purpose |
+|---|---|
+| Control room | Live workflow, human decisions, stage timing and evidence summaries |
+| Searchable catalog | Curator-facing study, pair-unit, file and audit tables |
+| XLSX export | Portable review artifact with the same four catalog sheets |
+| SQLite ledger | Runs, artifacts, decisions, messages and provenance |
+| Production tree | Downloaded and standardized data organized for analysis |
 
 ### Candidate dataset catalog
 
@@ -256,15 +297,15 @@ data/production/YYYY-MM-DD_RUN_<run_id>/
 
 ## 🔎 Data source coverage
 
-| Source | Role | Coverage |
+| Source | Current role | Integration |
 |---|---|---|
-| NCBI GEO | Study metadata, samples and supplementary manifests | **Supported** |
-| NCBI SRA | Raw sequencing studies | **Supported** |
-| ENA | FASTQ manifests, checksums and byte sizes | **Supported** |
-| Europe PMC | Publications, preprints and open full text | **Supported** |
-| Zenodo / Figshare | Author-deposited processed data | **Supported** |
-| EGA / dbGaP | Controlled-access discovery | Metadata-only by design |
-| ENCODE / CELLxGENE / HCA / SCP | Curated atlases and references | Planned |
+| NCBI GEO | Primary study discovery, samples and supplementary manifests | Direct |
+| NCBI SRA | Linked raw-sequencing records | Direct |
+| ENA | Linked FASTQ manifests, checksums and byte sizes | Direct |
+| Europe PMC | Publication and open-full-text evidence enrichment | Direct |
+| Zenodo / Figshare | Resolution of linked author-deposited assets | Linked assets |
+| EGA / dbGaP | Controlled-access study visibility | Metadata-only by design |
+| ENCODE / CELLxGENE / HCA / SCP | Curated atlases and reference corpora | Planned |
 
 Unsupported sources are recorded in `QueryPlan.uncovered_sources`; they are never
 silently treated as searched.
@@ -366,6 +407,16 @@ DeepSeek, OpenAI-compatible, OpenRouter, Ollama and Anthropic routes remain avai
 
 See [`.env.example`](.env.example) for the complete list.
 
+<details>
+<summary><strong>Naming and compatibility note</strong></summary>
+
+The product, repository, Python distribution, Conda environment and CLI are named
+CellLore / `celllore`. The internal Python import namespace and existing
+`SCDATA_AGENT_*` configuration keys remain stable for compatibility with persisted
+runs and local deployments.
+
+</details>
+
 ## 🧪 Development
 
 ```bash
@@ -375,7 +426,9 @@ cd frontend && npm ci && npm run build
 ```
 
 The test suite is offline by default and uses mocked HTTP transports; no API key is
-required. Optional AnnData/MuData inspection support is available through:
+required. The frontend build writes the production bundle into the Python package so
+clean clones and wheels serve the same UI. Optional AnnData/MuData inspection support
+is available through:
 
 ```bash
 pip install -e '.[dev,curation]'
@@ -403,6 +456,13 @@ Contributions that improve source coverage, evidence resolution, pair-unit parsi
 post-transfer QC or curator experience are welcome. Start with
 [CONTRIBUTING.md](CONTRIBUTING.md) and keep hard scientific gates deterministic and
 test-backed.
+
+## 💬 Support
+
+Open a [GitHub issue](https://github.com/yuanfu-bio/CellLore/issues) for bugs, source
+requests or curation-policy discussions. For reproducible reports, include the
+CellLore commit, command or UI action, run ID, failed stage and the relevant error —
+never include API keys or unpublished data.
 
 ## 📄 License
 
