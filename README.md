@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/celllore_header2_final.png" alt="CellLore — evidence-first single-cell data discovery and curation" width="100%" />
+  <img src="docs/assets/celllore_header.png" alt="CellLore — evidence-first single-cell data discovery and curation" width="100%" />
 </p>
 
 <p align="center">
