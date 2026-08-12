@@ -69,68 +69,9 @@ This compact view matches the live `PROCESS MAP`: planning feeds a branched
 discovery path, inventory fans out into parallel QC checks, and the lower two rows
 form an approval-gated curation loop back to finalization.
 
-```mermaid
-flowchart TB
-    subgraph ROW1[" "]
-        direction LR
-        INIT[01 · Initialize run] --> PLAN[02 · Research planner] --> PGATE{03 · Planning gate}
-    end
-
-    subgraph ROW2[" "]
-        direction LR
-        DISC[04 · Resource discovery] --> SCOUT1[05 · Asset scout · direct]
-        DISC --> META[06 · Evidence curator · metadata]
-        SCOUT1 --> EGATE{07 · Evidence escalation}
-        META --> EGATE
-        EGATE -->|fulltext| FULL[08 · Evidence curator · full text]
-    end
-
-    subgraph ROW3[" "]
-        direction LR
-        SCOUT2[09 · Asset scout · enriched] --> GEO[10 · GEO sample metadata] --> INV[11 · Inventory reconcile]
-    end
-
-    subgraph ROW4[" "]
-        direction LR
-        PREFLIGHT[12 · Preflight assessment] --> ACQ[14 · Acquisition strategy]
-        LINEAGE1[13 · Early lineage] --> ACQ
-    end
-
-    subgraph ROW5[" "]
-        direction LR
-        APPROVE{{15 · Download approval}} -->|transfer| XFER[16 · Transfer execution]
-        XFER --> CURATE[17 · Dataset curator] --> QC[18 · Materialized quality]
-    end
-
-    subgraph ROW6[" "]
-        direction RL
-        LINEAGE2[19 · Late lineage] --> GOV[20 · Corpus governance]
-        GOV --> CORPUS{{21 · Corpus approval}} --> FINAL[22 · Finalize run]
-    end
-
-    PGATE -->|replan| PLAN
-    PGATE -->|discover| DISC
-    EGATE -->|scout| SCOUT2
-    FULL --> SCOUT2
-    INV --> PREFLIGHT
-    INV --> LINEAGE1
-    ACQ --> APPROVE
-    APPROVE -->|stop| FINAL
-    QC --> LINEAGE2
-
-    classDef plan fill:#19142F,stroke:#8B5CF6,color:#F8FAFC,stroke-width:1.5px;
-    classDef discovery fill:#082638,stroke:#22D3EE,color:#F8FAFC,stroke-width:1.5px;
-    classDef quality fill:#101F43,stroke:#3B82F6,color:#F8FAFC,stroke-width:1.5px;
-    classDef curator fill:#24143B,stroke:#A78BFA,color:#F8FAFC,stroke-width:1.5px;
-    classDef human fill:#30154B,stroke:#C084FC,color:#FFFFFF,stroke-width:2px;
-    classDef row fill:transparent,stroke:transparent;
-    class INIT,PLAN,PGATE plan;
-    class DISC,SCOUT1,META,EGATE,FULL,SCOUT2,GEO,INV discovery;
-    class PREFLIGHT,LINEAGE1,ACQ quality;
-    class XFER,CURATE,QC,LINEAGE2,GOV,FINAL curator;
-    class APPROVE,CORPUS human;
-    class ROW1,ROW2,ROW3,ROW4,ROW5,ROW6 row;
-```
+<p align="center">
+  <img src="docs/assets/diagram_final.png" alt="CellLore workflow from research planning and discovery through quality control, curation and finalization" width="100%" />
+</p>
 
 ### Human checkpoints
 
