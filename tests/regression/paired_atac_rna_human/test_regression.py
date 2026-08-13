@@ -1,18 +1,7 @@
-"""Two layers of coverage, deliberately kept separate.
-
-1. Structural sanity on golden_cases.yaml itself, and unit tests of the
-   scoring logic in scoring.py against synthetic ObservedOutcome fixtures --
-   both run today, no network or captured data required.
-2. The real per-case replay (run each accession through the actual pipeline,
-   score the result against the golden case) -- explicitly not implemented
-   yet. See README.md in this directory for why and what it needs; the
-   skipped test below exists so the gap shows up in `pytest` output instead
-   of silently not existing.
-"""
+"""Offline contract tests for the curator-derived regression benchmark."""
 
 from __future__ import annotations
 
-import pytest
 from scoring import ObservedOutcome, load_golden_cases, score_case
 
 CASES = load_golden_cases()
@@ -94,7 +83,7 @@ class TestScoreCase:
     def test_matched_provenance_only_case_fails_if_admitted(self):
         """The exact regression this benchmark exists to catch: a
         provenance-match-only study (GSE295489-shaped) reaching an admitted
-        state would be the P0.0-class overclaim all over again."""
+        state would overclaim the physical pairing evidence."""
         case = self._case("exclude_matched_separate_chemistry_5p_v2")
         observed = ObservedOutcome(decision="admitted", relationship="provenance_match")
         score = score_case(case, observed)
@@ -139,18 +128,3 @@ class TestScoreCase:
         score = score_case(case, observed)
         assert score.pair_unit_delta == -1
         assert score.passed
-
-
-@pytest.mark.skip(
-    reason=(
-        "No captured replay records yet -- this benchmark's ground truth "
-        "(golden_cases.yaml) and scoring logic (scoring.py) are ready and "
-        "covered above, but running each case through the real pipeline "
-        "needs a real `agent-run`/LLM capture per accession, deliberately "
-        "deferred (see README.md). Wiring this in is a tracked follow-up, "
-        "not a silent gap."
-    )
-)
-@pytest.mark.parametrize("case", CASES, ids=[case["id"] for case in CASES])
-def test_real_pipeline_matches_the_curator(case):
-    raise NotImplementedError

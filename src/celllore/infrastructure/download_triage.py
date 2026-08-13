@@ -1,6 +1,6 @@
 """Classify a failed download without fetching its payload.
 
-The validated prototype shelled out to ``curl`` for this. httpx does the
+The validated reference implementation shelled out to ``curl`` for this. httpx does the
 same probe (a ``Range: bytes=0-0`` request -- metadata, not bytes) without a
 new executable dependency, and it is what lets this module be tested with
 ``httpx.MockTransport`` instead of a real network call.

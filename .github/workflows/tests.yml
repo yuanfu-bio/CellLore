@@ -32,9 +32,8 @@ jobs:
       - name: Run tests
         run: pytest
 
-      # The scorecard replays captured records offline, so it runs here for the
-      # same reason the tests do: a change to a gate must not silently move the
-      # numbers the two lanes are steering by.
+      # The scorecard replays captured records offline. A change to a gate must
+      # not silently move the checked-in baseline.
       - name: Score curation judgement against the golden set
         run: |
           python scripts/eval_discovery.py --out /tmp/scorecard.json > /dev/null
@@ -45,6 +44,24 @@ jobs:
           python -m pip install --upgrade build twine
           python -m build
           python -m twine check dist/*
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build production UI
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Verify the bundled UI is current
+        run: git diff --exit-code -- src/celllore/interfaces/static/ui
 
   secret-scan:
     runs-on: ubuntu-latest

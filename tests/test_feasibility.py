@@ -50,13 +50,11 @@ def test_feasibility_abstains_when_file_manifest_is_missing():
 
 
 class TestJointLayerRequirementIsNotSatisfiedByOneLayer:
-    """The exact P0.0-shaped regression eval/golden_questions.yaml's
-    `forbid_layer_pass` list exists to pin: a standalone-ATAC record must not
+    """A standalone-ATAC record must not
     pass the topic-relevance gate for a same-cell-multiome question just
-    because it shares one of the two requested layers. `layer_relevance` used
-    to check "any overlap" unconditionally, which is correct for a single-
-    layer question but wrong once a pairing requirement says the layers are
-    wanted *together*."""
+    because it shares one of the two requested layers. `layer_relevance` may
+    use "any overlap" for a single-layer question, but a pairing requirement
+    means all requested layers are wanted *together*."""
 
     def _multiome_requirement(self) -> ResearchRequirement:
         return ResearchRequirement(
@@ -107,4 +105,3 @@ class TestJointLayerRequirementIsNotSatisfiedByOneLayer:
         )
         report = FeasibilityAssessor().assess(requirement, candidate)
         assert report.dimensions["layer_relevance"].status == GateStatus.PASS
-

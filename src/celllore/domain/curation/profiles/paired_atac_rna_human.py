@@ -162,7 +162,7 @@ PAIRED_ATAC_RNA_HUMAN = CurationProfile(
                 "table, combinatorial-index relationship) is enough to proceed "
                 "into acquisition -- MODEL_INFERRED alone never satisfies this "
                 "on its own. Reaching corpus-ready requires the post-download "
-                "RNA/ATAC barcode-intersection validator (Phase 5)."
+                "RNA/ATAC barcode-intersection validator."
             ),
         ),
         RequiredEvidence(
@@ -194,20 +194,18 @@ PAIRED_ATAC_RNA_HUMAN = CurationProfile(
     validators=[
         ValidatorRef(validator_id="genome_build_consistency", blocking=True),
         ValidatorRef(
-            validator_id="barcode_linkage", blocking=False,
-            notes="WARN when no explicit linkage file is present; not yet a hard blocker.",
+            validator_id="barcode_linkage",
+            blocking=True,
+            notes=(
+                "Requires a verifiable RNA/ATAC barcode relationship before "
+                "the bundle can be corpus-ready."
+            ),
         ),
         ValidatorRef(validator_id="frip_computable", blocking=False),
         ValidatorRef(
-            validator_id="rna_integer_count", blocking=True,
-            notes="Not yet implemented -- Phase 5.",
-        ),
-        ValidatorRef(
-            validator_id="rna_atac_barcode_intersection", blocking=True,
-            notes=(
-                "Not yet implemented -- Phase 5. Produces the FILE_OBSERVED "
-                "evidence has_pair_relationship needs for corpus-ready."
-            ),
+            validator_id="rna_matrix_integer_like",
+            blocking=True,
+            notes="Requires the RNA matrix to contain integer-like count data.",
         ),
     ],
     search_hints=SearchHints(

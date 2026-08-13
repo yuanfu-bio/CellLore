@@ -210,7 +210,7 @@ class ProgressivePreflightAssessmentAgent:
                 )
             )
         }
-        # Pair-unit-level `has_pair_relationship` claims (Phase 4): the
+        # Pair-unit-level `has_pair_relationship` claims are the
         # authoritative source for whether *this specific* unit's physical
         # relationship was proven, as opposed to reading the candidate's
         # assay profile, which only states what the assay generally supports.
@@ -225,16 +225,15 @@ class ProgressivePreflightAssessmentAgent:
             )
             if item.predicate == "has_pair_relationship"
         }
-        # Candidate-scoped `has_omics_layer:*` claims (Phase 5A).
+        # Candidate-scoped `has_omics_layer:*` claims.
         layer_claims_by_candidate: dict[str, list[EvidenceClaim]] = {}
         for raw in (inventory.payload.get("layer_claims", []) if inventory else []):
             claim = EvidenceClaim.model_validate(raw)
             layer_claims_by_candidate.setdefault(claim.subject_id, []).append(claim)
         # The registered CurationProfile this run's requirement declares, if
         # any. None means the evidence-completeness formula below stays
-        # inactive and this agent falls back to its pre-Phase-5A logic
-        # entirely -- additive/opt-in, never a crash for a caller that hasn't
-        # threaded a profile through yet.
+        # inactive and this agent uses the compatibility path for callers
+        # that do not thread a profile through.
         profile = None
         if context.requirement is not None and context.requirement.profile_id is not None:
             try:
@@ -393,7 +392,7 @@ class ProgressivePreflightAssessmentAgent:
                 pairing_requirement is not None or required_pairing is not None
             )
             if bundle.pair_unit_id is not None:
-                # Pair-unit-resolved path (Phase 4): this bundle is one
+                # Pair-unit-resolved path: this bundle is one
                 # PairUnitResolver-proposed unit, not the whole candidate. Its
                 # relationship must be proven for THIS unit specifically --
                 # reading the candidate's assay profile here would let a
@@ -410,7 +409,7 @@ class ProgressivePreflightAssessmentAgent:
                 # No pair-unit resolution ran for this bundle (e.g. curated-
                 # manifest ingestion, which has its own file-level pairing
                 # key) -- fall back to the candidate-level assay-profile
-                # reading, same as before Phase 4.
+                # reading.
                 observed_pairing = best_pairing_level(candidate.assay_profiles)
             if observed_pairing is None:
                 pairing_gate = GateStatus.UNKNOWN
@@ -534,7 +533,7 @@ class ProgressivePreflightAssessmentAgent:
                 pairing_was_required and pairing_gate != GateStatus.PASS
             )
 
-            # Evidence-completeness Decision (Phase 5A): "Decision = required
+            # Evidence-completeness decision: "Decision = required
             # evidence completeness + blocking deterministic validators --
             # never LLM confidence." Only active when:
             #  1. a profile is resolvable -- context.requirement.profile_id
@@ -553,7 +552,7 @@ class ProgressivePreflightAssessmentAgent:
             #     has_omics_layer/*).
             # Given #1 and #2, whether this specific bundle actually claims
             # one of the profile's own bundle_schemas is a *scope* question,
-            # not an "is the profile active" question (Round 5 correction):
+            # not an "is the profile active" question:
             # even within a correctly paired-multiome-profiled search, one
             # discovered candidate can still turn out to be a standalone
             # scATAC study (applicable_schema_ids like scatac_standalone/
@@ -840,4 +839,3 @@ class ProgressivePreflightAssessmentAgent:
                 ],
             )
         ]
-

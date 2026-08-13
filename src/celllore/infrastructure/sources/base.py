@@ -7,6 +7,7 @@ from typing import Protocol
 
 import httpx
 
+from celllore._version import __version__
 from celllore.domain.models import QuerySpec, SourceRecord
 
 
@@ -53,7 +54,7 @@ def default_async_client(*, trust_env: bool = True) -> httpx.AsyncClient:
         trust_env=trust_env,
         headers={
             "User-Agent": (
-                "CellLore/0.1.0 "
+                f"CellLore/{__version__} "
                 "(public single-cell epigenomics metadata discovery)"
             )
         },

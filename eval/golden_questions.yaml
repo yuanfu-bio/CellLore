@@ -263,7 +263,7 @@ questions:
       The narrowing case. GSE340993 declares a 10x Multiome relationship; the
       plain snATAC records must not satisfy a same-cell requirement.
 
-      `deposition_precision` here fell from 0.6667 to 0.6000 when P0.0 was
+      `deposition_precision` here fell from 0.6667 to 0.6000 when pairing overclaim was
       fixed, and that fall is the fix working: the passing set lost primary
       depositions that were only passing because ENCODE's umbrella BioProject
       had merged them into a candidate that contained one real multiome record.
@@ -279,7 +279,7 @@ questions:
       hardwired to one modality -- it must still compile a requirement and
       produce a structured judgement rather than an empty result.
 
-      `deposition_precision` fell from 0.5833 to 0.5000 with the P0.0 fix, for
+      `deposition_precision` fell from 0.5833 to 0.5000 with the overclaim fix, for
       the same reason as `same_cell_multiome`: standalone snATAC depositions
       stopped passing an scRNA question they never had the data to answer.
       A rate cannot distinguish a lost right answer from a lost wrong one.

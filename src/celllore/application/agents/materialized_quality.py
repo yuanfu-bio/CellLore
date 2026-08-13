@@ -112,7 +112,7 @@ class MaterializedQualityAssessmentAgent:
                 encoding="utf-8",
             )
 
-        # Phase 5B: a FILE_OBSERVED/RECOMPUTED-level `has_pair_relationship`
+        # Emit a FILE_OBSERVED/RECOMPUTED-level `has_pair_relationship`
         # claim, recomputed from the materialized RNA/ATAC barcode overlap
         # (see resource_pipeline.barcode_overlap_pairing_claim), for the
         # CORPUS_READY gate's stronger acceptable-evidence-class bar --

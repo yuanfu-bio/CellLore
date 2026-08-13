@@ -54,10 +54,8 @@ class ManifestRunSupervisor(MultiAgentSupervisor):
             "transfer_execution",
             self._specialist(AgentName.ASSET_TRANSFER),
         )
-        # Archive expansion (P1.2, S7) is not wired in yet: none of this
-        # branch's fixture data has an ARCHIVE-role asset, and inserting a
-        # no-op node here would just be one more place for the milestone-0
-        # path to diverge from what is actually tested.
+        # Archive expansion is not wired in yet. Keep the graph aligned with
+        # implemented behavior instead of inserting a placeholder node.
         graph.add_node(
             "dataset_curator",
             self._specialist(AgentName.DATASET_CURATOR),

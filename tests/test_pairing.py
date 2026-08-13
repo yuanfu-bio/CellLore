@@ -548,11 +548,12 @@ def _evidence_completeness_context(tmp_path, pairing_claim_evidence_class):
 
 
 class TestEvidenceCompletenessGatesAcquisition:
-    """Phase 5A's headline behavior change: today, a has_pair_relationship
-    claim's evidence_class was never checked, only its PairingLevel value
-    against the pairing requirement. A MODEL_INFERRED claim (PairingVerifier's
-    LLM tier 3) must now correctly fail the profile's REPOSITORY_REPORTED
-    acquisition floor, exactly as `RequiredEvidence.notes` already promises."""
+    """A pairing claim must meet both the required level and evidence class.
+
+    A MODEL_INFERRED claim from PairingVerifier's LLM tier must fail the
+    profile's REPOSITORY_REPORTED acquisition floor, exactly as
+    `RequiredEvidence.notes` promises.
+    """
 
     @pytest.mark.asyncio
     async def test_model_inferred_pairing_evidence_never_reaches_preflight_ready(self, tmp_path):
@@ -663,7 +664,7 @@ class TestEvidenceCompletenessGatesAcquisition:
 
 
 class TestProfileScopeExclusion:
-    """Round 5 correction: a profile-schema mismatch on a pair-unit-resolved
+    """A profile-schema mismatch on a pair-unit-resolved
     bundle is a hard, terminal exclusion from *this profile's* corpus -- it
     must never silently fall back to the legacy candidate-level pairing_gate,
     which reads assay_profiles unscoped by any profile and could wrongly
@@ -712,8 +713,8 @@ class TestProfileScopeExclusion:
 async def test_standalone_atac_bundle_fails_the_layer_gate_for_a_joint_requirement(
     tmp_path,
 ):
-    """The same P0.0-shaped regression as
-    test_feasibility.py::TestJointLayerRequirementIsNotSatisfiedByOneLayer,
+    """Mirrors
+    test_feasibility.py::TestJointLayerRequirementIsNotSatisfiedByOneLayer
     pinned here for progressive_preflight's own layer_gate: a bundle that
     only reports the ATAC layer must not pass a same-cell-multiome
     requirement's layer_gate just because ATAC is one of the two requested

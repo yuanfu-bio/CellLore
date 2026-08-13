@@ -309,11 +309,11 @@ def _corpus_ready_gate_context(tmp_path, *, with_recomputed_pairing_claim: bool)
 
 
 class TestCorpusReadyEvidenceCompleteness:
-    """Phase 5B's headline behavior change: a declared-only pairing claim
+    """A declared-only pairing claim
     (REPOSITORY_REPORTED) clears preflight's ACQUISITION gate but must not,
     by itself, also clear governance's stronger CORPUS_READY gate -- which
-    requires the FILE_OBSERVED/RECOMPUTED barcode-overlap evidence Phase 5B's
-    post-materialization validators produce."""
+    requires FILE_OBSERVED/RECOMPUTED barcode-overlap evidence from the
+    post-materialization validators."""
 
     @pytest.mark.asyncio
     async def test_declared_only_pairing_evidence_is_quarantined_at_corpus_ready(

@@ -31,9 +31,7 @@ class FeasibilityAssessor:
         # transcriptome in the same cell" is not satisfied by a candidate
         # that supplies only one of the two. Requiring the full subset here
         # (rather than any overlap) is what keeps a standalone-ATAC record
-        # out of a same-cell-multiome question's topic-relevance gate; this
-        # is the same category of overclaim P0.0 had to walk back for assay
-        # inference, just at the requirement-matching layer instead.
+        # out of a same-cell-multiome question's topic-relevance gate.
         is_joint_requirement = requirement.pairing_requirement is not None
         relevant = (
             requested_layers <= observed_layers
@@ -213,4 +211,3 @@ class FeasibilityAssessor:
             decision=decision,
             decision_reasons=reasons,
         )
-

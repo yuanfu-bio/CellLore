@@ -103,17 +103,16 @@ class SnapshotCorpusGovernanceAgent:
             if transfer_artifact is not None
             else set(preflight) | set(manifests) | set(quality)
         )
-        # Phase 5B: CORPUS_READY evidence completeness, the same formula
-        # Phase 5A wired into preflight's ACQUISITION gate, now re-evaluated
-        # at the EvidenceGate.CORPUS_READY threshold against the union of
+        # Re-evaluate the preflight evidence-completeness formula at the
+        # EvidenceGate.CORPUS_READY threshold against the union of
         # declared-level claims (still valid; they never disappear) and the
-        # new FILE_OBSERVED/RECOMPUTED claims Phase 5B's post-materialization
+        # new FILE_OBSERVED/RECOMPUTED claims that post-materialization
         # validators produce. For most predicates the corpus-ready set equals
         # the acquisition set, so this is a no-op re-check; for
         # `has_pair_relationship` it is the strictly narrower
         # FILE_OBSERVED/RECOMPUTED bar the declared-only claim cannot satisfy
         # on its own. A bundle reaching this stage already cleared preflight's
-        # profile-scope check (Round 5.1), so scope is not re-derived here.
+        # profile-scope check, so scope is not re-derived here.
         profile = None
         if context.requirement is not None and context.requirement.profile_id is not None:
             try:

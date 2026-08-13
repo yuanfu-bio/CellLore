@@ -458,8 +458,7 @@ class AuditQueueAction(StrEnum):
     #: Needs reprocessing -- e.g. a re-download or re-run pipeline step --
     #: distinct from merely awaiting more evidence.
     REPROCESS = "reprocess"
-    #: One study, some pair-units archived and others not -- the pair-unit
-    #: admission granularity Phase 4 introduced made this a real, common case.
+    #: One study with some pair units archived and others not.
     PARTIAL_ARCHIVE = "partial_archive"
 
 

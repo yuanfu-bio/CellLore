@@ -199,7 +199,7 @@ async def test_no_evidence_and_no_client_yields_no_claim():
 @pytest.mark.asyncio
 async def test_model_inferred_evidence_alone_is_recorded_as_the_weaker_class():
     """MODEL_INFERRED must never look identical to REPOSITORY_REPORTED --
-    downstream evidence-completeness gating (Phase 5) depends on this
+    downstream evidence-completeness gating depends on this
     distinction to refuse MODEL_INFERRED alone as sufficient."""
     candidate = DatasetCandidate(candidate_id="cand_1", title="study")
     samples = [_sample("GSM1", "no relationship stated")]

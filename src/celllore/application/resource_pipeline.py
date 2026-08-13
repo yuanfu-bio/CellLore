@@ -301,8 +301,8 @@ def barcode_overlap_pairing_claim(
 ) -> EvidenceClaim | None:
     """A ``has_pair_relationship`` claim recomputed from the materialized
     RNA/ATAC barcode overlap (``infrastructure.qc_metrics.compute_role_metrics``),
-    for the CORPUS_READY gate's stronger acceptable-evidence-class bar (Phase
-    5B: see ``paired_atac_rna_human``'s ``acceptable_for_corpus_ready`` set,
+    for the CORPUS_READY gate's stronger acceptable-evidence-class bar (see
+    ``paired_atac_rna_human``'s ``acceptable_for_corpus_ready`` set,
     which requires FILE_OBSERVED/RECOMPUTED rather than declared evidence).
 
     Barcode overlap alone cannot distinguish same_cell from same_nucleus --

@@ -26,9 +26,9 @@ correct physical unit.
    fabricated claim is worse than admitting the relationship is unresolved.
 
 Post-download barcode intersection (the strongest tier, ``FILE_OBSERVED``) is
-Phase 5's new validator -- not available yet, so it is not attempted here.
-GSM accession-number adjacency is never evidence at any tier, matching R06's
-own "not accepted" column.
+handled by ``MaterializedQualityAssessmentAgent``, not this pre-download
+component. GSM accession-number adjacency is never evidence at any tier,
+matching R06's own "not accepted" column.
 """
 
 from __future__ import annotations

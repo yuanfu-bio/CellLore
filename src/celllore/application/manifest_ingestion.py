@@ -191,8 +191,8 @@ def _build_candidate(dataset_id: str, dataset_rows: list[ManifestRow]) -> Datase
         candidate_id=dataset_id,
         title=f"Curated manifest: {dataset_id}",
         # Left empty rather than inferred from which roles co-occur: claiming
-        # an assay from co-occurring RNA and ATAC rows is exactly the
-        # overclaim P0.0 had to walk back. An empty assay_profiles list makes
+        # an assay from co-occurring RNA and ATAC rows would overstate the
+        # manifest evidence. An empty assay_profiles list makes
         # `applicable_bundle_schemas_by_layers` offer every schema, so
         # admission is judged on the assets actually present, not on a
         # guessed layer combination.

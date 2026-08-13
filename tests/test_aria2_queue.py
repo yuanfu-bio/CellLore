@@ -82,7 +82,7 @@ def test_bucket_assignment_by_host_and_size():
     assert bucket_for(zenodo.locations[0].url, zenodo.locations[0].size_bytes) == "other_direct"
 
 
-def test_bucket_settings_match_the_validated_prototype_profiles():
+def test_bucket_settings_match_the_validated_reference_profiles():
     assert bucket_settings("stable") == {
         "geo_large": (2, 1), "geo_small": (4, 1), "other_direct": (4, 1),
     }
@@ -94,10 +94,10 @@ def test_bucket_settings_match_the_validated_prototype_profiles():
 
 
 def test_common_args_include_tuning_and_the_404_guard():
-    args = aria_common_args("CellLore/0.1.0 (contact: a@b.com)", Path("/s"), Path("/l"))
+    args = aria_common_args("CellLore/1.0.0 (contact: a@b.com)", Path("/s"), Path("/l"))
     assert "--no-conf=true" in args
     assert "--max-file-not-found=2" in args
-    assert "--user-agent=CellLore/0.1.0 (contact: a@b.com)" in args
+    assert "--user-agent=CellLore/1.0.0 (contact: a@b.com)" in args
     assert "--save-session=/s" in args
     assert "--log=/l" in args
 
@@ -106,14 +106,14 @@ def test_contact_email_is_cleanly_omitted_when_unset(monkeypatch):
     monkeypatch.delenv("NCBI_CONTACT_EMAIL", raising=False)
     email, user_agent = contact_email_and_user_agent({})
     assert email is None
-    assert user_agent == "CellLore/0.1.0"
+    assert user_agent == "CellLore/1.0.0"
     assert "(contact:" not in user_agent
 
 
 def test_contact_email_from_policy_appears_in_user_agent():
     email, user_agent = contact_email_and_user_agent({"contact_email": "me@example.org"})
     assert email == "me@example.org"
-    assert user_agent == "CellLore/0.1.0 (contact: me@example.org)"
+    assert user_agent == "CellLore/1.0.0 (contact: me@example.org)"
 
 
 def test_download_environment_removes_proxy_without_mutating_source():
@@ -170,8 +170,7 @@ def test_safe_destination_path_falls_back_to_bundle_layout():
 
 class _FakeAria2Runner:
     """Parses the queue file it's handed and writes the named bytes to the
-    named path -- the same offline-verification technique the handoff
-    prescribes: it proves the queue generation is correct, not aria2 itself.
+    named path. This proves queue generation, not aria2 itself.
     """
 
     def __init__(self, *, leave_control_file_for: frozenset[str] = frozenset()) -> None:

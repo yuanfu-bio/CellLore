@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from celllore._version import __version__
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -340,7 +342,7 @@ class Evidence(StrictModel):
     evidence_class: EvidenceClass
     retrieved_at: datetime = Field(default_factory=utc_now)
     snapshot_hash: str | None = None
-    extractor_version: str = "CellLore/0.1.0"
+    extractor_version: str = f"CellLore/{__version__}"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     validation_status: ValidationStatus = ValidationStatus.UNVALIDATED
 

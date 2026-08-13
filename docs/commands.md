@@ -1,270 +1,338 @@
 # Reusable commands
 
-Activate the development environment:
+Commands assume the repository root unless noted otherwise.
 
-```bash
-mamba activate celllore
-```
+## Environment
 
-Create or update the environment from the project declaration:
+Create and activate the declared environment:
 
 ```bash
 mamba env create -f environment.yml
+mamba activate celllore
+```
+
+Update an existing environment:
+
+```bash
 mamba env update -n celllore -f environment.yml --prune
 ```
 
-Install the project in editable mode:
+Install runtime, development and optional curation dependencies:
 
 ```bash
-mamba run -n celllore python -m pip install -e '.[dev]'
+python -m pip install -e .
+python -m pip install -e '.[dev]'
+python -m pip install -e '.[dev,curation]'
 ```
 
-Install optional AnnData/MuData inspection support:
+## Configuration
 
-```bash
-mamba run -n celllore python -m pip install -e '.[dev,curation]'
-```
-
-Run tests:
-
-```bash
-mamba run -n celllore pytest
-```
-
-Verify the layered package boundaries and entry points (included in the test suite):
-
-```bash
-mamba run -n celllore pytest tests/test_architecture.py
-```
-
-Configure StepFun without placing the key in source control:
+Create a local model configuration and validate it without a billable request:
 
 ```bash
 cp .env.example .env
-# Edit .env locally and set STEPFUN_API_KEY to a newly rotated key.
-mamba run -n celllore celllore llm-check
+$EDITOR .env
+celllore llm-check
 ```
 
-Send one small billable connectivity request only when desired:
+Send one small provider request when an end-to-end connectivity check is required:
 
 ```bash
-mamba run -n celllore celllore llm-ping
+celllore llm-ping
 ```
 
-Use StepFun semantic parsing by default, or force the deterministic offline compiler:
+Identify discovery and transfer requests to NCBI:
 
 ```bash
-mamba run -n celllore celllore compile \
-  'human lung cancer multiome data for annotation' --json
-mamba run -n celllore celllore compile \
-  'human lung cancer multiome data for annotation' --no-llm --json
+export NCBI_EMAIL='you@example.org'
+export NCBI_CONTACT_EMAIL='you@example.org'
 ```
 
-Compile a research requirement without network access:
+## Control room
+
+Start the packaged FastAPI/React interface:
 
 ```bash
-mamba run -n celllore celllore compile \
-  '人类肺癌免疫微环境scATAC-seq和multiome数据，用于跨数据集泛化' \
+celllore serve \
+  --database var/celllore.sqlite \
+  --port 8000
+```
+
+Open <http://127.0.0.1:8000>.
+
+## Research planning
+
+Compile a model-backed research contract:
+
+```bash
+celllore compile \
+  'public human PBMC same-cell RNA and ATAC data' \
   --json
 ```
 
-Run live discovery. Set `NCBI_EMAIL` before sustained NCBI API use:
+Inspect deterministic compilation during tests or offline debugging:
 
 ```bash
-mamba run -n celllore celllore discover \
-  'human lung cancer scATAC-seq and multiome' \
-  --max-results 10 \
-  --database var/celllore.sqlite \
-  --json-output var/latest_run.json
+celllore compile \
+  'public human PBMC same-cell RNA and ATAC data' \
+  --no-llm --json
 ```
 
-Run the standalone legacy ENA FASTQ resolver against a persisted run without downloading files:
+## Curation workflow
+
+Start the approval-gated supervisor:
 
 ```bash
-mamba run -n celllore celllore resolve-assets RUN_ID \
-  --database var/celllore.sqlite \
-  --destination data/raw \
-  --json-output var/latest_assets.json
-```
-
-BioProject expansion is intentionally opt-in and should always use a bound:
-
-```bash
-mamba run -n celllore celllore resolve-assets RUN_ID \
-  --candidate-id CANDIDATE_ID \
-  --expand-bioproject \
-  --max-assets 100 \
-  --json-output var/bioproject_assets.json
-```
-
-Run the v2 Supervisor. It performs discovery, evidence curation, remote asset
-inventory, preflight, early lineage, and acquisition planning, then stops before
-any data bytes are downloaded:
-
-```bash
-mamba run -n celllore celllore agent-run \
-  'human lung cancer scATAC and multiome data for representation learning' \
+celllore agent-run \
+  'find public human PBMC datasets with same-cell RNA and ATAC measurements' \
   --database var/celllore.sqlite \
   --data-root data \
   --max-download-bytes 500000000000 \
-  --evaluation-id GSE_EXCLUDED_FROM_TRAINING \
-  --approved-license cc-by-4.0 \
   --remote-probe
 ```
 
-Raise the per-repository enumeration budget for very large depositions. A study
-that exceeds it is flagged `inventory:truncated` and its size is reported as a
-lower bound:
+Use a bounded quick planning mode:
 
 ```bash
-mamba run -n celllore celllore agent-run 'research question' \
-  --max-assets 5000 --database var/celllore.sqlite
-```
-
-By default a bundle with no declared licence may be admitted on the published
-terms of the archive serving it, with the basis recorded for audit. Require a
-declared, allowlisted licence instead:
-
-```bash
-mamba run -n celllore celllore agent-run 'research question' \
-  --strict-license --database var/celllore.sqlite
-```
-
-For exploratory acquisition of publicly accessible data, retain a missing or
-unresolved per-record licence in the audit trail without holding it out of the
-recommendation tier. Restricted licences remain excluded:
-
-```bash
-mamba run -n celllore celllore agent-run 'research question' \
-  --allow-unknown-license --database var/celllore.sqlite
-```
-
-`agent-run` defaults to the planner's `deep` mode (four sequential LLM calls,
-~600s budget) so the model actually completes its analysis instead of racing
-two calls against a 30s budget each and degrading to a generic template.
-Trade thoroughness for speed only when you need an approximate result fast:
-
-```bash
-mamba run -n celllore celllore agent-run 'research question' \
-  --planner-mode fast --database var/celllore.sqlite
-```
-
-At the download checkpoint, stop after planning, download the recommendation, or
-download every preflight-ready Bundle (including assets with unknown size):
-
-```bash
-mamba run -n celllore celllore resume CHECKPOINT_ID \
-  --option plan_only --database var/celllore.sqlite
-mamba run -n celllore celllore resume CHECKPOINT_ID \
-  --option recommended --database var/celllore.sqlite
-mamba run -n celllore celllore resume CHECKPOINT_ID \
-  --bundle-id BUNDLE_ID --database var/celllore.sqlite
-mamba run -n celllore celllore resume CHECKPOINT_ID \
-  --option all_with_unknown_size --database var/celllore.sqlite
-```
-
-After transfer, materialization, local QC, late lineage, and governance, resolve
-the second checkpoint to approve or reject the immutable Corpus Snapshot:
-
-```bash
-mamba run -n celllore celllore resume CHECKPOINT_ID \
-  --option approve_snapshot --database var/celllore.sqlite
-mamba run -n celllore celllore resume CHECKPOINT_ID \
-  --option reject_snapshot --database var/celllore.sqlite
-```
-
-Inspect durable graph state locally:
-
-```bash
-mamba run -n celllore celllore graph-state RUN_ID \
+celllore agent-run 'research question' \
+  --planner-mode fast \
   --database var/celllore.sqlite
 ```
 
-Cloud tracing is opt-in; local SQLite is the default:
+Raise the per-repository file enumeration limit:
 
 ```bash
-SCDATA_AGENT_TRACE_MODE=langsmith \
-LANGSMITH_TRACING=true LANGSMITH_API_KEY=... LANGSMITH_PROJECT=celllore \
-mamba run -n celllore celllore agent-run 'research question'
+celllore agent-run 'research question' \
+  --max-assets 5000 \
+  --database var/celllore.sqlite
 ```
 
-Start the local FastAPI/HTMX control room at [http://127.0.0.1:8000](http://127.0.0.1:8000):
+Exclude Evaluation Vault families and allow only named licence IDs:
 
 ```bash
-mamba run -n celllore celllore serve \
-  --database var/celllore.sqlite --port 8000
+celllore agent-run 'research question' \
+  --evaluation-id GSE_EXCLUDED_FROM_TRAINING \
+  --approved-license cc-by-4.0 \
+  --database var/celllore.sqlite
 ```
 
-When `frontend/dist` is present, the same server serves the React control room.
-Its run pages use `/ui/runs/<run-id>`, so browser refreshes do not conflict with
-the JSON API at `/runs/<run-id>`. For frontend development, run the API command
-above alongside `cd frontend && npm run dev`; Vite proxies the API paths to port 8000.
+Require a declared, allowlisted licence:
 
-Inspect append-only Catalog records and approved Corpus Snapshots through the API:
+```bash
+celllore agent-run 'research question' \
+  --strict-license \
+  --database var/celllore.sqlite
+```
+
+Permit unresolved per-record licence evidence only for publicly accessible Bundles:
+
+```bash
+celllore agent-run 'research question' \
+  --allow-unknown-license \
+  --database var/celllore.sqlite
+```
+
+Inspect persisted workflow state:
+
+```bash
+celllore graph-state RUN_ID \
+  --database var/celllore.sqlite
+```
+
+## Checkpoints
+
+Keep the acquisition plan without downloading:
+
+```bash
+celllore resume CHECKPOINT_ID \
+  --option plan_only \
+  --database var/celllore.sqlite
+```
+
+Download all recommended Bundles:
+
+```bash
+celllore resume CHECKPOINT_ID \
+  --option recommended \
+  --database var/celllore.sqlite
+```
+
+Approve only selected recommended Bundles:
+
+```bash
+celllore resume CHECKPOINT_ID \
+  --bundle-id BUNDLE_A \
+  --bundle-id BUNDLE_B \
+  --database var/celllore.sqlite
+```
+
+Include eligible manual-review Bundles whose sizes are unknown:
+
+```bash
+celllore resume CHECKPOINT_ID \
+  --option all_with_unknown_size \
+  --database var/celllore.sqlite
+```
+
+Resolve the final Corpus Snapshot checkpoint:
+
+```bash
+celllore resume CHECKPOINT_ID \
+  --option approve_snapshot \
+  --database var/celllore.sqlite
+
+celllore resume CHECKPOINT_ID \
+  --option reject_snapshot \
+  --database var/celllore.sqlite
+```
+
+## Curated manifests
+
+Audit a curated manifest without creating a run or using the network:
+
+```bash
+celllore manifest-check path/to/manifest.xlsx
+```
+
+Run a curated manifest through the downstream approval-gated workflow:
+
+```bash
+celllore manifest-run path/to/manifest.xlsx \
+  --database var/celllore.sqlite \
+  --data-root data
+```
+
+Inspect transfer state and classify safe repairs:
+
+```bash
+celllore manifest-status RUN_ID \
+  --database var/celllore.sqlite
+
+celllore manifest-repair RUN_ID \
+  --database var/celllore.sqlite
+```
+
+Use command-specific `--help` before executing a repair action.
+
+## Catalog API
+
+Read evidence claims and approved snapshots from a running server:
 
 ```bash
 curl 'http://127.0.0.1:8000/catalog/records?record_type=evidence_claim'
 curl 'http://127.0.0.1:8000/corpus-snapshots?approved_only=true'
 ```
 
-Select an LLM provider through environment variables. StepFun remains the default:
+Download a run catalog:
 
 ```bash
-SCDATA_AGENT_MODEL_PROVIDER=openai_compatible
-SCDATA_AGENT_MODEL_API_KEY=...
-SCDATA_AGENT_MODEL_BASE_URL=https://api.openai.com/v1
-SCDATA_AGENT_MODEL=...
+curl -OJ \
+  'http://127.0.0.1:8000/runs/RUN_ID/curation-catalog.xlsx'
 ```
 
-For Anthropic, set `SCDATA_AGENT_MODEL_PROVIDER=anthropic` plus `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL`.
+## Broad discovery utility
 
-Run LangGraph Studio locally for graph visualization, checkpoint inspection, and interrupt debugging:
+Build the broad scATAC and paired multi-omics discovery catalog:
 
 ```bash
-mamba run -n celllore langgraph dev --no-reload --no-browser \
-  --config langgraph.json --host 127.0.0.1 --port 2025
-```
-
-Then open the Studio URL printed by the command, or use:
-
-```text
-https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2025
-```
-
-Configure a higher-capability model only for Research Planner while other roles
-inherit the default model:
-
-```bash
-SCDATA_AGENT_MODEL_PLANNER=YOUR_STRONGER_STEPFUN_MODEL
-SCDATA_AGENT_REASONING_EFFORT_PLANNER=high
-```
-
-Test complex requirement parsing without a model call:
-
-```bash
-mamba run -n celllore pytest tests/test_requirements.py tests/test_llm_requirements.py
-```
-
-
-Build the broad public scATAC and paired multi-omics discovery corpus. Each of the four query families is run against Europe PMC, GEO, and SRA; results are persisted to SQLite:
-
-```bash
-mamba run -n celllore celllore corpus-discover \
+celllore corpus-discover \
   --database var/scatac_corpus.sqlite \
   --max-results-per-query 200
 ```
 
-Use a small source smoke test before a large collection run:
+Run a small source smoke test first:
 
 ```bash
-mamba run -n celllore celllore corpus-discover \
+celllore corpus-discover \
   --database var/scatac_corpus_smoke.sqlite \
   --max-results-per-query 3
 ```
 
-Run the assay-pairing and corpus-planning tests:
+## Tests and evaluation
+
+Run static checks and the complete offline test suite:
 
 ```bash
-mamba run -n celllore pytest -q \
-  tests/test_assay_profiles.py tests/test_requirements.py tests/test_workflow.py
+ruff check src tests scripts
+pytest
+```
+
+Run the release scorecard:
+
+```bash
+python scripts/eval_discovery.py --out var/scorecard.json
+python scripts/compare_scorecards.py \
+  eval/baseline_scorecard.json var/scorecard.json
+```
+
+Run focused architectural and research-contract tests:
+
+```bash
+pytest tests/test_architecture.py
+pytest tests/test_requirements.py tests/test_llm_requirements.py
+```
+
+## Frontend
+
+Build the packaged production interface:
+
+```bash
+cd frontend
+npm ci
+npm run build
+cd ..
+git diff --exit-code -- src/celllore/interfaces/static/ui
+```
+
+Run the frontend development server alongside `celllore serve`:
+
+```bash
+cd frontend
+npm run dev
+```
+
+## LangGraph Studio and tracing
+
+Run Studio against the local graph:
+
+```bash
+langgraph dev --no-reload --no-browser \
+  --config langgraph.json \
+  --host 127.0.0.1 \
+  --port 2025
+```
+
+Opt in to LangSmith tracing:
+
+```bash
+SCDATA_AGENT_TRACE_MODE=langsmith \
+LANGSMITH_TRACING=true \
+LANGSMITH_API_KEY=... \
+LANGSMITH_PROJECT=celllore \
+celllore agent-run 'research question'
+```
+
+## Release verification
+
+Build and validate Python artifacts:
+
+```bash
+python -m pip install build twine
+python -m build
+python -m twine check dist/*
+```
+
+Run the complete archive verification:
+
+```bash
+ruff check src tests scripts
+pytest
+python scripts/eval_discovery.py --out var/scorecard.json
+python scripts/compare_scorecards.py \
+  eval/baseline_scorecard.json var/scorecard.json
+cd frontend && npm ci && npm run build && cd ..
+git diff --exit-code -- src/celllore/interfaces/static/ui
+python -m build
+python -m twine check dist/*
+git diff --check
 ```

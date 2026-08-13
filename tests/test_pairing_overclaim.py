@@ -1,4 +1,4 @@
-"""Regression tests for the pairing overclaim (roadmap P0.0).
+"""Regression tests for false-positive physical pairing claims.
 
 Every payload below is a verbatim excerpt of what an archive actually served,
 taken from `eval/records.jsonl`. Hand-invented strings would not have caught

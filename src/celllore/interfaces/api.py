@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
+from celllore import __version__
 from celllore.application.agents.supervisor import MultiAgentSupervisor
 from celllore.application.collaboration import CollaborationLedger
 from celllore.application.curation_catalog import (
@@ -89,7 +90,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
 
 def create_app(database_path: str | Path = "var/celllore.sqlite") -> FastAPI:
-    app = FastAPI(title="CellLore", version="0.2.0")
+    app = FastAPI(title="CellLore", version=__version__)
     ledger = CollaborationLedger(database_path)
     supervisor = MultiAgentSupervisor(ledger, str(database_path), trace_mode=os.getenv("SCDATA_AGENT_TRACE_MODE"))
     app.state.ledger = ledger

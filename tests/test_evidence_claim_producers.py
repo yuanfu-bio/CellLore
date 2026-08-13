@@ -1,7 +1,7 @@
-"""omics_layer_claims / resolved_assembly_claim in isolation: the two new
-EvidenceClaim producers closing the "no producer yet" gap for
-has_omics_layer:*/resolved_assembly. Both stay REPOSITORY_REPORTED --
-FILE_OBSERVED-level evidence is Phase 5B's job once files are in hand.
+"""Test omics-layer and resolved-assembly claim producers in isolation.
+
+Both stay REPOSITORY_REPORTED --
+FILE_OBSERVED-level evidence is produced only after files are in hand.
 """
 
 from celllore.application.resource_pipeline import (

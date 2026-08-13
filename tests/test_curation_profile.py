@@ -1,10 +1,8 @@
 """CurationProfile is declared data the kernel reads, not code it branches on.
 
-Phase 2 landed the profile skeleton and the `paired_atac_rna_human` instance
-before any production caller starts using it (Phase 3). These tests pin the
-structural guarantees the plan promised: GSM accession adjacency is excluded
+These tests pin its structural guarantees: GSM accession adjacency is excluded
 by construction, the pairing requirement is a set-membership allow-list (not
-a rank), and evidence has two distinct floors for acquisition vs corpus-ready.
+a rank), and evidence has distinct acquisition and corpus-ready floors.
 """
 
 import pytest
@@ -90,10 +88,21 @@ class TestBundleSchemasExcludeProvenanceOnlyPairing:
         assert "multiome_same_cell" in schema_ids
 
 
+def test_validator_ids_match_emitted_qc_checks():
+    validators = {
+        item.validator_id: item.blocking
+        for item in PAIRED_ATAC_RNA_HUMAN.validators
+    }
+    assert validators == {
+        "genome_build_consistency": True,
+        "barcode_linkage": True,
+        "frip_computable": False,
+        "rna_matrix_integer_like": True,
+    }
+
+
 class TestCompilerPlumbingIsBehaviorNeutral:
-    """Phase 2 wires `compile()` to read from a profile without changing what
-    it returns -- the profile's search hints are the same alias tables the
-    module-constant path already used. Phase 3 is where behavior can diverge."""
+    """Profile search hints preserve the compiler's default alias behavior."""
 
     @pytest.mark.parametrize("question", [
         "配对的scATAC-seq多组学数据",

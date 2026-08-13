@@ -14,7 +14,7 @@ from rich.table import Table
 
 from celllore.application.agents.supervisor import MultiAgentSupervisor
 from celllore.application.collaboration import CollaborationLedger
-from celllore.application.discovery import default_corpus_workflow, default_workflow
+from celllore.application.discovery import default_corpus_workflow
 from celllore.application.manifest_repair import (
     RepairNotAuthorized,
     classify_repair_candidates,
@@ -25,7 +25,6 @@ from celllore.application.orchestration_manifest import (
     supervisor_for_run,
 )
 from celllore.application.research_planning import configured_research_planner
-from celllore.domain.assets import build_asset_bundle
 from celllore.domain.manifest import (
     IssueSeverity,
     ManifestDocument,
@@ -36,14 +35,11 @@ from celllore.domain.manifest import (
     filter_manifest_rows,
     summarize_issues,
 )
-from celllore.domain.models import DataRole
 from celllore.domain.requirements import QueryPlanner
-from celllore.domain.transfer import TransferPlanner
 from celllore.infrastructure.llm.router import ModelRouter, ReasoningProfile
 from celllore.infrastructure.manifest_reader import read_manifest
 from celllore.infrastructure.persistence.download_store import DownloadStateStore
 from celllore.infrastructure.persistence.evidence_ledger import EvidenceLedger
-from celllore.infrastructure.sources.ena import ENAAssetResolver
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -550,7 +546,7 @@ def serve(
     host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
 ) -> None:
-    """Start the local API, SSE event stream, and HTMX control room."""
+    """Start the local API, SSE event stream, and React control room."""
     import uvicorn
 
     from celllore.interfaces.api import create_app
@@ -667,83 +663,6 @@ def compile(
             console.print(f"- {item}")
 
 
-@app.command()
-def discover(
-    question: Annotated[str, typer.Argument(help="Natural-language research question.")],
-    database: Annotated[
-        Path,
-        typer.Option(
-            "--database",
-            "-d",
-            help="SQLite evidence-ledger path.",
-        ),
-    ] = Path("var/celllore.sqlite"),
-    max_results: Annotated[
-        int,
-        typer.Option("--max-results", "-n", min=1, max=100),
-    ] = 20,
-    json_output: Annotated[
-        Path | None,
-        typer.Option("--json-output", help="Optional path for full JSON result."),
-    ] = None,
-    use_llm: Annotated[
-        bool,
-        typer.Option(
-            "--llm/--no-llm",
-            help=(
-                "Use configured LLM requirement compilation (fails fast without "
-                "a configured model). This legacy command is superseded by "
-                "agent-run's full production graph; --no-llm is for tests/"
-                "offline debugging only."
-            ),
-        ),
-    ] = True,
-) -> None:
-    """Run Europe PMC + GEO + SRA discovery and persist evidence."""
-    result = asyncio.run(
-        default_workflow(str(database), use_llm=use_llm).run(
-            question=question,
-            max_results=max_results,
-        )
-    )
-    if json_output is not None:
-        json_output.parent.mkdir(parents=True, exist_ok=True)
-        json_output.write_text(
-            result.model_dump_json(indent=2),
-            encoding="utf-8",
-        )
-
-    reports = {
-        report.candidate_id: report for report in result.feasibility_reports
-    }
-    table = Table(title=f"Discovery run {result.run_id}")
-    table.add_column("Candidate")
-    table.add_column("Title", overflow="fold")
-    table.add_column("Identifiers")
-    table.add_column("Layers")
-    table.add_column("Decision")
-    for candidate in result.candidates:
-        report = reports[candidate.candidate_id]
-        observed_layers = sorted(
-            {layer.value for profile in candidate.assay_profiles for layer in profile.omics_layers}
-        )
-        table.add_row(
-            candidate.candidate_id,
-            candidate.title,
-            ", ".join(identifier.value for identifier in candidate.identifiers)
-            or "—",
-            ", ".join(observed_layers) or "unknown",
-            report.decision.value,
-        )
-    console.print(table)
-    console.print(
-        f"records={len(result.source_records)} "
-        f"candidates={len(result.candidates)} errors={len(result.errors)}"
-    )
-    for error in result.errors:
-        console.print(f"[yellow]warning:[/yellow] {error}")
-
-
 @app.command("list-runs")
 def list_runs(
     database: Annotated[
@@ -785,106 +704,6 @@ def show_run(
         ],
     }
     console.print_json(json.dumps(payload, ensure_ascii=False, default=str))
-
-
-
-@app.command("resolve-assets")
-def resolve_assets(
-    run_id: Annotated[str, typer.Argument(help="Persisted discovery run ID.")],
-    database: Annotated[Path, typer.Option("--database", "-d")] = Path(
-        "var/celllore.sqlite"
-    ),
-    candidate_id: Annotated[
-        str | None,
-        typer.Option("--candidate-id", help="Resolve only one candidate."),
-    ] = None,
-    destination: Annotated[
-        Path,
-        typer.Option(
-            "--destination",
-            help="Logical download destination; files are not downloaded.",
-        ),
-    ] = Path("data/raw"),
-    json_output: Annotated[
-        Path | None,
-        typer.Option("--json-output", help="Optional asset-plan JSON path."),
-    ] = None,
-    expand_bioproject: Annotated[
-        bool,
-        typer.Option(
-            "--expand-bioproject",
-            help="Allow potentially very large BioProject expansion.",
-        ),
-    ] = False,
-    max_assets: Annotated[
-        int, typer.Option("--max-assets", min=1, max=10000)
-    ] = 500,
-) -> None:
-    """Resolve ENA FASTQ manifests and create read-only transfer plans."""
-    ledger = EvidenceLedger(database)
-    candidates = ledger.load_candidates(run_id)
-    if candidate_id is not None:
-        candidates = [
-            candidate
-            for candidate in candidates
-            if candidate.candidate_id == candidate_id
-        ]
-        if not candidates:
-            raise typer.BadParameter(
-                f"Candidate {candidate_id!r} is not present in run {run_id!r}."
-            )
-
-    async def resolve_all():
-        resolver = ENAAssetResolver(
-            expand_bioproject=expand_bioproject,
-            max_assets=max_assets,
-        )
-        return await asyncio.gather(
-            *(resolver.resolve(candidate) for candidate in candidates)
-        )
-
-    payload = []
-    for result in asyncio.run(resolve_all()):
-        bundle = build_asset_bundle(
-            result.candidate_id,
-            result.assets,
-            bundle_type="raw_reads",
-            required_roles=[DataRole.RAW_READS],
-        )
-        plan = TransferPlanner().plan(bundle, result.assets, destination)
-        payload.append(
-            {
-                "resolution": result.model_dump(mode="json"),
-                "bundle": bundle.model_dump(mode="json"),
-                "transfer_plan": plan.model_dump(mode="json"),
-            }
-        )
-
-    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
-    if json_output is not None:
-        json_output.parent.mkdir(parents=True, exist_ok=True)
-        json_output.write_text(rendered, encoding="utf-8")
-    table = Table(title=f"Asset resolution for {run_id}")
-    table.add_column("Candidate")
-    table.add_column("Assets", justify="right")
-    table.add_column("Complete")
-    table.add_column("Expected bytes", justify="right")
-    table.add_column("Errors", justify="right")
-    for item in payload:
-        resolution = item["resolution"]
-        bundle = item["bundle"]
-        transfer_plan = item["transfer_plan"]
-        table.add_row(
-            resolution["candidate_id"],
-            str(len(resolution["assets"])),
-            str(bundle["complete"]),
-            str(transfer_plan["total_expected_bytes"] or "—"),
-            str(len(resolution["errors"])),
-        )
-    console.print(table)
-    if json_output is not None:
-        console.print(f"Full plan: {json_output}")
-
 
 @app.command("corpus-discover")
 def corpus_discover(

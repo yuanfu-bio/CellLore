@@ -1,14 +1,10 @@
 # Ground-truth regression benchmark for the paired_atac_rna_human profile.
 #
-# Sourced from a human curator's real manual review, recorded in
-# 04_thinking/agent.xlsx (not part of this repo -- see `source` below for the
-# absolute path used when this file was built). Nothing here is invented: the
+# Sourced from a human curator's real manual review. Nothing here is invented: the
 # accessions, methods and stated reasons are copy-checked against that
 # spreadsheet's 01_Studies / 02_Pair_units / 04_Audit_Hold sheets.
 #
-# Design (see the plan's "benchmark / regression suite" section, and
-# eval/golden_questions.yaml for the established sibling pattern in this
-# repo): a small, representative sample rather than all ~1485 rows --
+# Design: a small, representative sample rather than all ~1485 rows --
 # `catalog_status`/`manifest_status`/`阻断类别`(blocking_category) diversity
 # matters more than volume, because the point is to pin one example of each
 # *kind* of judgement the profile has to get right, not to reproduce the
@@ -20,15 +16,12 @@
 # will never reproduce verbatim. See `expected.*` field docs below for what
 # is actually checked.
 #
-# THIS FILE IS GROUND TRUTH ONLY. It does not yet have captured records to
-# replay offline (see README.md in this directory for why, and what running
-# this benchmark for real requires) -- the runner in test_regression.py
-# currently only exercises the direction-matching logic itself against
-# synthetic fixtures. Wiring each case below to a real `agent-run` capture is
-# tracked as a separate, explicit follow-up task.
+# This curator reference set validates the outcome taxonomy and scoring
+# contract. It is intentionally independent from the captured repository
+# records used by the executable replay suite in eval/.
 
 meta:
-  source: /data/collab/ai-multiomics/yfu/02_agent/04_thinking/agent.xlsx
+  source: curator_review_workbook
   source_sheets: [01_Studies, 02_Pair_units, 04_Audit_Hold]
   extracted_date: "2026-08-08"
   note: >-
@@ -70,8 +63,7 @@ meta:
 #   expected.pair_unit_count  from 02_Pair_units, only meaningful for
 #                           READY/HOLD rows that were actually pair-unit-
 #                           resolved by the curator. Compared loosely
-#                           (matched_units / split_errors / merge_errors, see
-#                           the plan's Phase 4 regression design), never
+#                           (matched_units / split_errors / merge_errors), never
 #                           exact-equality -- an agent that finds 6 of 7 real
 #                           pair units is a much smaller miss than one that
 #                           finds 1 or 20.
@@ -168,7 +160,7 @@ cases:
       Standard object (H5MU) case -- tests the h5mu-aware path in
       standard_object_qc.py rather than raw MEX/mtx, and the "processed
       object exists, raw-count provenance still needs confirming" R03
-      distinction from Phase 5B.
+      distinction enforced by post-materialization QC.
 
   - id: ready_series_aggregate_metadata_split
     accession: GSE183273
@@ -224,8 +216,8 @@ cases:
     notes: >-
       Tests that "pair units resolved, per-file manifest still incomplete"
       stays HOLD rather than being upgraded on the strength of a partial
-      sample -- directly relevant to Phase 5A's per-predicate evidence-
-      completeness gate (has_pair_relationship can be satisfied while a
+      sample -- directly relevant to the per-predicate evidence-completeness
+      gate (has_pair_relationship can be satisfied while a
       file-manifest-shaped predicate is not).
 
   - id: hold_fragment_sample_provenance_unresolved
@@ -243,8 +235,8 @@ cases:
       split and archived per pair unit; pass criteria is a unique barcode-to-
       sample mapping that also intersects with the paired RNA barcodes.
     notes: >-
-      The single most direct precursor to Phase 5B's barcode-overlap
-      validator -- this is exactly the kind of ambiguity FILE_OBSERVED-level
+      A direct case for the barcode-overlap validator: this is the kind of
+      ambiguity FILE_OBSERVED-level
       barcode intersection evidence is meant to resolve or refuse to resolve.
 
   # --- EXCLUDE: matched-but-not-same-cell is the load-bearing case --------

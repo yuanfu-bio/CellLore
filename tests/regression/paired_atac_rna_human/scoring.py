@@ -24,7 +24,7 @@ DEFAULT_GOLDEN_CASES = Path(__file__).resolve().parent / "golden_cases.yaml"
 # spreadsheet does not distinguish PREFLIGHT_READY (declared-evidence,
 # pre-materialization) from ADMITTED (post-materialization, CORPUS_READY) --
 # the curator's own manual process did not separate those two states the way
-# Phase 5A/5B's two-tier lifecycle does, and the benchmark should not invent
+# the two-tier lifecycle does, and the benchmark should not invent
 # a distinction the ground truth itself does not make.
 _DECISION_COMPATIBLE_STATUSES: dict[str, frozenset[str]] = {
     "READY": frozenset({"preflight_ready", "ready_for_acquisition", "admitted"}),
@@ -65,8 +65,8 @@ class CaseScore:
         # relationship_match=None means the case declares no expectation --
         # absence of a check is not a failure. pair_unit_delta is reported
         # but, per golden_cases.yaml's own header, never a hard pass/fail
-        # criterion on its own until real per-unit membership data (Phase 4-
-        # style matched/split/merge accounting) backs it.
+        # criterion on its own until real per-unit membership data with
+        # matched/split/merge accounting backs it.
         return self.decision_match and self.relationship_match is not False
 
 

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
+from celllore._version import __version__
 from celllore.domain.identifiers import stable_id
 from celllore.domain.lifecycle import (
     AcquisitionPlan,
@@ -37,7 +38,7 @@ from celllore.domain.models import DataAsset, TransferProtocol
 from celllore.infrastructure.transfer_backend import prepare_transfer, safe_destination_path
 
 #: concurrent_downloads, connections_per_file (segments), keyed by profile
-#: name and bucket. Ported verbatim from the validated prototype
+#: name and bucket. Preserved from the validated reference implementation
 #: (multiome_downloader.py PROFILES + the settings dict in cmd_download):
 #: geo_small always uses 1 segment (nothing to gain splitting a small file),
 #: other_direct always uses 4 concurrent downloads regardless of profile.
@@ -139,7 +140,7 @@ def write_queue_file(path: Path, entries: list[QueueEntry]) -> Path:
 
 
 def aria_common_args(user_agent: str, session: Path, log: Path) -> list[str]:
-    """Ported verbatim from the validated prototype's ``aria_common_args``.
+    """Preserve the validated reference implementation's ``aria_common_args``.
 
     ``--max-file-not-found=2`` is the one that matters most: without it aria2
     retries a genuine 404 up to ``--max-tries`` times before giving up, which
@@ -186,8 +187,8 @@ def contact_email_and_user_agent(policy: dict[str, Any]) -> tuple[str | None, st
     """
     email = policy.get("contact_email") or os.environ.get("NCBI_CONTACT_EMAIL")
     if email:
-        return email, f"CellLore/0.1.0 (contact: {email})"
-    return None, "CellLore/0.1.0"
+        return email, f"CellLore/{__version__} (contact: {email})"
+    return None, f"CellLore/{__version__}"
 
 
 class Aria2Runner(Protocol):

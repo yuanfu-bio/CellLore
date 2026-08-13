@@ -1,4 +1,4 @@
-"""The exact wrong-admission scenario Phase 4 correction #3 closes:
+"""Regression for an unresolved pair unit being wrongly admitted:
 
     PairUnit resolution never runs (no LLM, no sample metadata)
     -> every asset for the study kept in one provisional/unresolved unit
